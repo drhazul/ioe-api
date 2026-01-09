@@ -49,6 +49,7 @@ export class AdminService {
         IDROL: roleId,
         IDGRUPMOD_FRONT: gid,
         ACTIVO: true,
+        FCNR: new Date(),
       }),
     );
 
@@ -101,6 +102,7 @@ export class AdminService {
         CAN_UPDATE: p.canUpdate,
         CAN_DELETE: p.canDelete,
         ACTIVO: true,
+        FCNR: new Date(),
       }),
     );
 

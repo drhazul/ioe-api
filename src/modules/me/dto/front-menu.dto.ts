@@ -2,6 +2,8 @@ export type FrontMenuItemDto = {
   id: number;
   codigo: string;
   nombre: string;
+  depto: string | null;
+  activo: boolean;
 };
 
 export type FrontMenuGroupDto = {

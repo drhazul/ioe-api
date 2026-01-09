@@ -11,9 +11,19 @@ import { MeService } from './me.service';
 export class MeController {
   constructor(private readonly service: MeService) {}
 
+  @Get('profile')
+  getProfile(@CurrentUser() user: any) {
+    return this.service.getProfile(Number(user.sub));
+  }
+
   @Get('front-menu')
   getFrontMenu(@CurrentUser() user: any) {
     return this.service.getFrontMenu(Number(user.roleId));
+  }
+
+  @Get('datmodulos')
+  getDatmodulos(@CurrentUser() user: any) {
+    return this.service.getRoleDatmodulos(Number(user.roleId));
   }
 
   @Get('backend-perms')

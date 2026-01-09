@@ -1,0 +1,91 @@
+@baseUrl = http://localhost:3000
+@token = {{JWT_TOKEN}}
+
+### Crear módulo backend
+POST {{baseUrl}}/access/modulos
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "CODIGO": "INV_CAPTURA",
+  "NOMBRE": "Captura de Inventarios",
+  "ACTIVO": true
+}
+
+### Crear grupo backend
+POST {{baseUrl}}/access/grupos-modulo
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "NOMBRE": "Inventarios",
+  "ACTIVO": true
+}
+
+### Asignar módulos a grupo backend (reemplaza lista)
+POST {{baseUrl}}/access/grupos-modulo/1/modulos
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "idModulos": [1, 2]
+}
+
+### Asignar permisos backend a rol (upsert)
+POST {{baseUrl}}/access/roles/1/permisos-backend
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "idGrupModulo": 1,
+  "canRead": true,
+  "canCreate": true,
+  "canUpdate": false,
+  "canDelete": false,
+  "activo": true
+}
+
+### Crear módulo front
+POST {{baseUrl}}/access/mod-front
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "CODIGO": "SYS_DAT_MAE",
+  "NOMBRE": "Datos Maestros",
+  "DEPTO": "SISTEMAS",
+  "ACTIVO": true
+}
+
+### Crear grupo front
+POST {{baseUrl}}/access/grupos-front
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "NOMBRE": "Menu Principal",
+  "ACTIVO": true
+}
+
+### Asignar módulos front a grupo (reemplaza lista)
+POST {{baseUrl}}/access/grupos-front/1/mods
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "idModFront": [1, 2]
+}
+
+### Enrolar rol en grupo front (upsert)
+POST {{baseUrl}}/access/roles/1/enrolamientos-front
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "idGrupmodFront": 1,
+  "activo": true
+}
+
+### Menu front para el usuario autenticado
+GET {{baseUrl}}/access/me/front-menu
+Authorization: Bearer {{token}}

@@ -14,6 +14,39 @@ async function bootstrap() {
     }),
   );
 
+  // CORS configuration: allow configurable origins via CORS_ORIGINS env var
+  // Example: CORS_ORIGINS="http://localhost:57591,http://127.0.0.1:57591"
+  const defaultOrigins = ['http://localhost:57591', 'http://127.0.0.1:57591'];
+  const envOrigins = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+  const allowedOrigins = envOrigins.length > 0 ? envOrigins : defaultOrigins;
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like curl, mobile apps)
+      if (!origin) return callback(null, true);
+
+      // Exact matches from env or defaults
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        return callback(null, true);
+      }
+
+      // Development convenience: allow any localhost or 127.0.0.1 origin on any port
+      try {
+        const u = new URL(origin);
+        if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+          return callback(null, true);
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+
+      callback(new Error('CORS policy: Origin not allowed'), false);
+    },
+    credentials: true,
+  });
+
   const config = new DocumentBuilder()
     .setTitle('IOE API')
     .setDescription('API NestJS + MSSQL')

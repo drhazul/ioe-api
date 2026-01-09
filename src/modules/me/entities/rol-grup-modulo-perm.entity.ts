@@ -22,4 +22,7 @@ export class RolGrupModuloPermEntity {
 
   @Column({ type: 'bit' })
   ACTIVO: boolean;
+
+  @Column({ type: 'datetime2', precision: 0 })
+  FCNR: Date;
 }

@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { Like, Repository, QueryFailedError } from 'typeorm';
 import { DatSucEntity } from './dat-suc.entity';
 import { CreateDatSucDto } from './dto/create-dat-suc.dto';
 import { UpdateDatSucDto } from './dto/update-dat-suc.dto';
@@ -53,7 +53,17 @@ export class DatSucService {
 
   async remove(suc: string) {
     const row = await this.findOne(suc);
-    await this.repo.remove(row);
+    try {
+      await this.repo.remove(row);
+    } catch (err) {
+      // FK constraints (usuarios, etc.) terminan en error 500; devolvemos conflicto legible
+      if (err instanceof QueryFailedError) {
+        throw new ConflictException(
+          `No se puede eliminar la sucursal ${suc} porque está referenciada por otros registros (usuarios u otros catálogos).`,
+        );
+      }
+      throw err;
+    }
     return { deleted: true, SUC: suc };
   }
 }

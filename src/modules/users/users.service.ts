@@ -57,6 +57,9 @@ export class UsersService {
   }
 
   async update(id: number, dto: UpdateUserDto) {
+    // Debug log to verify incoming payload values during updates
+    // eslint-disable-next-line no-console
+    console.log('UpdateUserDto', { id, dto });
     const row = await this.findOne(id);
 
     // Si viene PASSWORD, rehace hash
@@ -77,12 +80,21 @@ export class UsersService {
 
     const { PASSWORD, ...rest } = dto as any;
 
-    const updated = this.repo.merge(row, {
+    // Solo enviar campos definidos al update para evitar pisar relaciones cargadas
+    const payload: Partial<UsuarioEntity> = {
       ...rest,
       PASSWORD_HASH,
+    };
+    Object.keys(payload).forEach(key => {
+      if (payload[key as keyof typeof payload] === undefined) {
+        delete payload[key as keyof typeof payload];
+      }
     });
 
-    return this.repo.save(updated);
+    await this.repo.update({ IDUSUARIO: id }, payload);
+
+    // Devuelve con relaciones frescas
+    return this.findOne(id);
   }
 
   async remove(id: number) {

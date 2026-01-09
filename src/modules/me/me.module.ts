@@ -7,6 +7,7 @@ import { ModFrontEntity } from './entities/mod-front.entity';
 import { GrupmodFrontModEntity } from './entities/grupmod-front-mod.entity';
 import { RolGrupmodFrontEntity } from './entities/rol-grupmod-front.entity';
 import { RolGrupModuloPermEntity } from './entities/rol-grup-modulo-perm.entity';
+import { UsuarioEntity } from '../users/usuario.entity';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { RolGrupModuloPermEntity } from './entities/rol-grup-modulo-perm.entity'
       GrupmodFrontModEntity,
       RolGrupmodFrontEntity,
       RolGrupModuloPermEntity,
+      UsuarioEntity,
     ]),
   ],
   controllers: [MeController],
