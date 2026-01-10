@@ -13,6 +13,7 @@ import { CreateDatContCapDto } from './dto/create-datcontcap.dto';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { DatContCtrlEntity } from '../datcontctrl/datcontctrl.entity';
 import { DatArtEntity } from '../datart/datart.entity';
+import { DatDetSvrEntity } from '../datdetsvr/datdetsvr.entity';
 import type { ListDatContCapDto } from './dto/list-datcontcap.dto';
 
 type NormalizedConteo = { cont: string; suc: string; ctrl: DatContCtrlEntity };
@@ -27,6 +28,8 @@ export class DatContCapService {
     private readonly ctrlRepo: Repository<DatContCtrlEntity>,
     @InjectRepository(DatArtEntity)
     private readonly artRepo: Repository<DatArtEntity>,
+    @InjectRepository(DatDetSvrEntity)
+    private readonly detRepo: Repository<DatDetSvrEntity>,
   ) {}
 
   async conteosDisponibles(user: JwtPayload) {
@@ -74,6 +77,7 @@ export class DatContCapService {
     const cantidad = this.normalizeCantidad(dto.cantidad, dto.tipoMov);
     const captureUuid = dto.capturaUuid ?? randomUUID();
     const { art, upc } = await this.resolveArticulo({ suc, art: dto.art, upc: dto.upc });
+    await this.validateArticuloEnConteo({ suc, cont, upc });
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -146,13 +150,23 @@ export class DatContCapService {
       .where('c.SUC = :suc', { suc: sucToUse })
       .andWhere('c.CONT = :cont', { cont: contCode });
 
+    const sumQb = this.repo
+      .createQueryBuilder('c')
+      .where('c.SUC = :suc', { suc: sucToUse })
+      .andWhere('c.CONT = :cont', { cont: contCode });
+
     if (almacenFilter && almacenFilter !== 'TODOS') {
       qb.andWhere('c.ALMACEN = :alm', { alm: almacenFilter });
+      sumQb.andWhere('c.ALMACEN = :alm', { alm: almacenFilter });
     }
 
     if (upcFilter) {
       qb.andWhere('c.UPC LIKE :upc', { upc: `${upcFilter}%` });
+      sumQb.andWhere('c.UPC LIKE :upc', { upc: `${upcFilter}%` });
     }
+
+    const sumRow = await sumQb.select('SUM(c.CANT)', 'sumCant').getRawOne();
+    const sumCant = this.toNumber((sumRow as any)?.sumCant) ?? 0;
 
     const [rows, total] = await qb
       .orderBy('c.FCNR', 'DESC')
@@ -169,6 +183,7 @@ export class DatContCapService {
       totalPages: total === 0 ? 0 : Math.ceil(total / limit),
       suc: sucToUse,
       cont: contCode,
+      sumCant,
     };
   }
 
@@ -273,6 +288,18 @@ export class DatContCapService {
       throw new NotFoundException(`UPC ${upc} no existe en la sucursal ${input.suc}`);
     }
     return { art: (row.ART ?? '').trim().toUpperCase(), upc: row.UPC };
+  }
+
+  private async validateArticuloEnConteo(input: { suc: string; cont: string; upc?: string | null }) {
+    const upc = (input.upc ?? '').trim();
+    if (!upc) {
+      throw new BadRequestException('Envía UPC para validar el conteo seleccionado.');
+    }
+
+    const row = await this.detRepo.findOne({ where: { SUC: input.suc, CONT: input.cont, UPC: upc } });
+    if (!row) {
+      throw new BadRequestException(`El UPC ${upc} no está dentro del conteo ${input.cont} seleccionado.`);
+    }
   }
 
   private normalizeCantidad(value: number, tipoMov?: string) {
