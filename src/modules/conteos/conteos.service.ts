@@ -67,50 +67,123 @@ export class ConteosService {
 
     const { contCode, sucToUse, ctrl } = await this.resolveCtrl(cont, user, suc);
 
+    const tipocont = (ctrl.TIPOCONT ?? '').trim().toUpperCase();
+    if (tipocont !== 'ARTICULO' && tipocont !== 'JERARQUIA') {
+      throw new BadRequestException(`TIPOCONT inválido para conteo ${contCode}`);
+    }
+
+    const columnName = tipocont === 'ARTICULO' ? 'ART' : 'SCLA2';
+    const alternateName = columnName === 'ART' ? 'SCLA2' : 'ART';
+    const values = this.extractColumnValues(file, columnName, alternateName, contCode, tipocont);
+
+    if (!values.length) {
+      throw new BadRequestException(`No se encontraron datos en la columna ${columnName}`);
+    }
+
+    const insertValues = async (runner: any) => {
+      const batchSize = 400; // evita exceder el limite de 2100 parametros en SQL Server
+      for (let i = 0; i < values.length; i += batchSize) {
+        const batch = values.slice(i, i + batchSize);
+        const params: unknown[] = [];
+        const placeholders = batch
+          .map((value, idx) => {
+            const base = idx * 5;
+            params.push(sucToUse, contCode, tipocont, value, user.sub);
+            return `(@${base}, @${base + 1}, @${base + 2}, @${base + 3}, @${base + 4})`;
+          })
+          .join(', ');
+
+        const sql =
+          'INSERT INTO dbo.DAT_CONT_UPLOAD_ITEMS ([SUC], [CONT], [TIPOCONT], [VALUE], [IDUSUARIO]) ' +
+          `VALUES ${placeholders}`;
+        await runner.query(sql, params);
+      }
+    };
+
+    if (tipocont === 'ARTICULO') {
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.query('SET LOCK_TIMEOUT 5000');
+      await queryRunner.startTransaction();
+
+      try {
+        await queryRunner.query('EXEC dbo.sp_cont_upload_clear @SUC = @0, @CONT = @1, @IDUSUARIO = @2', [
+          sucToUse,
+          contCode,
+          user.sub,
+        ]);
+        await insertValues(queryRunner);
+        await queryRunner.query(
+          'UPDATE dbo.DAT_CONT_CTRL SET TOTAL_ITEMS = @0, FILE_NAME = @1, MODIFICADO_POR = @2, LAST_ERROR = NULL WHERE SUC = @3 AND CONT = @4',
+          [values.length, file.originalname ?? null, user.username ?? String(user.sub), sucToUse, contCode],
+        );
+        await queryRunner.commitTransaction();
+      } catch (err) {
+        await queryRunner.rollbackTransaction();
+        const message = err instanceof Error ? err.message : 'Error desconocido';
+        try {
+          await this.dataSource.query(
+            'UPDATE dbo.DAT_CONT_CTRL SET LAST_ERROR = @0, ESTA = @1 WHERE SUC = @2 AND CONT = @3',
+            [message?.slice(0, 4000), 'ERROR', sucToUse, contCode],
+          );
+        } catch (_) {
+          // no bloquear por fallas al loguear el error
+        }
+        throw err;
+      } finally {
+        await queryRunner.release();
+      }
+
+      try {
+        await this.dataSource.query('EXEC dbo.sp_cont_build_det_svr @SUC = @0, @CONT = @1', [sucToUse, contCode]);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Error desconocido';
+        try {
+          await this.dataSource.query(
+            'UPDATE dbo.DAT_CONT_CTRL SET LAST_ERROR = @0, ESTA = @1 WHERE SUC = @2 AND CONT = @3',
+            [message?.slice(0, 4000), 'ERROR', sucToUse, contCode],
+          );
+        } catch (_) {
+          // no bloquear por fallas al loguear el error
+        }
+        throw err;
+      }
+
+      const detCountRows = await this.dataSource.query(
+        'SELECT COUNT(*) AS total FROM dbo.DAT_DET_SVR WHERE SUC = @0 AND CONT = @1',
+        [sucToUse, contCode],
+      );
+      const totalDetRow = detCountRows?.[0] ?? {};
+      const totalDetVal =
+        (totalDetRow as any).total ??
+        (totalDetRow as any).TOTAL ??
+        Object.values(totalDetRow as Record<string, unknown>)[0] ??
+        0;
+      const totalDet = Number(totalDetVal) || 0;
+
+      return {
+        cont: contCode,
+        suc: sucToUse,
+        tipocont,
+        totalItems: values.length,
+        totalDet,
+        fileName: file.originalname ?? null,
+        status: 'LISTO',
+      };
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.query('SET LOCK_TIMEOUT 5000');
     await queryRunner.startTransaction();
 
     try {
-      const tipocont = (ctrl.TIPOCONT ?? '').trim().toUpperCase();
-      if (tipocont !== 'ARTICULO' && tipocont !== 'JERARQUIA') {
-        throw new BadRequestException(`TIPOCONT inválido para conteo ${contCode}`);
-      }
-
       await queryRunner.query('EXEC dbo.sp_cont_upload_clear @SUC = @0, @CONT = @1, @IDUSUARIO = @2', [
         sucToUse,
         contCode,
         user.sub,
       ]);
-
-      const columnName = tipocont === 'ARTICULO' ? 'ART' : 'SCLA2';
-      const alternateName = columnName === 'ART' ? 'SCLA2' : 'ART';
-      const values = this.extractColumnValues(file, columnName, alternateName, contCode, tipocont);
-
-      if (!values.length) {
-        throw new BadRequestException(`No se encontraron datos en la columna ${columnName}`);
-      }
-
-      const batchSize = 500;
-      for (let i = 0; i < values.length; i += batchSize) {
-        const batch = values.slice(i, i + batchSize);
-        const rows = batch.map((value) => ({
-          SUC: sucToUse,
-          CONT: contCode,
-          TIPOCONT: tipocont,
-          VALUE: value,
-          IDUSUARIO: user.sub,
-        }));
-
-        await queryRunner.manager
-          .createQueryBuilder()
-          .insert()
-          .into('DAT_CONT_UPLOAD_ITEMS')
-          .values(rows)
-          .execute();
-      }
-
+      await insertValues(queryRunner);
       await queryRunner.query('EXEC dbo.sp_cont_build_det_svr @SUC = @0, @CONT = @1', [sucToUse, contCode]);
 
       const detCountRows = await queryRunner.query(
@@ -333,50 +406,155 @@ export class ConteosService {
       throw new BadRequestException('No se pudo leer el archivo Excel');
     }
 
-    const sheetName = workbook.SheetNames?.[0];
-    if (!sheetName) {
+    const sheetNames = workbook.SheetNames ?? [];
+    if (!sheetNames.length) {
       throw new BadRequestException('El archivo Excel no contiene hojas');
     }
 
-    const sheet = workbook.Sheets[sheetName];
-    const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: null });
+    const expectedHeaders = this.buildHeaderSet(columnName);
+    const alternateHeaders = this.buildHeaderSet(alternateName);
+    let sawAlternate = false;
+    let foundExpected = false;
 
-    const values: string[] = [];
-    const headers = new Set<string>();
+    for (const sheetName of sheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
 
-    for (const row of rows) {
-      for (const key of Object.keys(row)) {
-        const normalized = key.trim().toUpperCase();
-        if (normalized) headers.add(normalized);
+      const bounds = this.getSheetBounds(sheet);
+      if (!bounds) continue;
+
+      const scanEnd = Math.min(bounds.endRow, bounds.startRow + 29);
+      let headerRowIndex = -1;
+      let colIndex = -1;
+
+      for (let r = bounds.startRow; r <= scanEnd; r += 1) {
+        for (let c = bounds.startCol; c <= bounds.endCol; c += 1) {
+          const raw = this.getCellRaw(sheet, r, c);
+          const normalized = this.normalizeHeader(raw);
+          if (!normalized) continue;
+          if (expectedHeaders.has(normalized)) {
+            headerRowIndex = r;
+            colIndex = c;
+            break;
+          }
+          if (alternateHeaders.has(normalized)) {
+            sawAlternate = true;
+          }
+        }
+        if (colIndex !== -1) break;
+      }
+
+      if (colIndex !== -1) {
+        foundExpected = true;
+        const values: string[] = [];
+        for (let r = headerRowIndex + 1; r <= bounds.endRow; r += 1) {
+          const raw = this.getCellRaw(sheet, r, colIndex);
+          if (raw === undefined || raw === null) continue;
+          const value = String(raw).trim();
+          if (value) values.push(value);
+        }
+        if (values.length) {
+          return this.normalizeValues(values, tipocont);
+        }
       }
     }
 
-    const hasExpected = headers.has(columnName);
-    const hasAlternate = headers.has(alternateName);
-
-    if (!hasExpected && hasAlternate) {
+    if (!foundExpected && sawAlternate) {
       throw new BadRequestException(
         `El conteo ${contCode} es tipo ${tipocont}, pero el archivo contiene columna ${alternateName}. ` +
           `Usa un archivo con columna ${columnName}.`,
       );
     }
 
-    for (const row of rows) {
-      const key = Object.keys(row).find((k) => k.trim().toUpperCase() === columnName);
-      if (!key) continue;
+    if (!foundExpected && tipocont === 'ARTICULO') {
+      let bestValues: string[] = [];
+      for (const sheetName of sheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        if (!sheet) continue;
 
-      const raw = row[key];
-      if (raw === undefined || raw === null) continue;
+        const bounds = this.getSheetBounds(sheet);
+        if (!bounds) continue;
 
-      const value = String(raw).trim();
-      if (value) values.push(value);
+        for (let c = bounds.startCol; c <= bounds.endCol; c += 1) {
+          const values: string[] = [];
+          for (let r = bounds.startRow; r <= bounds.endRow; r += 1) {
+            const raw = this.getCellRaw(sheet, r, c);
+            if (raw === undefined || raw === null) continue;
+            const value = String(raw).trim();
+            if (!value) continue;
+            const normalized = this.normalizeHeader(value);
+            if (expectedHeaders.has(normalized) || alternateHeaders.has(normalized)) continue;
+            values.push(value);
+          }
+          if (values.length > bestValues.length) {
+            bestValues = values;
+          }
+        }
+      }
+      if (bestValues.length) {
+        return this.normalizeValues(bestValues, tipocont);
+      }
     }
 
-    if (!values.length) {
-      throw new BadRequestException(`No se encontró la columna ${columnName} o no tenía datos`);
+    throw new BadRequestException(`No se encontró la columna ${columnName} o no tenía datos`);
+  }
+
+  private normalizeHeader(value: unknown) {
+    return String(value ?? '')
+      .replace(/\u00a0/g, ' ')
+      .trim()
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
+
+  private getSheetBounds(sheet: XLSX.WorkSheet) {
+    let startRow = Number.POSITIVE_INFINITY;
+    let endRow = -1;
+    let startCol = Number.POSITIVE_INFINITY;
+    let endCol = -1;
+
+    const ref = sheet['!ref'];
+    if (ref) {
+      const range = XLSX.utils.decode_range(ref);
+      startRow = Math.min(startRow, range.s.r);
+      endRow = Math.max(endRow, range.e.r);
+      startCol = Math.min(startCol, range.s.c);
+      endCol = Math.max(endCol, range.e.c);
     }
 
-    return Array.from(new Set(values));
+    for (const key of Object.keys(sheet)) {
+      if (key.startsWith('!')) continue;
+      const cell = XLSX.utils.decode_cell(key);
+      startRow = Math.min(startRow, cell.r);
+      endRow = Math.max(endRow, cell.r);
+      startCol = Math.min(startCol, cell.c);
+      endCol = Math.max(endCol, cell.c);
+    }
+
+    if (!Number.isFinite(startRow) || endRow < startRow || endCol < startCol) {
+      return null;
+    }
+
+    return { startRow, endRow, startCol, endCol };
+  }
+
+  private getCellRaw(sheet: XLSX.WorkSheet, row: number, col: number) {
+    const addr = XLSX.utils.encode_cell({ r: row, c: col });
+    const cell = sheet[addr] as XLSX.CellObject | undefined;
+    if (!cell) return undefined;
+    return cell.v ?? cell.w;
+  }
+
+  private buildHeaderSet(name: 'ART' | 'SCLA2') {
+    if (name === 'ART') {
+      return new Set(['ART', 'ARTICULO', 'ARTICULOS']);
+    }
+    return new Set(['SCLA2']);
+  }
+
+  private normalizeValues(values: string[], tipocont: string) {
+    return tipocont === 'ARTICULO' ? values : Array.from(new Set(values));
   }
 
   private async resolveCtrl(cont: string, user: JwtPayload, suc?: string) {
