@@ -9,7 +9,7 @@ export class DatContCapEntity {
   @Column({ name: 'SUC', type: 'nvarchar', length: 5 })
   SUC: string;
 
-  @Column({ name: 'CONT', type: 'nvarchar', length: 255 })
+  @Column({ name: 'CONT', type: 'nvarchar', length: 30 })
   CONT: string;
 
   @Column({ name: 'ART', type: 'nvarchar', length: 50 })

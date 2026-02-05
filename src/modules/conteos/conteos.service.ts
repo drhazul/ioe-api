@@ -112,6 +112,11 @@ export class ConteosService {
           contCode,
           user.sub,
         ]);
+        // Fallback defensivo: asegurar limpieza por clave unica (SUC/CONT/TIPOCONT)
+        await queryRunner.query(
+          'DELETE FROM dbo.DAT_CONT_UPLOAD_ITEMS WHERE SUC = @0 AND CONT = @1 AND TIPOCONT = @2',
+          [sucToUse, contCode, tipocont],
+        );
         await insertValues(queryRunner);
         await queryRunner.query(
           'UPDATE dbo.DAT_CONT_CTRL SET TOTAL_ITEMS = @0, FILE_NAME = @1, MODIFICADO_POR = @2, LAST_ERROR = NULL WHERE SUC = @3 AND CONT = @4',
@@ -135,6 +140,11 @@ export class ConteosService {
       }
 
       try {
+        // Fallback defensivo: limpiar detalle previo antes de reconstruir
+        await this.dataSource.query('DELETE FROM dbo.DAT_DET_SVR WHERE SUC = @0 AND CONT = @1', [
+          sucToUse,
+          contCode,
+        ]);
         await this.dataSource.query('EXEC dbo.sp_cont_build_det_svr @SUC = @0, @CONT = @1', [sucToUse, contCode]);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Error desconocido';
@@ -183,7 +193,14 @@ export class ConteosService {
         contCode,
         user.sub,
       ]);
+      // Fallback defensivo: asegurar limpieza por clave unica (SUC/CONT/TIPOCONT)
+      await queryRunner.query(
+        'DELETE FROM dbo.DAT_CONT_UPLOAD_ITEMS WHERE SUC = @0 AND CONT = @1 AND TIPOCONT = @2',
+        [sucToUse, contCode, tipocont],
+      );
       await insertValues(queryRunner);
+      // Fallback defensivo: limpiar detalle previo antes de reconstruir
+      await queryRunner.query('DELETE FROM dbo.DAT_DET_SVR WHERE SUC = @0 AND CONT = @1', [sucToUse, contCode]);
       await queryRunner.query('EXEC dbo.sp_cont_build_det_svr @SUC = @0, @CONT = @1', [sucToUse, contCode]);
 
       const detCountRows = await queryRunner.query(
@@ -240,6 +257,8 @@ export class ConteosService {
     await queryRunner.startTransaction();
 
     try {
+      // Fallback defensivo: limpiar detalle previo antes de reconstruir
+      await queryRunner.query('DELETE FROM dbo.DAT_DET_SVR WHERE SUC = @0 AND CONT = @1', [sucToUse, contCode]);
       await queryRunner.query('EXEC dbo.sp_cont_build_det_svr @SUC = @0, @CONT = @1', [sucToUse, contCode]);
 
       const ctrlRepo = queryRunner.manager.getRepository(DatContCtrlEntity);
@@ -554,7 +573,10 @@ export class ConteosService {
   }
 
   private normalizeValues(values: string[], tipocont: string) {
-    return tipocont === 'ARTICULO' ? values : Array.from(new Set(values));
+    // Evita violar el índice único (SUC, CONT, TIPOCONT, VALUE)
+    // para cualquier tipo de conteo.
+    const normalized = tipocont === 'ARTICULO' ? values : values;
+    return Array.from(new Set(normalized));
   }
 
   private async resolveCtrl(cont: string, user: JwtPayload, suc?: string) {

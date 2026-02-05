@@ -8,7 +8,7 @@ type Almacen = (typeof ALMACENES)[number];
 export class CreateDatContCapDto {
   @ApiProperty({ example: 'CONT-001' })
   @IsString()
-  @Length(1, 255)
+  @Length(1, 30)
   cont: string;
 
   @ApiPropertyOptional({ description: 'Solo admin puede sobrescribir. Por defecto se usa SUC del token.' })

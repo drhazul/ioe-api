@@ -10,7 +10,7 @@ export class CreateDatContCtrlDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @Length(0, 255)
+  @Length(0, 30)
   CONT?: string;
 
   @ApiPropertyOptional({ example: '2024-01-01T00:00:00Z' })

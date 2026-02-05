@@ -36,6 +36,10 @@ export class MeService {
       ? null
       : assigns.map((a) => a.IDGRUPMOD_FRONT).filter((x) => x !== 0);
 
+    if (!accesoTotal && (!allowedGroupIds || allowedGroupIds.length === 0)) {
+      return { roleId, accesoTotal, grupos: [] };
+    }
+
     const qb = this.gfmRepo
       .createQueryBuilder('gfm')
       .leftJoinAndSelect('gfm.GRUPO', 'grupo')

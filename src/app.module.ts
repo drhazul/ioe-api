@@ -23,8 +23,26 @@ import { Datmb51Module } from './modules/datmb51/datmb51.module';
 import { DatContCapModule } from './modules/datcontcap/datcontcap.module';
 import { DatDetSvrModule } from './modules/datdetsvr/datdetsvr.module';
 import { DatContCtrlModule } from './modules/datcontctrl/datcontctrl.module';
+import { PvCtrFolAsvrModule } from './modules/pvctrfolasvr/pvctrfolasvr.module';
+import { PvTicketLogModule } from './modules/pvticketlog/pvticketlog.module';
+import { PvCtrFolFormModule } from './modules/pvctrfolform/pvctrfolform.module';
+import { RefDetalleModule } from './modules/refdetalle/refdetalle.module';
+import { PvCtrOrdsModule } from './modules/pvctrords/pvctrords.module';
+import { PvCtrOrdsDetModule } from './modules/pvctrordsdet/pvctrordsdet.module';
+import { DatRetCtrSvrModule } from './modules/datretctrsvr/datretctrsvr.module';
+import { DatRetDetSvrModule } from './modules/datretdetsvr/datretdetsvr.module';
+import { DatRetDetEfecSvrModule } from './modules/datretdetefecsvr/datretdetefecsvr.module';
+import { FactClientShpModule } from './modules/factclientshp/factclientshp.module';
+import { DatCatRegModule } from './modules/datcatreg/datcatreg.module';
+import { DatCatUsoModule } from './modules/datcatuso/datcatuso.module';
 import { ConteosModule } from './modules/conteos/conteos.module';
 import { AccessModule } from './modules/access/access.module';
+import { JrqClasModule } from './modules/jrqclas/jrqclas.module';
+import { JrqDepaModule } from './modules/jrqdepa/jrqdepa.module';
+import { JrqGuiaModule } from './modules/jrqguia/jrqguia.module';
+import { JrqSclaModule } from './modules/jrqscla/jrqscla.module';
+import { JrqScla2Module } from './modules/jrqscla2/jrqscla2.module';
+import { JrqSubdModule } from './modules/jrqsubd/jrqsubd.module';
 
 @Module({
   imports: [
@@ -50,8 +68,26 @@ import { AccessModule } from './modules/access/access.module';
     DatContCapModule,
     DatDetSvrModule,
     DatContCtrlModule,
+    PvCtrFolAsvrModule,
+    PvTicketLogModule,
+    PvCtrFolFormModule,
+    RefDetalleModule,
+    PvCtrOrdsModule,
+    PvCtrOrdsDetModule,
+    DatRetCtrSvrModule,
+    DatRetDetSvrModule,
+    DatRetDetEfecSvrModule,
+    FactClientShpModule,
+    DatCatRegModule,
+    DatCatUsoModule,
     ConteosModule,
     AccessModule,
+    JrqClasModule,
+    JrqDepaModule,
+    JrqGuiaModule,
+    JrqSclaModule,
+    JrqScla2Module,
+    JrqSubdModule,
   ],
   providers: [
     {

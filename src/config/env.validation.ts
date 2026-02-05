@@ -13,4 +13,10 @@ export const envValidationSchema = Joi.object({
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
   REFRESH_EXPIRES_DAYS: Joi.number().default(30),
+
+  // Admin guard overrides (comma-separated lists)
+  ADMIN_ROLE_IDS: Joi.string().optional(),
+  ADMIN_ROLE_ID: Joi.string().optional(),
+  ADMIN_NIVELES: Joi.string().optional(),
+  ADMIN_NIVEL: Joi.string().optional(),
 });

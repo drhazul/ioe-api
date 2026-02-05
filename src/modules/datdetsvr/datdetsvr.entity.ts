@@ -5,13 +5,13 @@ export class DatDetSvrEntity {
   @PrimaryGeneratedColumn({ type: 'int', name: 'ID' })
   ID: number;
 
-  @Column({ type: 'nvarchar', length: 255, nullable: true })
+  @Column({ type: 'nvarchar', length: 10, nullable: true })
   ART: string | null;
 
-  @Column({ type: 'nvarchar', length: 255, nullable: true })
+  @Column({ type: 'nvarchar', length: 15, nullable: true })
   UPC: string | null;
 
-  @Column({ type: 'nvarchar', length: 255, nullable: true })
+  @Column({ type: 'nvarchar', length: 30, nullable: true })
   CONT: string | null;
 
   @Column({ type: 'nvarchar', length: 255, nullable: true })
@@ -80,6 +80,6 @@ export class DatDetSvrEntity {
   @Column({ type: 'float', nullable: true })
   DIF_T1: number | null;
 
-  @Column({ type: 'nvarchar', length: 255, nullable: true })
+  @Column({ type: 'nvarchar', length: 5, nullable: true })
   SUC: string | null;
 }

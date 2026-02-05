@@ -19,8 +19,32 @@ export class DatArtController {
     @Query('upc') upc?: string,
     @Query('des') des?: string,
     @Query('tipo') tipo?: string,
+    @Query('modelo') modelo?: string,
+    @Query('depa') depa?: string,
+    @Query('subd') subd?: string,
+    @Query('clas') clas?: string,
+    @Query('scla') scla?: string,
+    @Query('scla2') scla2?: string,
+    @Query('sph') sph?: string,
+    @Query('cyl') cyl?: string,
+    @Query('adic') adic?: string,
   ) {
-    return this.service.findAll({ suc, art, upc, des, tipo });
+    return this.service.findAll({
+      suc,
+      art,
+      upc,
+      des,
+      tipo,
+      modelo,
+      depa,
+      subd,
+      clas,
+      scla,
+      scla2,
+      sph,
+      cyl,
+      adic,
+    });
   }
 
   @Get(':suc/:art/:upc')

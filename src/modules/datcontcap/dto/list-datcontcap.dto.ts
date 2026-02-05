@@ -7,7 +7,7 @@ const ALMACENES = ['001', '002', 'M001', 'T001', 'TODOS'] as const;
 export class ListDatContCapDto {
   @ApiProperty({ description: 'Conteo a consultar', example: 'CONT-001' })
   @IsString()
-  @Length(1, 255)
+  @Length(1, 30)
   cont: string;
 
   @ApiPropertyOptional({ description: 'Filtro por almacén. TODOS no filtra.', enum: ALMACENES })

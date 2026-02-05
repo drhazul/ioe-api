@@ -12,13 +12,61 @@ export class DatArtService {
     private readonly repo: Repository<DatArtEntity>,
   ) {}
 
-  findAll(query?: { suc?: string; art?: string; upc?: string; des?: string; tipo?: string }) {
+  findAll(query?: {
+    suc?: string;
+    art?: string;
+    upc?: string;
+    des?: string;
+    tipo?: string;
+    modelo?: string;
+    depa?: string;
+    subd?: string;
+    clas?: string;
+    scla?: string;
+    scla2?: string;
+    sph?: string;
+    cyl?: string;
+    adic?: string;
+  }) {
+    const buildLike = (value: string | undefined, maxLen: number) => {
+      const trimmed = value?.trim();
+      if (!trimmed) return undefined;
+      const normalized = trimmed.length > maxLen ? trimmed.slice(0, maxLen) : trimmed;
+      if (normalized.length + 2 <= maxLen) return Like(`%${normalized}%`);
+      if (normalized.length + 1 <= maxLen) return Like(`${normalized}%`);
+      return Like(normalized);
+    };
+    const parseNumber = (value?: string) => {
+      if (!value) return undefined;
+      const trimmed = value.trim();
+      if (!trimmed) return undefined;
+      const normalized = trimmed.replace(',', '.');
+      const num = Number(normalized);
+      return Number.isFinite(num) ? num : undefined;
+    };
     const where: any = {};
-    if (query?.suc) where.SUC = Like(`%${query.suc}%`);
-    if (query?.art) where.ART = Like(`%${query.art}%`);
-    if (query?.upc) where.UPC = Like(`%${query.upc}%`);
-    if (query?.des) where.DES = Like(`%${query.des}%`);
-    if (query?.tipo) where.TIPO = Like(`%${query.tipo}%`);
+    if (query?.suc) where.SUC = buildLike(query.suc, 5);
+    if (query?.art) where.ART = buildLike(query.art, 10);
+    if (query?.upc) where.UPC = buildLike(query.upc, 15);
+    if (query?.des) where.DES = buildLike(query.des, 255);
+    if (query?.tipo) where.TIPO = buildLike(query.tipo, 255);
+    if (query?.modelo) where.MODELO = buildLike(query.modelo, 255);
+    const depa = parseNumber(query?.depa);
+    if (depa !== undefined) where.DEPA = depa;
+    const subd = parseNumber(query?.subd);
+    if (subd !== undefined) where.SUBD = subd;
+    const clas = parseNumber(query?.clas);
+    if (clas !== undefined) where.CLAS = clas;
+    const scla = parseNumber(query?.scla);
+    if (scla !== undefined) where.SCLA = scla;
+    const scla2 = parseNumber(query?.scla2);
+    if (scla2 !== undefined) where.SCLA2 = scla2;
+    const sph = parseNumber(query?.sph);
+    if (sph !== undefined) where.SPH = sph;
+    const cyl = parseNumber(query?.cyl);
+    if (cyl !== undefined) where.CYL = cyl;
+    const adic = parseNumber(query?.adic);
+    if (adic !== undefined) where.ADIC = adic;
 
     return this.repo.find({
       where: Object.keys(where).length ? where : undefined,

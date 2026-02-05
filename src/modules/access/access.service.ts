@@ -457,6 +457,9 @@ export class AccessService {
   }
 
   async setGrupoFrontMods(id: number, dto: AssignFrontModulesToGroupDto) {
+    // TEMP: log para validar payload y persistencia
+    // eslint-disable-next-line no-console
+    console.log('[access.setGrupoFrontMods] id:', id, 'dto:', dto);
     const group = await this.grupFrontRepo.findOne({ where: { IDGRUPMOD_FRONT: id } });
     if (!group) throw new NotFoundException(`GRUPMOD_FRONT ${id} no existe`);
 
@@ -480,6 +483,8 @@ export class AccessService {
       await manager.save(GrupmodFrontModEntity, rows);
     });
 
+    // eslint-disable-next-line no-console
+    console.log('[access.setGrupoFrontMods] saved ids:', ids);
     return { idGrupmodFront: id, idModFront: ids };
   }
 
@@ -573,7 +578,10 @@ export class AccessService {
 
   // -------- FRONT MENU --------
   async getFrontMenu(roleId: number) {
-    if (roleId === 1) {
+    // TEMP: log para validar rol y grupos aplicados
+    // eslint-disable-next-line no-console
+    console.log('[access.getFrontMenu] roleId:', roleId);
+    if (roleId === 0) {
       const rows = await this.modFrontRepo.find({ where: { ACTIVO: true } });
       return rows
         .map((m) => ({ codigo: m.CODIGO, nombre: m.NOMBRE, depto: m.DEPTO ?? null }))
@@ -584,33 +592,21 @@ export class AccessService {
           return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
         });
     }
-
     const assigns = await this.rgfRepo.find({
       where: { IDROL: roleId, ACTIVO: true },
     });
 
-    const accesoTotal = assigns.some((a) => a.IDGRUPMOD_FRONT === 0);
-    if (accesoTotal) {
-      const rows = await this.modFrontRepo.find({
-        where: { ACTIVO: true },
-      });
-
-      return rows
-        .map((m) => ({
-          codigo: m.CODIGO,
-          nombre: m.NOMBRE,
-          depto: m.DEPTO ?? null,
-        }))
-        .sort((a, b) => {
-          const deptoA = (a.depto ?? '').trim();
-          const deptoB = (b.depto ?? '').trim();
-          const deptoCmp = deptoA.localeCompare(deptoB);
-          return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
-        });
-    }
+    // eslint-disable-next-line no-console
+    console.log(
+      '[access.getFrontMenu] assigns:',
+      assigns.map((a) => ({ IDROL: a.IDROL, IDGRUPMOD_FRONT: a.IDGRUPMOD_FRONT, ACTIVO: a.ACTIVO })),
+    );
 
     const groupIds = assigns.map((a) => a.IDGRUPMOD_FRONT).filter((x) => x !== 0);
     if (!groupIds.length) return [];
+
+    // eslint-disable-next-line no-console
+    console.log('[access.getFrontMenu] groupIds:', groupIds);
 
     const rel = await this.gfmRepo
       .createQueryBuilder('gfm')
@@ -620,6 +616,9 @@ export class AccessService {
       .andWhere('mod.ACTIVO = 1')
       .andWhere('gfm.IDGRUPMOD_FRONT IN (:...ids)', { ids: groupIds })
       .getMany();
+
+    // eslint-disable-next-line no-console
+    console.log('[access.getFrontMenu] rel count:', rel.length);
 
     const byId = new Map<number, ModFrontEntity>();
     for (const r of rel) {

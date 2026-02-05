@@ -5,7 +5,7 @@ export class DatContCtrlEntity {
   @PrimaryColumn({ name: 'tokenreg', type: 'nvarchar', length: 255 })
   TOKENREG: string;
 
-  @Column({ name: 'CONT', type: 'nvarchar', length: 255, nullable: true })
+  @Column({ name: 'CONT', type: 'nvarchar', length: 30, nullable: true })
   CONT: string | null;
 
   @Column({ name: 'FCNC', type: 'datetime', nullable: true })
