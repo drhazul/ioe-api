@@ -1,9 +1,25 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DatArtService } from './datart.service';
 import { CreateDatArtDto } from './dto/create-datart.dto';
 import { UpdateDatArtDto } from './dto/update-datart.dto';
+import type { JwtPayload } from '../auth/jwt.strategy';
 
 @ApiTags('datart')
 @ApiBearerAuth('jwt-auth')
@@ -28,6 +44,11 @@ export class DatArtController {
     @Query('sph') sph?: string,
     @Query('cyl') cyl?: string,
     @Query('adic') adic?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('withTotal') withTotal?: string,
+    @Query('view') view?: string,
+    @Query('loteId') loteId?: string,
   ) {
     return this.service.findAll({
       suc,
@@ -44,6 +65,11 @@ export class DatArtController {
       sph,
       cyl,
       adic,
+      page,
+      limit,
+      withTotal,
+      view,
+      loteId,
     });
   }
 
@@ -70,5 +96,26 @@ export class DatArtController {
   @Delete(':suc/:art/:upc')
   remove(@Param('suc') suc: string, @Param('art') art: string, @Param('upc') upc: string) {
     return this.service.remove(suc, art, upc);
+  }
+
+  @Post('massive-upload')
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+      required: ['file'],
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  massiveUpload(@UploadedFile() file: any, @CurrentUser() user: JwtPayload) {
+    return this.service.massiveUpload(file, user);
   }
 }

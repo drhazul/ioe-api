@@ -1,0 +1,171 @@
+CREATE OR ALTER PROCEDURE dbo.sp_art_masiva_validate_batch
+  @BatchId UNIQUEIDENTIFIER
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  IF @BatchId IS NULL
+  BEGIN
+    THROW 51010, 'BatchId es obligatorio.', 1;
+  END;
+
+  IF NOT EXISTS (SELECT 1 FROM dbo.JA_NVO_ART_CON WHERE BatchId = @BatchId)
+  BEGIN
+    THROW 51011, 'No existen registros para el batch indicado.', 1;
+  END;
+
+  DECLARE @Now DATETIME2(0) = SYSUTCDATETIME();
+
+  UPDATE T
+  SET
+    Status = 'PENDING',
+    ErrorMsg = NULL,
+    BLOQ = CASE WHEN NULLIF(LTRIM(RTRIM(BLOQ)), '') IS NULL THEN '0' ELSE BLOQ END,
+    STOCK = NULL
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId = @BatchId;
+
+  -- Obligatorios
+  UPDATE T SET Status='ERROR', ErrorMsg='SUC obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.SUC)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='TIPO obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.TIPO)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='CLAVESAT obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.CLAVESAT)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='UNIMEDSAT obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.UNIMEDSAT)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='DES obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.DES)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='DEPA obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.DEPA)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='SUBD obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.SUBD)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='CLAS obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.CLAS)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='SCLA obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.SCLA)),'') IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='SCLA2 obligatorio'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.SCLA2)),'') IS NULL;
+
+  -- Numericos (solo si trae valor)
+  UPDATE T SET Status='ERROR', ErrorMsg='CLAVESAT inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.CLAVESAT)),'') IS NOT NULL
+    AND TRY_CONVERT(FLOAT, T.CLAVESAT) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='STOCK_MIN inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.STOCK_MIN)),'') IS NOT NULL
+    AND TRY_CONVERT(FLOAT, T.STOCK_MIN) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='DIA_REABASTO inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.DIA_REABASTO)),'') IS NOT NULL
+    AND TRY_CONVERT(FLOAT, T.DIA_REABASTO) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='PVTA inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.PVTA)),'') IS NOT NULL
+    AND TRY_CONVERT(MONEY, T.PVTA) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='CTOP inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.CTOP)),'') IS NOT NULL
+    AND TRY_CONVERT(MONEY, T.CTOP) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='CTO_PROV1 inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.CTO_PROV1)),'') IS NOT NULL
+    AND TRY_CONVERT(MONEY, T.CTO_PROV1) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='CTO_PROV2 inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.CTO_PROV2)),'') IS NOT NULL
+    AND TRY_CONVERT(MONEY, T.CTO_PROV2) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='CTO_PROV3 inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.CTO_PROV3)),'') IS NOT NULL
+    AND TRY_CONVERT(MONEY, T.CTO_PROV3) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='FACT_COMP inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.FACT_COMP)),'') IS NOT NULL
+    AND TRY_CONVERT(FLOAT, T.FACT_COMP) IS NULL;
+
+  UPDATE T SET Status='ERROR', ErrorMsg='FACT_VTA inválido'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.FACT_VTA)),'') IS NOT NULL
+    AND TRY_CONVERT(FLOAT, T.FACT_VTA) IS NULL;
+
+  -- UPC duplicado en batch (solo si viene)
+  ;WITH DUPS AS (
+    SELECT UPC
+    FROM dbo.JA_NVO_ART_CON
+    WHERE BatchId=@BatchId AND Status='PENDING' AND NULLIF(LTRIM(RTRIM(UPC)),'') IS NOT NULL
+    GROUP BY UPC
+    HAVING COUNT(1) > 1
+  )
+  UPDATE T
+  SET Status='ERROR', ErrorMsg='UPC duplicado en batch'
+  FROM dbo.JA_NVO_ART_CON T
+  INNER JOIN DUPS D ON D.UPC = T.UPC
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING';
+
+  -- UPC ya existe en DAT_ART
+  UPDATE T
+  SET Status='ERROR', ErrorMsg='UPC ya existe en DAT_ART'
+  FROM dbo.JA_NVO_ART_CON T
+  INNER JOIN dbo.DAT_ART A ON A.UPC = T.UPC
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.UPC)),'') IS NOT NULL;
+
+  -- ART ya existe en DAT_ART (si viene informado)
+  UPDATE T
+  SET Status='ERROR', ErrorMsg='ART ya existe en DAT_ART'
+  FROM dbo.JA_NVO_ART_CON T
+  INNER JOIN dbo.DAT_ART A ON A.ART = T.ART
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.ART)),'') IS NOT NULL;
+
+  -- Marcar pendientes como VALID
+  UPDATE T
+  SET Status='VALID'
+  FROM dbo.JA_NVO_ART_CON T
+  WHERE T.BatchId=@BatchId AND T.Status='PENDING';
+
+  SELECT
+    COUNT(1) AS total,
+    SUM(CASE WHEN Status='VALID' THEN 1 ELSE 0 END) AS validRows,
+    SUM(CASE WHEN Status='ERROR' THEN 1 ELSE 0 END) AS errorRows
+  FROM dbo.JA_NVO_ART_CON
+  WHERE BatchId=@BatchId;
+END;
+GO

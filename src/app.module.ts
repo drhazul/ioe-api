@@ -20,6 +20,9 @@ import { AdminModule } from './modules/admin/admin.module';
 import { DatmodulosModule } from './modules/datmodulos/datmodulos.module';
 import { DatArtModule } from './modules/datart/datart.module';
 import { Datmb51Module } from './modules/datmb51/datmb51.module';
+import { Datmb52Module } from './modules/datmb52/datmb52.module';
+import { DatCmovModule } from './modules/dat-cmov/dat-cmov.module';
+import { DatAlmacenModule } from './modules/dat-almacen/dat-almacen.module';
 import { DatContCapModule } from './modules/datcontcap/datcontcap.module';
 import { DatDetSvrModule } from './modules/datdetsvr/datdetsvr.module';
 import { DatContCtrlModule } from './modules/datcontctrl/datcontctrl.module';
@@ -43,6 +46,8 @@ import { JrqGuiaModule } from './modules/jrqguia/jrqguia.module';
 import { JrqSclaModule } from './modules/jrqscla/jrqscla.module';
 import { JrqScla2Module } from './modules/jrqscla2/jrqscla2.module';
 import { JrqSubdModule } from './modules/jrqsubd/jrqsubd.module';
+import { UsrModSucModule } from './modules/usr-mod-suc/usr-mod-suc.module';
+import { AltaMasivaModule } from './modules/articulos/alta-masiva/alta-masiva.module';
 
 @Module({
   imports: [
@@ -65,6 +70,9 @@ import { JrqSubdModule } from './modules/jrqsubd/jrqsubd.module';
     DatmodulosModule,
     DatArtModule,
     Datmb51Module,
+    Datmb52Module,
+    DatCmovModule,
+    DatAlmacenModule,
     DatContCapModule,
     DatDetSvrModule,
     DatContCtrlModule,
@@ -88,6 +96,8 @@ import { JrqSubdModule } from './modules/jrqsubd/jrqsubd.module';
     JrqSclaModule,
     JrqScla2Module,
     JrqSubdModule,
+    UsrModSucModule,
+    AltaMasivaModule,
   ],
   providers: [
     {

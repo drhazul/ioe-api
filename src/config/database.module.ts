@@ -33,17 +33,18 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 
           extra: {
             options: {
-              server: host, // tedioous/mssql
+              server: host, // tedious/mssql
               trustServerCertificate: true,
               encrypt: false,
             },
             pool: {
-              max: 10,
+              max: 20,
               min: 0,
               idleTimeoutMillis: 30000,
+              acquireTimeoutMillis: 60000,
             },
-            connectionTimeout: 30000,
-            requestTimeout: 30000,
+            connectionTimeout: 60000,
+            requestTimeout: 120000,
           },
         };
       },

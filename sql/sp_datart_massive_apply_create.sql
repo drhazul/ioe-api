@@ -1,0 +1,159 @@
+CREATE OR ALTER PROCEDURE dbo.sp_datart_massive_apply
+  @LOTE_ID UNIQUEIDENTIFIER,
+  @USUARIO NVARCHAR(100) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  IF @LOTE_ID IS NULL
+  BEGIN
+    THROW 51001, 'LOTE_ID es obligatorio.', 1;
+  END;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM dbo.DAT_ART_MASIVA_TMP
+    WHERE LOTE_ID = @LOTE_ID
+  )
+  BEGIN
+    THROW 51002, 'No existen registros en tabla temporal para el lote indicado.', 1;
+  END;
+
+  DECLARE @AHORA DATETIME2(0) = SYSUTCDATETIME();
+
+  BEGIN TRY
+    BEGIN TRANSACTION;
+
+    UPDATE T
+    SET
+      SUC = NULLIF(LTRIM(RTRIM(T.SUC)), ''),
+      ART = NULLIF(LTRIM(RTRIM(T.ART)), ''),
+      UPC = NULLIF(LTRIM(RTRIM(T.UPC)), ''),
+      ESTADO = 'PENDIENTE',
+      ERROR_DETALLE = NULL,
+      PROCESADO_EN = NULL
+    FROM dbo.DAT_ART_MASIVA_TMP T
+    WHERE T.LOTE_ID = @LOTE_ID;
+
+    UPDATE T
+    SET
+      ESTADO = 'INVALIDO_UK',
+      ERROR_DETALLE = 'Faltan datos obligatorios: SUC, ART y/o UPC.',
+      PROCESADO_EN = @AHORA
+    FROM dbo.DAT_ART_MASIVA_TMP T
+    WHERE T.LOTE_ID = @LOTE_ID
+      AND (T.SUC IS NULL OR T.ART IS NULL OR T.UPC IS NULL);
+
+    UPDATE T
+    SET
+      ESTADO = 'NO_EXISTE',
+      ERROR_DETALLE = 'Articulo no existe en DAT_ART para la sucursal indicada.',
+      PROCESADO_EN = @AHORA
+    FROM dbo.DAT_ART_MASIVA_TMP T
+    LEFT JOIN dbo.DAT_ART A
+      ON A.SUC = T.SUC
+      AND A.ART = T.ART
+      AND A.UPC = T.UPC
+    WHERE T.LOTE_ID = @LOTE_ID
+      AND T.ESTADO = 'PENDIENTE'
+      AND A.SUC IS NULL;
+
+    ;WITH DUP AS (
+      SELECT
+        ID,
+        ROW_NUMBER() OVER (PARTITION BY SUC, ART, UPC ORDER BY ID DESC) AS RN
+      FROM dbo.DAT_ART_MASIVA_TMP
+      WHERE LOTE_ID = @LOTE_ID
+        AND ESTADO = 'PENDIENTE'
+    )
+    UPDATE T
+    SET
+      ESTADO = 'DUPLICADO',
+      ERROR_DETALLE = 'Registro duplicado en archivo. Se conserva el ultimo renglon del mismo articulo.',
+      PROCESADO_EN = @AHORA
+    FROM dbo.DAT_ART_MASIVA_TMP T
+    INNER JOIN DUP D
+      ON D.ID = T.ID
+    WHERE D.RN > 1;
+
+    ;WITH SRC AS (
+      SELECT
+        T.*
+      FROM dbo.DAT_ART_MASIVA_TMP T
+      WHERE T.LOTE_ID = @LOTE_ID
+        AND T.ESTADO = 'PENDIENTE'
+    )
+    UPDATE A
+    SET
+      A.TIPO = S.TIPO,
+      A.CLAVESAT = S.CLAVESAT,
+      A.UNIMEDSAT = S.UNIMEDSAT,
+      A.DES = S.DES,
+      A.STOCK_MIN = S.STOCK_MIN,
+      A.ESTATUS = S.ESTATUS,
+      A.DIA_REABASTO = S.DIA_REABASTO,
+      A.PVTA = S.PVTA,
+      A.CTOP = S.CTOP,
+      A.PROV_1 = S.PROV_1,
+      A.CTO_PROV1 = S.CTO_PROV1,
+      A.PROV_2 = S.PROV_2,
+      A.CTO_PROV2 = S.CTO_PROV2,
+      A.PROV_3 = S.PROV_3,
+      A.CTO_PROV3 = S.CTO_PROV3,
+      A.UN_COMP = S.UN_COMP,
+      A.FACT_COMP = S.FACT_COMP,
+      A.UN_VTA = S.UN_VTA,
+      A.FACT_VTA = S.FACT_VTA,
+      A.BASE = S.BASE,
+      A.SPH = S.SPH,
+      A.CYL = S.CYL,
+      A.ADIC = S.ADIC,
+      A.DEPA = S.DEPA,
+      A.SUBD = S.SUBD,
+      A.CLAS = S.CLAS,
+      A.SCLA = S.SCLA,
+      A.SCLA2 = S.SCLA2,
+      A.UMUE = S.UMUE,
+      A.UTRA = S.UTRA,
+      A.UNIV = S.UNIV,
+      A.UFRE = S.UFRE,
+      A.BLOQ = S.BLOQ,
+      A.MARCA = S.MARCA,
+      A.MODELO = S.MODELO,
+      A.MODF = 1
+    FROM dbo.DAT_ART A
+    INNER JOIN SRC S
+      ON A.SUC = S.SUC
+      AND A.ART = S.ART
+      AND A.UPC = S.UPC;
+    -- STOCK se conserva del registro original de DAT_ART y no se actualiza.
+
+    UPDATE T
+    SET
+      ESTADO = 'PROCESADO',
+      ERROR_DETALLE = NULL,
+      PROCESADO_EN = @AHORA
+    FROM dbo.DAT_ART_MASIVA_TMP T
+    WHERE T.LOTE_ID = @LOTE_ID
+      AND T.ESTADO = 'PENDIENTE';
+
+    COMMIT TRANSACTION;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0
+      ROLLBACK TRANSACTION;
+    THROW;
+  END CATCH;
+
+  SELECT
+    @LOTE_ID AS LOTE_ID,
+    @USUARIO AS USUARIO,
+    COUNT(1) AS TOTAL_CARGADOS,
+    SUM(CASE WHEN ESTADO = 'PROCESADO' THEN 1 ELSE 0 END) AS PROCESADOS,
+    SUM(CASE WHEN ESTADO = 'INVALIDO_UK' THEN 1 ELSE 0 END) AS INVALIDOS_UK,
+    SUM(CASE WHEN ESTADO = 'NO_EXISTE' THEN 1 ELSE 0 END) AS NO_EXISTEN_CATALOGO,
+    SUM(CASE WHEN ESTADO = 'DUPLICADO' THEN 1 ELSE 0 END) AS DUPLICADOS
+  FROM dbo.DAT_ART_MASIVA_TMP
+  WHERE LOTE_ID = @LOTE_ID;
+END;
+GO

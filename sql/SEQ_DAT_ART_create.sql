@@ -1,0 +1,37 @@
+DECLARE @Base BIGINT = 8000000;
+DECLARE @MaxArt BIGINT;
+DECLARE @StartWith BIGINT;
+
+SELECT
+  @MaxArt = MAX(TRY_CONVERT(BIGINT, ART))
+FROM dbo.DAT_ART
+WHERE TRY_CONVERT(BIGINT, ART) IS NOT NULL
+  AND TRY_CONVERT(BIGINT, ART) >= @Base;
+
+IF @MaxArt IS NULL OR @MaxArt < @Base
+BEGIN
+  SET @StartWith = 1;
+END
+ELSE
+BEGIN
+  SET @StartWith = (@MaxArt - @Base + 1);
+END;
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.sequences
+  WHERE name = 'SEQ_DAT_ART' AND SCHEMA_NAME(schema_id) = 'dbo'
+)
+BEGIN
+  DECLARE @CreateSql NVARCHAR(MAX) =
+    'CREATE SEQUENCE dbo.SEQ_DAT_ART AS BIGINT ' +
+    'START WITH ' + CAST(@StartWith AS NVARCHAR(30)) + ' INCREMENT BY 1;';
+  EXEC sp_executesql @CreateSql;
+END
+ELSE
+BEGIN
+  DECLARE @AlterSql NVARCHAR(MAX) =
+    'ALTER SEQUENCE dbo.SEQ_DAT_ART RESTART WITH ' + CAST(@StartWith AS NVARCHAR(30)) + ';';
+  EXEC sp_executesql @AlterSql;
+END;
+GO
