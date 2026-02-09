@@ -14,6 +14,62 @@ export class Datmb51Service {
     private readonly repo: Repository<Datmb51Entity>,
   ) {}
 
+  private async appendDescripcion(rows: any[]) {
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+    const needsDes = rows.some(
+      (row) =>
+        row &&
+        !Object.prototype.hasOwnProperty.call(row, 'DES') &&
+        !Object.prototype.hasOwnProperty.call(row, 'des'),
+    );
+    if (!needsDes) return rows;
+
+    const pairSet = new Map<string, { suc: string; art: string }>();
+    for (const row of rows) {
+      const suc = String(row?.SUC ?? row?.suc ?? '').trim();
+      const art = String(row?.ART ?? row?.art ?? '').trim();
+      if (!suc || !art) continue;
+      const key = `${suc}||${art}`;
+      if (!pairSet.has(key)) pairSet.set(key, { suc, art });
+    }
+    if (pairSet.size === 0) return rows;
+
+    const sucs = Array.from(new Set(Array.from(pairSet.values()).map((p) => p.suc)));
+    const arts = Array.from(new Set(Array.from(pairSet.values()).map((p) => p.art)));
+    const desRows = await this.dataSource.query(
+      `
+      SELECT SUC, ART, MAX(DES) AS DES
+      FROM dbo.DAT_ART
+      WHERE SUC IN (SELECT LTRIM(RTRIM(value)) FROM string_split(@0, ','))
+        AND ART IN (SELECT LTRIM(RTRIM(value)) FROM string_split(@1, ','))
+      GROUP BY SUC, ART
+      `,
+      [sucs.join(','), arts.join(',')],
+    );
+
+    const desMap = new Map<string, string>();
+    for (const row of desRows ?? []) {
+      const suc = String(row?.SUC ?? '').trim();
+      const art = String(row?.ART ?? '').trim();
+      if (!suc || !art) continue;
+      const des = String(row?.DES ?? '').trim();
+      if (des) desMap.set(`${suc}||${art}`, des);
+    }
+
+    return rows.map((row) => {
+      const hasDes =
+        Object.prototype.hasOwnProperty.call(row, 'DES') ||
+        Object.prototype.hasOwnProperty.call(row, 'des');
+      if (hasDes) return row;
+      const suc = String(row?.SUC ?? row?.suc ?? '').trim();
+      const art = String(row?.ART ?? row?.art ?? '').trim();
+      const key = `${suc}||${art}`;
+      const des = desMap.get(key);
+      if (!des) return row;
+      return { ...row, DES: des };
+    });
+  }
+
   findAll(q?: { idpd?: string; user?: string; art?: string; almacen?: string; suc?: string }) {
     const where: any = {};
     if (q?.idpd) where.IDPD = Like(`%${q.idpd}%`);
@@ -211,64 +267,70 @@ export class Datmb51Service {
       rows = await this.dataSource.query(
         `
         SELECT
-          IDPD,
-          [USER],
-          CLSM,
-          DOCP,
-          ART,
-          CTDA,
-          CTOT,
-          FCND,
-          FCNC,
-          TXT,
-          ALMACEN,
-          VTAESP,
-          SUC,
+          M.IDPD,
+          M.[USER],
+          M.CLSM,
+          M.DOCP,
+          M.ART,
+          A.DES AS DES,
+          M.CTDA,
+          M.CTOT,
+          M.FCND,
+          M.FCNC,
+          M.TXT,
+          M.ALMACEN,
+          M.VTAESP,
+          M.SUC,
           COUNT(1) OVER() AS TOTAL_COUNT
-        FROM dbo.DAT_MB51
-        WHERE (@0 IS NULL OR FCND >= @0)
-          AND (@1 IS NULL OR FCND <= @1)
-          AND (@2 IS NULL OR FCNC >= @2)
-          AND (@3 IS NULL OR FCNC <= @3)
-          AND (@4 IS NULL OR ART LIKE '%' + @4 + '%')
-          AND (@5 IS NULL OR DOCP LIKE '%' + @5 + '%')
+        FROM dbo.DAT_MB51 M
+        LEFT JOIN (
+          SELECT SUC, ART, MAX(DES) AS DES
+          FROM dbo.DAT_ART
+          GROUP BY SUC, ART
+        ) A ON A.SUC = M.SUC AND A.ART = M.ART
+        WHERE (@0 IS NULL OR M.FCND >= @0)
+          AND (@1 IS NULL OR M.FCND <= @1)
+          AND (@2 IS NULL OR M.FCNC >= @2)
+          AND (@3 IS NULL OR M.FCNC <= @3)
+          AND (@4 IS NULL OR M.ART LIKE '%' + @4 + '%')
+          AND (@5 IS NULL OR M.DOCP LIKE '%' + @5 + '%')
           AND (
-            @6 IS NULL OR ALMACEN = @6
+            @6 IS NULL OR M.ALMACEN = @6
           )
           AND (
-            @7 IS NULL OR SUC = @7
+            @7 IS NULL OR M.SUC = @7
           )
           AND (
-            @8 IS NULL OR CLSM = @8
+            @8 IS NULL OR M.CLSM = @8
           )
-          AND (@9 IS NULL OR VTAESP = @9)
-          AND (@10 IS NULL OR [USER] LIKE '%' + @10 + '%')
-          AND (@11 IS NULL OR TXT LIKE '%' + @11 + '%')
+          AND (@9 IS NULL OR M.VTAESP = @9)
+          AND (@10 IS NULL OR M.[USER] LIKE '%' + @10 + '%')
+          AND (@11 IS NULL OR M.TXT LIKE '%' + @11 + '%')
           AND (
             @12 IS NULL OR EXISTS (
               SELECT 1 FROM string_split(@12, ',') s
-              WHERE LTRIM(RTRIM(s.value)) = ART
+              WHERE LTRIM(RTRIM(s.value)) = M.ART
             )
           )
           AND (
             @13 IS NULL OR EXISTS (
               SELECT 1 FROM string_split(@13, ',') s
-              WHERE LTRIM(RTRIM(s.value)) = ALMACEN
+              WHERE LTRIM(RTRIM(s.value)) = M.ALMACEN
             )
           )
           AND (
             @14 IS NULL OR EXISTS (
               SELECT 1 FROM string_split(@14, ',') s
-              WHERE LTRIM(RTRIM(s.value)) = SUC
+              WHERE LTRIM(RTRIM(s.value)) = M.SUC
             )
           )
           AND (
             @15 IS NULL OR EXISTS (
               SELECT 1 FROM string_split(@15, ',') s
-              WHERE TRY_CAST(LTRIM(RTRIM(s.value)) AS FLOAT) = CLSM
+              WHERE TRY_CAST(LTRIM(RTRIM(s.value)) AS FLOAT) = M.CLSM
             )
           )
-        ORDER BY FCND DESC
+        ORDER BY M.FCND DESC
         OFFSET CASE WHEN @16 IS NULL OR @17 IS NULL OR @16 < 1 OR @17 < 1 THEN 0 ELSE (@16 - 1) * @17 END ROWS
         FETCH NEXT CASE WHEN @17 IS NULL OR @17 < 1 THEN 2147483647 ELSE @17 END ROWS ONLY
         `,
@@ -295,6 +357,7 @@ export class Datmb51Service {
       );
     }
 
+    rows = await this.appendDescripcion(rows);
     const totalFromRow = rows?.[0]?.TOTAL_COUNT ?? rows?.[0]?.total_count ?? rows?.[0]?.Total_Count;
     let items = (rows ?? []).map(row => {
       if (row && Object.prototype.hasOwnProperty.call(row, 'TOTAL_COUNT')) {
