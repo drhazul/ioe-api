@@ -69,6 +69,11 @@ export class ConteosController {
     return this.service.applyAdjustment(cont, user, suc);
   }
 
+  @Post(':cont/sync-capturas')
+  syncCapturas(@Param('cont') cont: string, @Query('suc') suc: string | undefined, @CurrentUser() user: JwtPayload) {
+    return this.service.syncCapturasFromDetalle(cont, user, suc);
+  }
+
   @Get(':cont/det')
   listDet(
     @Param('cont') cont: string,

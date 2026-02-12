@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -20,6 +21,8 @@ type NormalizedConteo = { cont: string; suc: string; ctrl: DatContCtrlEntity };
 
 @Injectable()
 export class DatContCapService {
+  private readonly logger = new Logger(DatContCapService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(DatContCapEntity)
@@ -106,6 +109,7 @@ export class DatContCapService {
       const saved = await scopedRepo.save(entity);
 
       await this.runSyncProcedure(queryRunner, suc, cont, art);
+      await this.assertSyncedDetalle(queryRunner, { suc, cont, art });
 
       await queryRunner.commitTransaction();
 
@@ -326,6 +330,82 @@ export class DatContCapService {
 
   private async runSyncProcedure(queryRunner: QueryRunner, suc: string, cont: string, art: string) {
     await queryRunner.query('EXEC dbo.sp_cont_sync_captura_art @SUC = @0, @CONT = @1, @ART = @2', [suc, cont, art]);
+  }
+
+  private async assertSyncedDetalle(
+    queryRunner: QueryRunner,
+    input: { suc: string; cont: string; art: string },
+  ) {
+    const expectedRows = await queryRunner.query(
+      `
+      SELECT
+        SUM(CASE WHEN ALMACEN = '001' THEN CANT ELSE 0 END) AS cap001,
+        SUM(CASE WHEN ALMACEN = '002' THEN CANT ELSE 0 END) AS cap002,
+        SUM(CASE WHEN ALMACEN = 'M001' THEN CANT ELSE 0 END) AS capM1,
+        SUM(CASE WHEN ALMACEN = 'T001' THEN CANT ELSE 0 END) AS capT1
+      FROM dbo.DAT_CONT_CAPTURA
+      WHERE SUC = @0
+        AND CONT = @1
+        AND UPPER(LTRIM(RTRIM(ART))) = UPPER(LTRIM(RTRIM(@2)))
+      `,
+      [input.suc, input.cont, input.art],
+    );
+
+    const expectedRow = (expectedRows?.[0] ?? {}) as Record<string, unknown>;
+    const cap001 = this.toNumber(expectedRow['cap001']) ?? 0;
+    const cap002 = this.toNumber(expectedRow['cap002']) ?? 0;
+    const capM1 = this.toNumber(expectedRow['capM1']) ?? 0;
+    const capT1 = this.toNumber(expectedRow['capT1']) ?? 0;
+    const capTotal = cap001 + cap002 + capM1 + capT1;
+
+    const detRows = await queryRunner.query(
+      `
+      SELECT
+        [001] AS det001,
+        [002] AS det002,
+        M001  AS detM1,
+        T001  AS detT1,
+        TOTAL AS detTotal
+      FROM dbo.DAT_DET_SVR
+      WHERE SUC = @0
+        AND CONT = @1
+        AND UPPER(LTRIM(RTRIM(ART))) = UPPER(LTRIM(RTRIM(@2)))
+      `,
+      [input.suc, input.cont, input.art],
+    );
+
+    if (detRows.length !== 1) {
+      throw new ConflictException(
+        `Sincronización inválida para ART ${input.art}: se esperaban 1 fila en DAT_DET_SVR y hay ${detRows.length}.`,
+      );
+    }
+
+    const det = detRows[0] as Record<string, unknown>;
+    const det001 = this.toNumber(det['det001']) ?? 0;
+    const det002 = this.toNumber(det['det002']) ?? 0;
+    const detM1 = this.toNumber(det['detM1']) ?? 0;
+    const detT1 = this.toNumber(det['detT1']) ?? 0;
+    const detTotal = this.toNumber(det['detTotal']) ?? 0;
+
+    const inSync =
+      this.nearlyEqual(det001, cap001) &&
+      this.nearlyEqual(det002, cap002) &&
+      this.nearlyEqual(detM1, capM1) &&
+      this.nearlyEqual(detT1, capT1) &&
+      this.nearlyEqual(detTotal, capTotal);
+
+    if (!inSync) {
+      this.logger.warn(
+        `[captura-sync-mismatch] suc=${input.suc} cont=${input.cont} art=${input.art} expected=[${cap001},${cap002},${capM1},${capT1},${capTotal}] got=[${det001},${det002},${detM1},${detT1},${detTotal}]`,
+      );
+      throw new ConflictException(
+        `No se pudo sincronizar DAT_DET_SVR para ART ${input.art}. Se canceló la captura.`,
+      );
+    }
+  }
+
+  private nearlyEqual(left: number, right: number, epsilon = 0.0001) {
+    return Math.abs(left - right) <= epsilon;
   }
 
   private buildCaptureResponse(entity: DatContCapEntity, idempotent: boolean, ctrl?: DatContCtrlEntity) {
