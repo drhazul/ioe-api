@@ -38,6 +38,7 @@ import { DatRetDetEfecSvrModule } from './modules/datretdetefecsvr/datretdetefec
 import { FactClientShpModule } from './modules/factclientshp/factclientshp.module';
 import { DatCatRegModule } from './modules/datcatreg/datcatreg.module';
 import { DatCatUsoModule } from './modules/datcatuso/datcatuso.module';
+import { DatEstOrdModule } from './modules/datestord/datestord.module';
 import { ConteosModule } from './modules/conteos/conteos.module';
 import { AccessModule } from './modules/access/access.module';
 import { JrqClasModule } from './modules/jrqclas/jrqclas.module';
@@ -48,6 +49,8 @@ import { JrqScla2Module } from './modules/jrqscla2/jrqscla2.module';
 import { JrqSubdModule } from './modules/jrqsubd/jrqsubd.module';
 import { UsrModSucModule } from './modules/usr-mod-suc/usr-mod-suc.module';
 import { AltaMasivaModule } from './modules/articulos/alta-masiva/alta-masiva.module';
+import { CatCtasModule } from './modules/cat-ctas/cat-ctas.module';
+import { CtrlCtasModule } from './modules/ctrl-ctas/ctrl-ctas.module';
 
 @Module({
   imports: [
@@ -88,6 +91,7 @@ import { AltaMasivaModule } from './modules/articulos/alta-masiva/alta-masiva.mo
     FactClientShpModule,
     DatCatRegModule,
     DatCatUsoModule,
+    DatEstOrdModule,
     ConteosModule,
     AccessModule,
     JrqClasModule,
@@ -98,6 +102,8 @@ import { AltaMasivaModule } from './modules/articulos/alta-masiva/alta-masiva.mo
     JrqSubdModule,
     UsrModSucModule,
     AltaMasivaModule,
+    CatCtasModule,
+    CtrlCtasModule,
   ],
   providers: [
     {

@@ -1,7 +1,18 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PvCtrOrdsService } from './pvctrords.service';
+import { CreateOrdFromQuoteLineDto } from './dto/create-ord-from-quote-line.dto';
+import { DeleteOrdFromQuoteLineDto } from './dto/delete-ord-from-quote-line.dto';
 import { CreatePvCtrOrdsDto } from './dto/create-pvctrords.dto';
 import { UpdatePvCtrOrdsDto } from './dto/update-pvctrords.dto';
 
@@ -25,6 +36,16 @@ export class PvCtrOrdsController {
   @Post()
   create(@Body() dto: CreatePvCtrOrdsDto) {
     return this.service.create(dto);
+  }
+
+  @Post('create-from-quote-line')
+  createFromQuoteLine(@Body() dto: CreateOrdFromQuoteLineDto) {
+    return this.service.createFromQuoteLine(dto);
+  }
+
+  @Post('delete-from-quote-line')
+  deleteFromQuoteLine(@Body() dto: DeleteOrdFromQuoteLineDto) {
+    return this.service.deleteFromQuoteLine(dto);
   }
 
   @Patch(':iord')

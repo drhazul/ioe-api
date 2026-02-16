@@ -47,6 +47,15 @@
 - La validacion de sucursal autorizada debe aplicarse en lectura y acciones de cambio (ej. `apply-adjustment`, upload/process/detalle/summary).
 - No confiar en filtros de frontend como control de seguridad; la API debe rechazar sucursales no autorizadas.
 
+## Control de Cuentas / Catalogo Cuentas: autorizacion por sucursal
+
+- Para `ctrl-ctas` y `cat-ctas`, la autorizacion por sucursal debe resolverse con `USR_MOD_SUC` para modulos `DAT_CONS_CTAS`, `DAT_CTRL_CTAS` y `DAT_CTRL_CUENTAS`.
+- Endpoints de consulta (catalogos y reportes) deben aplicar interseccion entre sucursales solicitadas y sucursales autorizadas del usuario no-admin.
+- Operaciones CRUD de `cat-ctas` (insert/update/delete/find) para no-admin solo deben permitir sucursales autorizadas.
+- Admin (roleId `1`) mantiene bypass por rol y puede operar sin filtro de `USR_MOD_SUC`.
+- Compatibilidad legacy: si no existen filas en `USR_MOD_SUC` para ese usuario/modulo, se permite fallback a `user.suc` para no romper usuarios existentes.
+- `GET /ctrl-ctas/config` debe exponer contexto para UI (`allowedSucs`, `forcedSuc`, `canSelectSucs`) y no depender solo de `user.suc`.
+
 ## Buenas practicas
 
 - Controllers delgados; logica en services.

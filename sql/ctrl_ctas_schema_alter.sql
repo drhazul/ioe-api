@@ -1,0 +1,29 @@
+SET NOCOUNT ON;
+
+IF COL_LENGTH('dbo.DAT_CAT_CTAS', 'SUC') IS NULL
+BEGIN
+  ALTER TABLE dbo.DAT_CAT_CTAS ADD SUC nvarchar(255) NULL;
+END;
+GO
+
+IF COL_LENGTH('dbo.DAT_CTRL_CTAS', 'SUC') IS NULL
+BEGIN
+  ALTER TABLE dbo.DAT_CTRL_CTAS ADD SUC nvarchar(255) NULL;
+END;
+GO
+
+/* Opcional recomendado: habilita filtro por colaborador */
+IF COL_LENGTH('dbo.DAT_CTRL_CTAS', 'IDOPV') IS NULL
+BEGIN
+  ALTER TABLE dbo.DAT_CTRL_CTAS ADD IDOPV nvarchar(255) NULL;
+END;
+GO
+
+IF TYPE_ID('dbo.StringList255') IS NULL
+BEGIN
+  CREATE TYPE dbo.StringList255 AS TABLE
+  (
+    Value nvarchar(255) NOT NULL
+  );
+END;
+GO
