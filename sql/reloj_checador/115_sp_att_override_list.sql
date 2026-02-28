@@ -1,0 +1,89 @@
+CREATE OR ALTER PROCEDURE dbo.sp_att_override_list
+  @SUC NVARCHAR(10) = NULL,
+  @IDUSUARIO INT = NULL,
+  @ACTIVE_ONLY BIT = 1,
+  @PAGE INT = 1,
+  @LIMIT INT = 100,
+  @REQUESTED_BY INT = NULL,
+  @IP NVARCHAR(64) = NULL,
+  @URL NVARCHAR(400) = NULL,
+  @METHOD NVARCHAR(10) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @sucNorm NVARCHAR(10) = NULLIF(LTRIM(RTRIM(ISNULL(@SUC, ''))), '');
+  DECLARE @safePage INT = CASE WHEN ISNULL(@PAGE, 0) < 1 THEN 1 ELSE @PAGE END;
+  DECLARE @safeLimit INT = CASE
+    WHEN ISNULL(@LIMIT, 0) < 1 THEN 100
+    WHEN @LIMIT > 500 THEN 500
+    ELSE @LIMIT
+  END;
+  DECLARE @metadataJson NVARCHAR(MAX);
+
+  SET @metadataJson = (
+    SELECT
+      @URL AS url,
+      @METHOD AS method,
+      (
+        SELECT
+          @sucNorm AS suc,
+          @IDUSUARIO AS idUsuario,
+          @ACTIVE_ONLY AS activeOnly,
+          @safePage AS page,
+          @safeLimit AS [limit]
+        FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+      ) AS filters
+    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+  );
+
+  INSERT INTO dbo.AUDIT_LOG (
+    IDUSUARIO,
+    ACTION,
+    MODULO,
+    ENTIDAD,
+    ENTIDAD_ID,
+    SUC,
+    METADATA_JSON,
+    IP,
+    FCNR
+  )
+  VALUES (
+    @REQUESTED_BY,
+    'GET',
+    'reloj_checador',
+    'ATT_OVERRIDE',
+    NULL,
+    @sucNorm,
+    @metadataJson,
+    @IP,
+    SYSUTCDATETIME()
+  );
+
+  SELECT
+    o.IDOVR,
+    o.IDUSUARIO,
+    u.USERNAME,
+    LTRIM(RTRIM(CONCAT(ISNULL(u.NOMBRE, ''), ' ', ISNULL(u.APELLIDOS, '')))) AS NOMBRE_COMPLETO,
+    o.SUC,
+    o.TIPO,
+    o.REASON,
+    o.AUTH_BY,
+    ua.USERNAME AS AUTH_USERNAME,
+    o.VALID_UNTIL,
+    o.FCNR,
+    CASE WHEN o.VALID_UNTIL >= SYSUTCDATETIME() THEN 1 ELSE 0 END AS IS_ACTIVE,
+    COUNT(1) OVER() AS TOTAL_COUNT
+  FROM dbo.ATT_OVERRIDE o
+  LEFT JOIN dbo.USUARIO u ON u.IDUSUARIO = o.IDUSUARIO
+  LEFT JOIN dbo.USUARIO ua ON ua.IDUSUARIO = o.AUTH_BY
+  WHERE (@IDUSUARIO IS NULL OR o.IDUSUARIO = @IDUSUARIO)
+    AND (@sucNorm IS NULL OR o.SUC = @sucNorm)
+    AND (@ACTIVE_ONLY = 0 OR o.VALID_UNTIL >= SYSUTCDATETIME())
+  ORDER BY o.VALID_UNTIL DESC, o.IDOVR DESC
+  OFFSET (@safePage - 1) * @safeLimit ROWS
+  FETCH NEXT @safeLimit ROWS ONLY;
+END;
+GO
+
+

@@ -19,4 +19,7 @@ export const envValidationSchema = Joi.object({
   ADMIN_ROLE_ID: Joi.string().optional(),
   ADMIN_NIVELES: Joi.string().optional(),
   ADMIN_NIVEL: Joi.string().optional(),
+
+  // PV devoluciones
+  PV_DEV_ORD_BLOCK_THRESHOLD: Joi.number().integer().min(1).default(5),
 });

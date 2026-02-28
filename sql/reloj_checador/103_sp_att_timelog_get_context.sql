@@ -1,0 +1,111 @@
+CREATE OR ALTER PROCEDURE dbo.sp_att_timelog_get_context
+  @IDUSUARIO INT,
+  @SUC NVARCHAR(10)
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @sucNorm NVARCHAR(10) = LTRIM(RTRIM(ISNULL(@SUC, '')));
+  DECLARE @today DATE = CONVERT(DATE, SYSUTCDATETIME());
+  DECLARE @lastTipo VARCHAR(20) = NULL;
+  DECLARE @lastFcnr DATETIME2(0) = NULL;
+  DECLARE @nextTipo VARCHAR(20) = NULL;
+  DECLARE @message VARCHAR(200);
+
+  IF @IDUSUARIO IS NULL OR @IDUSUARIO <= 0
+    THROW 52021, 'IDUSUARIO invalido', 1;
+
+  IF @sucNorm = ''
+    THROW 52022, 'SUC es requerido', 1;
+
+  DECLARE @policy TABLE (
+    IDPOLICY INT NULL,
+    SUC NVARCHAR(10) NOT NULL,
+    IDDEPTO INT NULL,
+    TIMEZONE VARCHAR(60) NOT NULL,
+    ALLOW_EARLY_MIN INT NOT NULL,
+    ALLOW_LATE_MIN INT NOT NULL,
+    REQUIRE_GPS BIT NOT NULL,
+    GEOFENCE_LAT DECIMAL(10,7) NULL,
+    GEOFENCE_LON DECIMAL(10,7) NULL,
+    GEOFENCE_RADIUS_M INT NULL,
+    GPS_MAX_ACCURACY_M INT NOT NULL,
+    REQUIRE_LIVENESS BIT NOT NULL,
+    SHIFT_START TIME NULL,
+    SHIFT_END TIME NULL,
+    LUNCH_START TIME NULL,
+    LUNCH_END TIME NULL,
+    ENFORCE_WINDOWS BIT NOT NULL,
+    OVERTIME_DAILY_LIMIT_HOURS DECIMAL(5,2) NOT NULL,
+    OVERTIME_WEEKLY_LIMIT_HOURS DECIMAL(5,2) NOT NULL,
+    ACTIVE BIT NOT NULL,
+    FCNR DATETIME2(0) NOT NULL,
+    IS_DB_POLICY BIT NOT NULL
+  );
+
+  INSERT INTO @policy
+  EXEC dbo.sp_att_policy_get
+    @SUC = @sucNorm,
+    @IDDEPTO = NULL,
+    @IDUSUARIO = @IDUSUARIO;
+
+  SELECT TOP 1
+    @lastTipo = tl.TIPO,
+    @lastFcnr = tl.FCNR
+  FROM dbo.ATT_TIME_LOG tl
+  WHERE tl.IDUSUARIO = @IDUSUARIO
+    AND tl.SUC = @sucNorm
+    AND CONVERT(DATE, tl.FCNR) = @today
+  ORDER BY tl.FCNR DESC;
+
+  IF @lastTipo IS NULL
+    SET @nextTipo = 'ENTRADA';
+  ELSE IF @lastTipo = 'ENTRADA'
+    SET @nextTipo = 'SALIDA_COMER';
+  ELSE IF @lastTipo = 'SALIDA_COMER'
+    SET @nextTipo = 'REGRESO_COMER';
+  ELSE IF @lastTipo = 'REGRESO_COMER'
+    SET @nextTipo = 'SALIDA';
+  ELSE
+    SET @nextTipo = 'NINGUNO';
+
+  SET @message = CASE
+    WHEN @lastTipo IS NULL THEN 'No hay marcajes hoy. Siguiente recomendado: ENTRADA.'
+    WHEN @lastTipo = 'ENTRADA' THEN 'Siguiente permitido: SALIDA_COMER o SALIDA.'
+    WHEN @lastTipo = 'SALIDA_COMER' THEN 'Siguiente permitido: REGRESO_COMER.'
+    WHEN @lastTipo = 'REGRESO_COMER' THEN 'Siguiente permitido: SALIDA.'
+    WHEN @lastTipo = 'SALIDA' THEN 'Jornada cerrada para hoy.'
+    ELSE 'Contexto listo para marcaje.'
+  END;
+
+  SELECT TOP 1
+    @IDUSUARIO AS IDUSUARIO,
+    @sucNorm AS SUC,
+    @today AS FECHA,
+    @lastTipo AS LAST_TIPO,
+    @lastFcnr AS LAST_FCNR,
+    @nextTipo AS NEXT_ALLOWED_TIPO,
+    p.IDPOLICY,
+    p.IDDEPTO,
+    p.TIMEZONE,
+    p.ALLOW_EARLY_MIN,
+    p.ALLOW_LATE_MIN,
+    p.REQUIRE_GPS,
+    p.GEOFENCE_LAT,
+    p.GEOFENCE_LON,
+    p.GEOFENCE_RADIUS_M,
+    p.GPS_MAX_ACCURACY_M,
+    p.REQUIRE_LIVENESS,
+    p.SHIFT_START,
+    p.SHIFT_END,
+    p.LUNCH_START,
+    p.LUNCH_END,
+    p.ENFORCE_WINDOWS,
+    p.OVERTIME_DAILY_LIMIT_HOURS,
+    p.OVERTIME_WEEKLY_LIMIT_HOURS,
+    @message AS MESSAGE
+  FROM @policy p;
+END;
+GO
+
+

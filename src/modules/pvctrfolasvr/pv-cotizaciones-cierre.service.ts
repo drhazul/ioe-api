@@ -2,11 +2,12 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  InternalServerErrorException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryFailedError } from 'typeorm';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { PvCotizacionCierreDto } from './dto/pv-cotizacion-cierre.dto';
 import { PvCotizacionCierreFormaDto } from './dto/pv-cotizacion-cierre-forma.dto';
@@ -45,13 +46,94 @@ type FormaNormalizada = {
   aut: string | null;
 };
 
+type RegistroCargoInput = {
+  idfol: string;
+  suc: string;
+  clien: number | null;
+  opv: string | null;
+  form: string;
+  impp: number;
+};
+
+type PrintHeaderData = {
+  suc: string;
+  desc: string | null;
+  encar: string | null;
+  zona: string | null;
+  rfc: string | null;
+  direccion: string | null;
+  contacto: string | null;
+};
+
+type PrintTicketItem = {
+  id: string;
+  art: string | null;
+  upc: string | null;
+  des: string | null;
+  ctd: number;
+  pvta: number;
+  importe: number;
+  ord: string | null;
+};
+
+type PrintFormaItem = {
+  idf: string;
+  form: string;
+  impp: number;
+  aut: string | null;
+  fcn: string | null;
+};
+
+type PrintFooterData = {
+  opv: string | null;
+  opvNombre: string | null;
+  idfol: string;
+  fcnm: string | null;
+  clienteId: number | null;
+  clienteNombre: string | null;
+};
+
+type PrintOrdDetail = {
+  iordp: string;
+  art: string | null;
+  job: string | null;
+  esf: string | null;
+  cil: string | null;
+  eje: string | null;
+};
+
+type PrintOrdHeader = {
+  iord: string;
+  tipo: string | null;
+  opv: string | null;
+  fcns: string | null;
+  fcnm: string | null;
+  estatus: number | null;
+  ncliente: string | null;
+  art: string | null;
+  desc: string | null;
+  ctd: number | null;
+  comad: string | null;
+  details: PrintOrdDetail[];
+};
+
 @Injectable()
 export class PvCotizacionesCierreService {
+  private static readonly CTA_CTRL_CTAS_CARGO_CREDITO = '101001002';
+  private static readonly CMOV_CARGO_CREDITO_CLIENTE = 602;
+  private static readonly NDOC_BASE = 6000000;
+  private static readonly FORMAS_CARGO_CTRL_CTAS = new Set([
+    'CREDITO',
+    'DEUDOR',
+  ]);
+  private static readonly NDOC_LOCK_RESOURCE = 'PV_CIERRE_NDOC_602';
+
   private static readonly FORMAS_PERMITIDAS = new Set([
     'EFECTIVO',
     'TARJETA',
     'CHEQUE',
     'TRANSFERENCIA',
+    'DEPOSITO 3RO',
     'CREDITO',
     'DEUDOR',
   ]);
@@ -60,12 +142,14 @@ export class PvCotizacionesCierreService {
     'TARJETA',
     'CHEQUE',
     'TRANSFERENCIA',
+    'DEPOSITO 3RO',
   ]);
 
   private static readonly FORMAS_NO_EFECTIVO = new Set([
     'TARJETA',
     'CHEQUE',
     'TRANSFERENCIA',
+    'DEPOSITO 3RO',
     'CREDITO',
     'DEUDOR',
   ]);
@@ -121,6 +205,97 @@ export class PvCotizacionesCierreService {
     };
   }
 
+  async getPrintPreview(idfolRaw: string, user: JwtPayload) {
+    const idfol = this.normalizeIdfol(idfolRaw);
+    const context = await this.resolveContext(
+      this.dataSource,
+      idfol,
+      user,
+      undefined,
+      false,
+      false,
+    );
+
+    const folioRows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        IDFOL,
+        SUC,
+        CLIEN,
+        OPV,
+        OPVM,
+        FCN,
+        FCNM,
+        AUT,
+        REQF
+      FROM dbo.PV_CTR_FOL_ASVR
+      WHERE IDFOL = @0
+      `,
+      [idfol],
+    );
+    if (!folioRows?.length) {
+      throw new NotFoundException(`La cotizacion ${idfol} no existe`);
+    }
+    const folio = (folioRows[0] ?? {}) as Record<string, unknown>;
+    const tipotran = this.normalizeTipoTranFromFolio(folio.AUT);
+    const rqfac = tipotran === 'CA'
+      ? false
+      : (this.toInt(folio.REQF) ?? 0) === 1;
+
+    const totals = this.calculateTotals({
+      totalBase: context.totalBase,
+      ivaIntegrado: context.ivaIntegrado,
+      tipotran,
+      rqfac,
+    });
+
+    const [header, items, formas, ords] = await Promise.all([
+      this.loadPrintHeader(this.dataSource, context.suc),
+      this.loadPrintTicketItems(this.dataSource, idfol),
+      this.loadPrintFormas(this.dataSource, idfol),
+      this.loadPrintOrds(this.dataSource, idfol),
+    ]);
+
+    const sumPagos = this.round2(formas.reduce((acc, item) => acc + item.impp, 0));
+    const faltante = this.round2(Math.max(totals.total - sumPagos, 0));
+    const cambio = this.round2(Math.max(sumPagos - totals.total, 0));
+
+    const opv =
+      this.normalizeText(folio.OPVM) ||
+      this.normalizeText(folio.OPV) ||
+      null;
+    const clienteId = context.clien;
+    const [opvNombre, clienteNombre] = await Promise.all([
+      this.loadOpvNombre(this.dataSource, opv),
+      this.loadClienteNombre(this.dataSource, clienteId),
+    ]);
+
+    const footer: PrintFooterData = {
+      opv,
+      opvNombre,
+      idfol: context.idfol,
+      fcnm: this.toIsoDateTime(folio.FCNM),
+      clienteId,
+      clienteNombre,
+    };
+
+    return {
+      ok: true,
+      idfol: context.idfol,
+      header,
+      items,
+      totals: {
+        ...totals,
+        sumPagos,
+        faltante,
+        cambio,
+      },
+      formas,
+      footer,
+      ords,
+    };
+  }
+
   async close(idfolRaw: string, dto: PvCotizacionCierreDto, user: JwtPayload) {
     const idfol = this.normalizeIdfol(idfolRaw);
     const tipotran = this.normalizeTipoTran(dto.tipotran);
@@ -129,109 +304,39 @@ export class PvCotizacionesCierreService {
       this.normalizeText(dto.idopv) ||
       this.normalizeText(user?.username) ||
       null;
+    const formas = this.normalizeFormas(dto.formas ?? []);
+    if (!formas.length) {
+      throw new BadRequestException('Debe registrar al menos una forma de pago');
+    }
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
-    await queryRunner.startTransaction();
 
     try {
-      const context = await this.resolveContext(
+      // El SP realiza el cierre transaccional; aqui solo prevalidamos acceso/contexto.
+      await this.resolveContext(queryRunner, idfol, user, dto.suc, false);
+      const procedureName = 'dbo.sp_pv_cotizacion_cerrar';
+      const hasProcedure = await this.procedureExists(
         queryRunner,
-        idfol,
-        user,
-        dto.suc,
-        true,
+        procedureName,
       );
-      const totals = this.calculateTotals({
-        totalBase: context.totalBase,
-        ivaIntegrado: context.ivaIntegrado,
-        tipotran,
-        rqfac,
-      });
-
-      const existingForms = await this.loadExistingForms(queryRunner, idfol);
-      const formas = this.normalizeFormas(dto.formas ?? []);
-      const formsValidation = await this.validateFormas({
-        executor: queryRunner,
-        idfol,
-        tipotran,
-        total: totals.total,
-        clien: context.clien,
-        formas,
-        existingForms,
-      });
-
-      await queryRunner.query(
-        'DELETE FROM dbo.PV_CTR_FOL_FORM WHERE IDFOL = @0',
-        [idfol],
-      );
-
-      let cambioPendiente = formsValidation.cambio;
-      let efectivoConCambioAsignado = false;
-
-      for (const forma of formas) {
-        const idf = randomUUID();
-        let impc = 0;
-        if (
-          cambioPendiente > 0 &&
-          !efectivoConCambioAsignado &&
-          forma.form === 'EFECTIVO'
-        ) {
-          impc = cambioPendiente;
-          cambioPendiente = 0;
-          efectivoConCambioAsignado = true;
-        }
-
-        await queryRunner.query(
-          `
-          INSERT INTO dbo.PV_CTR_FOL_FORM (
-            IDF,
-            IDFOL,
-            FCN,
-            FORM,
-            IMPA,
-            IMPP,
-            IMPC,
-            IMPD,
-            AUT
-          )
-          VALUES (
-            @0,
-            @1,
-            GETDATE(),
-            @2,
-            @3,
-            @4,
-            @5,
-            @6,
-            @7
-          )
-          `,
-          [idf, idfol, forma.form, forma.impp, forma.impp, impc, 0, forma.aut],
+      if (!hasProcedure) {
+        throw new ConflictException(
+          `No existe ${procedureName}. Ejecute el script sql/sp_pv_cotizacion_cerrar_create.sql`,
         );
       }
-
-      await this.updateFolioHeader(queryRunner, {
+      const result = await this.executeCloseWithStoredProcedure(queryRunner, {
         idfol,
-        total: totals.total,
-        rqfac,
-        opv,
-      });
-
-      await queryRunner.commitTransaction();
-
-      return {
-        ok: true,
-        idfol,
+        suc: this.normalizeText(dto.suc) || null,
         tipotran,
         rqfac,
-        totales: totals,
-        sumPagos: formsValidation.sumPagos,
-        cambio: formsValidation.cambio,
-      };
+        opv,
+        formas,
+      });
+
+      return result;
     } catch (error) {
-      await queryRunner.rollbackTransaction();
-      throw error;
+      throw this.mapCloseError(error);
     } finally {
       await queryRunner.release();
     }
@@ -260,6 +365,296 @@ export class PvCotizacionesCierreService {
     throw new BadRequestException(
       'tipotran invalido. Valores permitidos: CA, VF',
     );
+  }
+
+  private normalizeTipoTranFromFolio(value: unknown): TipoTran {
+    const type = this.normalizeUpper(value ?? '');
+    return type === 'CA' ? 'CA' : 'VF';
+  }
+
+  private toIsoDateTime(value: unknown): string | null {
+    if (value == null) return null;
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) return null;
+      return value.toISOString();
+    }
+    const text = this.normalizeText(value);
+    if (!text) return null;
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return text;
+    return parsed.toISOString();
+  }
+
+  private async loadPrintHeader(
+    executor: SqlExecutor,
+    suc: string,
+  ): Promise<PrintHeaderData> {
+    const rows = await executor.query(
+      `
+      SELECT TOP 1
+        SUC,
+        [DESC],
+        ENCAR,
+        ZONA,
+        RFC,
+        DIRECCION,
+        CONTACTO
+      FROM dbo.DAT_SUC
+      WHERE SUC = @0
+      `,
+      [suc],
+    );
+    const row = (rows?.[0] ?? {}) as Record<string, unknown>;
+    return {
+      suc: this.normalizeText(row.SUC) || suc,
+      desc: this.normalizeText(row.DESC) || null,
+      encar: this.normalizeText(row.ENCAR) || null,
+      zona: this.normalizeText(row.ZONA) || null,
+      rfc: this.normalizeText(row.RFC) || null,
+      direccion: this.normalizeText(row.DIRECCION) || null,
+      contacto: this.normalizeText(row.CONTACTO) || null,
+    };
+  }
+
+  private async loadPrintTicketItems(
+    executor: SqlExecutor,
+    idfol: string,
+  ): Promise<PrintTicketItem[]> {
+    const rows = await executor.query(
+      `
+      SELECT
+        ID,
+        ART,
+        UPC,
+        DES,
+        CTD,
+        PVTA,
+        PVTAT,
+        ORD
+      FROM dbo.PV_TICKET_LOG
+      WHERE IDFOL = @0
+      ORDER BY ID ASC
+      `,
+      [idfol],
+    );
+
+    return (rows ?? [])
+      .map((raw) => raw as Record<string, unknown>)
+      .map((row, index) => {
+        const ctd = this.toNumber(row.CTD) ?? 0;
+        const pvta = this.round2(this.toNumber(row.PVTA) ?? 0);
+        const pvtat = this.toNumber(row.PVTAT);
+        const importe = this.round2(pvtat ?? ctd * pvta);
+        return {
+          id: this.normalizeText(row.ID) || `ROW-${index + 1}`,
+          art: this.normalizeText(row.ART) || null,
+          upc: this.normalizeText(row.UPC) || null,
+          des: this.normalizeText(row.DES) || null,
+          ctd: this.round2(ctd),
+          pvta,
+          importe,
+          ord: this.normalizeText(row.ORD) || null,
+        } satisfies PrintTicketItem;
+      });
+  }
+
+  private async loadPrintFormas(
+    executor: SqlExecutor,
+    idfol: string,
+  ): Promise<PrintFormaItem[]> {
+    const tableName = await this.resolveFolioFormTable(executor);
+    const colsSet = await this.loadTableColumns(executor, tableName);
+    if (!colsSet.has('FORM')) return [];
+
+    const selectedCols = ['IDF', 'FORM', 'IMPP', 'IMPD', 'AUT', 'FCN']
+      .map((name) => this.normalizeUpper(name))
+      .filter((name) => colsSet.has(name))
+      .map((name) => `[${name}]`);
+    if (!selectedCols.length) return [];
+
+    let orderBy = '[FORM] ASC';
+    if (colsSet.has('FCN')) {
+      orderBy = '[FCN] ASC';
+    } else if (colsSet.has('IDF')) {
+      orderBy = '[IDF] ASC';
+    }
+
+    const rows = await executor.query(
+      `
+      SELECT
+        ${selectedCols.join(',\n        ')}
+      FROM ${tableName}
+      WHERE IDFOL = @0
+      ORDER BY ${orderBy}
+      `,
+      [idfol],
+    );
+
+    return (rows ?? [])
+      .map((raw) => raw as Record<string, unknown>)
+      .map((row, index) => {
+        const imppCol = this.toNumber(this.getRowValue(row, 'IMPP'));
+        const impdCol = this.toNumber(this.getRowValue(row, 'IMPD'));
+        const imppRaw =
+          imppCol != null && imppCol > 0
+            ? imppCol
+            : (impdCol ?? imppCol ?? 0);
+        return {
+          idf: this.normalizeText(this.getRowValue(row, 'IDF') ?? '') ||
+            `F-${index + 1}`,
+          form: this.normalizeText(this.getRowValue(row, 'FORM') ?? ''),
+          impp: this.round2(imppRaw),
+          aut: this.normalizeText(this.getRowValue(row, 'AUT') ?? '') || null,
+          fcn: this.toIsoDateTime(this.getRowValue(row, 'FCN')),
+        } satisfies PrintFormaItem;
+      })
+      .filter((row) => row.form && row.impp > 0);
+  }
+
+  private async loadPrintOrds(
+    executor: SqlExecutor,
+    idfol: string,
+  ): Promise<PrintOrdHeader[]> {
+    if (!(await this.tableExists(executor, 'dbo.PV_CTR_ORDS'))) return [];
+
+    const ordRows = await executor.query(
+      `
+      SELECT
+        IORD,
+        TIPO,
+        OPV,
+        FCNS,
+        FCNM,
+        ESTATUS,
+        NCLIENTE,
+        ART,
+        DESCART,
+        CTD,
+        COMAD
+      FROM dbo.PV_CTR_ORDS
+      WHERE IDFOL = @0
+      ORDER BY FCNM ASC, IORD ASC
+      `,
+      [idfol],
+    );
+
+    const headers = (ordRows ?? []).map((raw) => {
+      const row = raw as Record<string, unknown>;
+      return {
+        iord: this.normalizeText(row.IORD),
+        tipo: this.normalizeText(row.TIPO) || null,
+        opv: this.normalizeText(row.OPV) || null,
+        fcns: this.toIsoDateTime(row.FCNS),
+        fcnm: this.toIsoDateTime(row.FCNM),
+        estatus: this.toInt(row.ESTATUS),
+        ncliente: this.normalizeText(row.NCLIENTE) || null,
+        art: this.normalizeText(row.ART) || null,
+        desc: this.normalizeText(row.DESCART) || null,
+        ctd: this.toNumber(row.CTD),
+        comad: this.normalizeText(row.COMAD) || null,
+        details: [] as PrintOrdDetail[],
+      } satisfies PrintOrdHeader;
+    });
+
+    const byIord = new Map<string, PrintOrdHeader>();
+    for (const ord of headers) {
+      if (ord.iord) byIord.set(this.normalizeUpper(ord.iord), ord);
+    }
+    if (!byIord.size || !(await this.tableExists(executor, 'dbo.PV_CTR_ORDS_DET'))) {
+      return headers.filter((item) => item.iord);
+    }
+
+    const detailRows = await executor.query(
+      `
+      SELECT
+        det.IORDP,
+        det.IORD,
+        det.ART,
+        det.JOB,
+        det.ESF,
+        det.CIL,
+        det.EJE
+      FROM dbo.PV_CTR_ORDS_DET det
+      INNER JOIN dbo.PV_CTR_ORDS ord
+        ON ord.IORD = det.IORD
+      WHERE ord.IDFOL = @0
+      ORDER BY det.IORD ASC, det.IORDP ASC
+      `,
+      [idfol],
+    );
+
+    for (const raw of detailRows ?? []) {
+      const row = raw as Record<string, unknown>;
+      const iord = this.normalizeText(row.IORD);
+      if (!iord) continue;
+      const target = byIord.get(this.normalizeUpper(iord));
+      if (!target) continue;
+      target.details.push({
+        iordp: this.normalizeText(row.IORDP),
+        art: this.normalizeText(row.ART) || null,
+        job: this.normalizeText(row.JOB) || null,
+        esf: this.normalizeText(row.ESF) || null,
+        cil: this.normalizeText(row.CIL) || null,
+        eje: this.normalizeText(row.EJE) || null,
+      });
+    }
+
+    return headers.filter((item) => item.iord);
+  }
+
+  private async loadOpvNombre(
+    executor: SqlExecutor,
+    opv: string | null,
+  ): Promise<string | null> {
+    const key = this.normalizeText(opv);
+    if (!key) return null;
+    if (!(await this.tableExists(executor, 'dbo.PV_OPV'))) return null;
+
+    const colsSet = await this.loadTableColumns(executor, 'dbo.PV_OPV');
+    if (!colsSet.has('OPV')) return null;
+
+    let nameExpr = `LTRIM(RTRIM(ISNULL([OPV], '')))`;
+    if (colsSet.has('NOMB') || colsSet.has('APELP') || colsSet.has('APELM')) {
+      const parts: string[] = [];
+      if (colsSet.has('NOMB')) parts.push(`ISNULL([NOMB], '')`);
+      if (colsSet.has('APELP')) parts.push(`ISNULL([APELP], '')`);
+      if (colsSet.has('APELM')) parts.push(`ISNULL([APELM], '')`);
+      nameExpr = `LTRIM(RTRIM(CONCAT(${parts.join(", ' ', ")})))`;
+    } else if (colsSet.has('NOMBRE')) {
+      nameExpr = `LTRIM(RTRIM(ISNULL([NOMBRE], '')))`;
+    } else if (colsSet.has('NOM')) {
+      nameExpr = `LTRIM(RTRIM(ISNULL([NOM], '')))`;
+    }
+
+    const rows = await executor.query(
+      `
+      SELECT TOP 1
+        ${nameExpr} AS OPV_NOMBRE
+      FROM dbo.PV_OPV
+      WHERE LTRIM(RTRIM([OPV])) = @0
+      `,
+      [key],
+    );
+    return this.normalizeText((rows?.[0] ?? {})['OPV_NOMBRE']) || null;
+  }
+
+  private async loadClienteNombre(
+    executor: SqlExecutor,
+    clien: number | null,
+  ): Promise<string | null> {
+    const clientId = this.toNumber(clien);
+    if (clientId == null) return null;
+
+    const rows = await executor.query(
+      `
+      SELECT TOP 1
+        RazonSocialReceptor AS CLIENTE_NOMBRE
+      FROM dbo.FACT_CLIENT_SHP
+      WHERE IDC = @0
+      `,
+      [clientId],
+    );
+    return this.normalizeText((rows?.[0] ?? {})['CLIENTE_NOMBRE']) || null;
   }
 
   private toNumber(value: unknown) {
@@ -307,6 +702,7 @@ export class PvCotizacionesCierreService {
     user: JwtPayload,
     sucBody?: string,
     lockHeader = false,
+    validateEstado = true,
   ): Promise<CotizacionContext> {
     const lockHint = lockHeader ? ' WITH (UPDLOCK, HOLDLOCK, ROWLOCK)' : '';
     const folioRows = await executor.query(
@@ -342,7 +738,7 @@ export class PvCotizacionesCierreService {
     this.assertUserSucAccess(user, suc);
 
     const esta = this.normalizeText(folio.ESTA) || null;
-    if (this.isEstadoBloqueado(esta)) {
+    if (validateEstado && this.isEstadoBloqueado(esta)) {
       throw new ConflictException(
         `La cotizacion ${idfol} ya no permite cierre en estado ${esta}`,
       );
@@ -465,6 +861,9 @@ export class PvCotizacionesCierreService {
       TRANSFERENCIA: 'TRANSFERENCIA',
       TRANSFER: 'TRANSFERENCIA',
       SPEI: 'TRANSFERENCIA',
+      DEPOSITO3RO: 'DEPOSITO 3RO',
+      DEPOSITO3ROS: 'DEPOSITO 3RO',
+      DEPOSITOTERCERO: 'DEPOSITO 3RO',
       CREDITO: 'CREDITO',
       DEUDOR: 'DEUDOR',
     };
@@ -496,11 +895,15 @@ export class PvCotizacionesCierreService {
     });
   }
 
-  private async loadExistingForms(executor: SqlExecutor, idfol: string) {
+  private async loadExistingForms(
+    executor: SqlExecutor,
+    idfol: string,
+    tableName: string,
+  ) {
     const rows = await executor.query(
       `
       SELECT FORM
-      FROM dbo.PV_CTR_FOL_FORM
+      FROM ${tableName}
       WHERE IDFOL = @0
       `,
       [idfol],
@@ -514,6 +917,7 @@ export class PvCotizacionesCierreService {
     executor: SqlExecutor;
     idfol: string;
     tipotran: TipoTran;
+    rqfac: boolean;
     total: number;
     clien: number | null;
     formas: FormaNormalizada[];
@@ -564,17 +968,31 @@ export class PvCotizacionesCierreService {
         );
       }
     }
+    if (input.rqfac && Number(input.clien ?? 0) === 1) {
+      throw new BadRequestException(
+        'Para cierre con factura el cliente no puede ser 1',
+      );
+    }
 
     for (const forma of formas) {
-      if (
-        PvCotizacionesCierreService.FORMAS_AUT_REQUERIDA.has(forma.form) &&
-        !this.normalizeText(forma.aut ?? '')
-      ) {
+      const aut = this.normalizeText(forma.aut ?? '');
+      const requiereAut = PvCotizacionesCierreService.FORMAS_AUT_REQUERIDA.has(
+        forma.form,
+      );
+
+      if (requiereAut && !aut) {
         throw new BadRequestException(
           `La forma ${forma.form} requiere autorizacion/referencia`,
         );
       }
+      if (!requiereAut && aut) {
+        throw new BadRequestException(
+          `La forma ${forma.form} no permite autorizacion/referencia`,
+        );
+      }
     }
+
+    await this.validateReferenciasCierre(input.executor, input.idfol, formas);
 
     const sumPagos = this.round2(
       formas.reduce((acc, item) => acc + (this.toNumber(item.impp) ?? 0), 0),
@@ -587,22 +1005,9 @@ export class PvCotizacionesCierreService {
         `El total pagado (${sumPagos.toFixed(2)}) es menor al total (${total.toFixed(2)})`,
       );
     }
-
-    const hasEfectivo = formas.some((item) => item.form === 'EFECTIVO');
-    if (sumPagos > total + epsilon && !hasEfectivo) {
+    if (sumPagos > total + epsilon) {
       throw new BadRequestException(
-        'Solo EFECTIVO puede exceder el total para generar cambio',
-      );
-    }
-
-    const sumNoEfectivo = this.round2(
-      formas
-        .filter((item) => item.form !== 'EFECTIVO')
-        .reduce((acc, item) => acc + item.impp, 0),
-    );
-    if (sumNoEfectivo > total + epsilon) {
-      throw new BadRequestException(
-        'Solo EFECTIVO puede cubrir el excedente sobre el total',
+        `El total pagado (${sumPagos.toFixed(2)}) no puede exceder el total (${total.toFixed(2)})`,
       );
     }
 
@@ -623,11 +1028,174 @@ export class PvCotizacionesCierreService {
     return { sumPagos, cambio };
   }
 
+  private async validateReferenciasCierre(
+    executor: SqlExecutor,
+    idfol: string,
+    formas: FormaNormalizada[],
+  ) {
+    const referencias = await executor.query(
+      `
+      SELECT
+        IDREF,
+        IDFOL,
+        TIPO,
+        ESTATUS,
+        RfcEmisor,
+        IMPT
+      FROM dbo.REF_DETALLE
+      WHERE IDFOL = @0
+      `,
+      [idfol],
+    );
+
+    const byIdref = new Map<
+      string,
+      {
+        idref: string;
+        idfol: string;
+        tipo: string;
+        estatus: string;
+        rfcEmisor: string;
+        impt: number | null;
+      }
+    >();
+
+    for (const row of referencias ?? []) {
+      const record = row as Record<string, unknown>;
+      const idref = this.normalizeText(record.IDREF);
+      if (!idref) continue;
+      byIdref.set(this.normalizeUpper(idref), {
+        idref,
+        idfol: this.normalizeText(record.IDFOL),
+        tipo: this.normalizeUpper(record.TIPO),
+        estatus: this.normalizeUpper(record.ESTATUS),
+        rfcEmisor: this.normalizeText(
+          record.RfcEmisor ?? record.RFCEMISOR ?? '',
+        ),
+        impt: this.toNumber(record.IMPT),
+      });
+    }
+
+    const formasConRef = formas.filter((item) =>
+      PvCotizacionesCierreService.FORMAS_AUT_REQUERIDA.has(item.form),
+    );
+
+    const usedRefs = new Set<string>();
+    for (const forma of formasConRef) {
+      const aut = this.normalizeText(forma.aut ?? '');
+      if (!aut) {
+        throw new BadRequestException(
+          `Debe asignar referencia para ${forma.form}`,
+        );
+      }
+
+      const key = this.normalizeUpper(aut);
+      if (usedRefs.has(key)) {
+        throw new BadRequestException(
+          'No se puede reutilizar la misma referencia en multiples formas de pago',
+        );
+      }
+      usedRefs.add(key);
+
+      const ref = byIdref.get(key);
+      if (!ref) {
+        throw new BadRequestException(
+          `Debe asignar referencia para ${forma.form}`,
+        );
+      }
+      if (this.normalizeUpper(ref.idfol) !== this.normalizeUpper(idfol)) {
+        throw new BadRequestException(
+          `Debe asignar referencia para ${forma.form}`,
+        );
+      }
+      if (ref.estatus !== 'PROCESADO') {
+        throw new BadRequestException(
+          `Debe asignar referencia para ${forma.form}`,
+        );
+      }
+      if (ref.tipo && ref.tipo !== this.normalizeUpper(forma.form)) {
+        throw new BadRequestException(
+          `La referencia ${ref.idref} no corresponde a ${forma.form}`,
+        );
+      }
+      if (!ref.rfcEmisor || !(ref.impt != null && Number.isFinite(ref.impt))) {
+        throw new BadRequestException(
+          `La referencia ${ref.idref} no tiene datos completos`,
+        );
+      }
+    }
+
+    const unusedRefs = Array.from(byIdref.values()).filter((ref) => {
+      if (!ref.idref) return false;
+      const status = this.normalizeUpper(ref.estatus);
+      const isOpenRef = status === 'CAPTURADO' || status === 'PROCESADO';
+      return isOpenRef && !usedRefs.has(this.normalizeUpper(ref.idref));
+    });
+    if (unusedRefs.length > 0) {
+      throw new BadRequestException(
+        'Existen referencias ligadas al folio sin utilizar; elimine las referencias no usadas antes de finalizar',
+      );
+    }
+  }
+
+  private async insertFormaPago(
+    executor: SqlExecutor,
+    input: {
+      tableName: string;
+      tableColumns: Set<string>;
+      idf: string;
+      idfol: string;
+      forma: FormaNormalizada;
+      impc: number;
+    },
+  ) {
+    const cols = ['IDF', 'IDFOL', 'FCN', 'FORM', 'IMPP', 'IMPC'];
+    const values = ['@0', '@1', 'GETDATE()', '@2', '@3', '@4'];
+    const params: unknown[] = [
+      input.idf,
+      input.idfol,
+      input.forma.form,
+      input.forma.impp,
+      input.impc,
+    ];
+
+    if (input.tableColumns.has('IMPA')) {
+      cols.push('IMPA');
+      values.push(`@${params.length}`);
+      params.push(0);
+    }
+
+    if (input.tableColumns.has('IMPD')) {
+      cols.push('IMPD');
+      values.push(`@${params.length}`);
+      params.push(input.forma.impp);
+    }
+
+    if (input.tableColumns.has('AUT')) {
+      cols.push('AUT');
+      values.push(`@${params.length}`);
+      params.push(this.resolveAutForForma(input.forma, input.idfol));
+    }
+
+    await executor.query(
+      `
+      INSERT INTO ${input.tableName} (
+        ${cols.join(',\n        ')}
+      )
+      VALUES (
+        ${values.join(',\n        ')}
+      )
+      `,
+      params,
+    );
+  }
+
   private async updateFolioHeader(
     executor: SqlExecutor,
     input: {
       idfol: string;
       total: number;
+      tipotran: TipoTran;
       rqfac: boolean;
       opv: string | null;
     },
@@ -654,6 +1222,12 @@ export class PvCotizacionesCierreService {
       index += 1;
     }
 
+    if (columns.has('AUT')) {
+      sets.push(`AUT = @${index}`);
+      params.push(input.tipotran);
+      index += 1;
+    }
+
     if (columns.has('FCNM')) {
       sets.push('FCNM = GETDATE()');
     }
@@ -671,6 +1245,281 @@ export class PvCotizacionesCierreService {
       WHERE IDFOL = @0
     `;
     await executor.query(sql, params);
+  }
+
+  private async updateOrdenesStatus(executor: SqlExecutor, idfol: string) {
+    await executor.query(
+      `
+      UPDATE dbo.PV_CTR_ORDS
+      SET ESTATUS = @1
+      WHERE IDFOL = @0
+      `,
+      [idfol, 2],
+    );
+  }
+
+  private async resolveFolioFormTable(executor: SqlExecutor) {
+    const hasSvr = await this.tableExists(executor, 'dbo.PV_CTR_FOL_FORM_SVR');
+    if (hasSvr) return 'dbo.PV_CTR_FOL_FORM_SVR';
+    const hasLegacy = await this.tableExists(executor, 'dbo.PV_CTR_FOL_FORM');
+    if (hasLegacy) return 'dbo.PV_CTR_FOL_FORM';
+    throw new NotFoundException(
+      'No existe tabla de formas de pago (PV_CTR_FOL_FORM_SVR/PV_CTR_FOL_FORM)',
+    );
+  }
+
+  private resolveAutForForma(forma: FormaNormalizada, idfol: string) {
+    if (PvCotizacionesCierreService.FORMAS_CARGO_CTRL_CTAS.has(forma.form)) {
+      return idfol;
+    }
+    return forma.aut;
+  }
+
+  private async registerCargoCreditoDeudor(
+    executor: SqlExecutor,
+    input: RegistroCargoInput,
+  ) {
+    const clientId = Number(input.clien ?? NaN);
+    if (!Number.isFinite(clientId) || clientId <= 0) {
+      throw new BadRequestException(
+        `No se puede aplicar forma ${input.form} sin cliente valido`,
+      );
+    }
+
+    const ndoc = await this.generateNextNdoc(executor);
+    await this.insertDatCtrDocIfAvailable(executor, {
+      ndoc,
+      idfol: input.idfol,
+      clientId,
+      form: input.form,
+      impp: input.impp,
+      suc: input.suc,
+      opv: input.opv,
+    });
+    await this.insertDatCtrlCtasCargo(executor, {
+      ndoc,
+      idfol: input.idfol,
+      clientId,
+      form: input.form,
+      impp: input.impp,
+      suc: input.suc,
+      opv: input.opv,
+    });
+  }
+
+  private async generateNextNdoc(executor: SqlExecutor) {
+    const lockRows = await executor.query(
+      `
+      DECLARE @res int;
+      EXEC @res = sp_getapplock
+        @Resource = @0,
+        @LockMode = 'Exclusive',
+        @LockOwner = 'Transaction',
+        @LockTimeout = 15000;
+      SELECT @res AS LOCK_RESULT;
+      `,
+      [PvCotizacionesCierreService.NDOC_LOCK_RESOURCE],
+    );
+    const lockResult = this.toInt((lockRows?.[0] ?? {})['LOCK_RESULT']) ?? -1;
+    if (lockResult < 0) {
+      throw new ConflictException(
+        'No se pudo asegurar consecutivo NDOC para cierre',
+      );
+    }
+
+    let maxNum = PvCotizacionesCierreService.NDOC_BASE;
+    const maxCtrlRows = await executor.query(
+      `
+      SELECT MAX(
+        TRY_CAST(SUBSTRING(LTRIM(RTRIM(NDOC)), 2, 50) AS bigint)
+      ) AS MAX_NUM
+      FROM dbo.DAT_CTRL_CTAS WITH (UPDLOCK, HOLDLOCK)
+      WHERE LTRIM(RTRIM(ISNULL(NDOC, ''))) LIKE 'N%'
+      `,
+    );
+    const maxCtrl = this.toNumber((maxCtrlRows?.[0] ?? {})['MAX_NUM']);
+    if (maxCtrl != null) {
+      maxNum = Math.max(maxNum, Math.trunc(maxCtrl));
+    }
+
+    if (await this.tableExists(executor, 'dbo.DAT_CTR_DOC')) {
+      const maxDocRows = await executor.query(
+        `
+        SELECT MAX(
+          TRY_CAST(SUBSTRING(LTRIM(RTRIM(NDOC)), 2, 50) AS bigint)
+        ) AS MAX_NUM
+        FROM dbo.DAT_CTR_DOC WITH (UPDLOCK, HOLDLOCK)
+        WHERE LTRIM(RTRIM(ISNULL(NDOC, ''))) LIKE 'N%'
+        `,
+      );
+      const maxDoc = this.toNumber((maxDocRows?.[0] ?? {})['MAX_NUM']);
+      if (maxDoc != null) {
+        maxNum = Math.max(maxNum, Math.trunc(maxDoc));
+      }
+    }
+
+    const next = Math.max(maxNum, PvCotizacionesCierreService.NDOC_BASE) + 1;
+    return `N${next}`;
+  }
+
+  private async insertDatCtrDocIfAvailable(
+    executor: SqlExecutor,
+    input: {
+      ndoc: string;
+      idfol: string;
+      clientId: number;
+      form: string;
+      impp: number;
+      suc: string;
+      opv: string | null;
+    },
+  ) {
+    const tableName = 'dbo.DAT_CTR_DOC';
+    if (!(await this.tableExists(executor, tableName))) {
+      return;
+    }
+
+    const colsSet = await this.loadTableColumns(executor, tableName);
+    if (!colsSet.has('NDOC')) {
+      return;
+    }
+
+    const cols: string[] = ['NDOC'];
+    const values: string[] = ['@0'];
+    const params: unknown[] = [input.ndoc];
+
+    const pushValue = (column: string, value: unknown) => {
+      cols.push(column);
+      values.push(`@${params.length}`);
+      params.push(value);
+    };
+    const pushNow = (column: string) => {
+      cols.push(column);
+      values.push('GETDATE()');
+    };
+    const classColumn = colsSet.has('CMOV')
+      ? 'CMOV'
+      : colsSet.has('CLSD')
+        ? 'CLSD'
+        : null;
+    const rtxt = `Cargo ${input.form.toLowerCase()} ticket ${input.idfol}`;
+
+    if (colsSet.has('IDFOL')) pushValue('IDFOL', input.idfol);
+    if (colsSet.has('CLIENT')) pushValue('CLIENT', input.clientId);
+    if (colsSet.has('CTA')) {
+      pushValue('CTA', PvCotizacionesCierreService.CTA_CTRL_CTAS_CARGO_CREDITO);
+    }
+    if (classColumn != null) {
+      pushValue(
+        classColumn,
+        PvCotizacionesCierreService.CMOV_CARGO_CREDITO_CLIENTE,
+      );
+    }
+    if (colsSet.has('IMPT')) pushValue('IMPT', this.round2(input.impp));
+    if (colsSet.has('SUC')) pushValue('SUC', input.suc);
+    if (colsSet.has('OPV')) pushValue('OPV', input.opv);
+    if (colsSet.has('IDOPV')) pushValue('IDOPV', input.opv);
+    if (colsSet.has('TIPO')) pushValue('TIPO', input.form);
+    if (colsSet.has('RTXT')) pushValue('RTXT', rtxt);
+    if (colsSet.has('FCND')) pushNow('FCND');
+    if (colsSet.has('FCN')) pushNow('FCN');
+    if (colsSet.has('FCNR')) pushNow('FCNR');
+    if (colsSet.has('FECHA')) pushNow('FECHA');
+
+    await executor.query(
+      `
+      INSERT INTO ${tableName} (
+        ${cols.map((c) => `[${c}]`).join(',\n        ')}
+      )
+      VALUES (
+        ${values.join(',\n        ')}
+      )
+      `,
+      params,
+    );
+  }
+
+  private async insertDatCtrlCtasCargo(
+    executor: SqlExecutor,
+    input: {
+      ndoc: string;
+      idfol: string;
+      clientId: number;
+      form: string;
+      impp: number;
+      suc: string;
+      opv: string | null;
+    },
+  ) {
+    const tableName = 'dbo.DAT_CTRL_CTAS';
+    const colsSet = await this.loadTableColumns(executor, tableName);
+    const classColumn = colsSet.has('CMOV')
+      ? 'CMOV'
+      : colsSet.has('CLSD')
+        ? 'CLSD'
+        : null;
+    const required = ['CTA', 'CLIENT', 'IMPT', 'NDOC', 'IDFOL'];
+    const missing = required.filter((col) => !colsSet.has(col));
+    if (missing.length > 0 || classColumn == null) {
+      if (classColumn == null) {
+        missing.push('CMOV/CLSD');
+      }
+      throw new ConflictException(
+        `DAT_CTRL_CTAS no contiene columnas requeridas: ${missing.join(', ')}`,
+      );
+    }
+
+    const cols: string[] = ['CTA', 'CLIENT', classColumn, 'IMPT', 'NDOC'];
+    const values: string[] = ['@0', '@1', '@2', '@3', '@4'];
+    const params: unknown[] = [
+      PvCotizacionesCierreService.CTA_CTRL_CTAS_CARGO_CREDITO,
+      input.clientId,
+      PvCotizacionesCierreService.CMOV_CARGO_CREDITO_CLIENTE,
+      -this.round2(input.impp),
+      input.ndoc,
+    ];
+
+    const pushValue = (column: string, value: unknown) => {
+      cols.push(column);
+      values.push(`@${params.length}`);
+      params.push(value);
+    };
+    const pushNow = (column: string) => {
+      cols.push(column);
+      values.push('GETDATE()');
+    };
+    const rtxt = `Cargo ${input.form.toLowerCase()} ticket ${input.idfol}`;
+
+    if (colsSet.has('IDFOL')) pushValue('IDFOL', input.idfol);
+    if (colsSet.has('SUC')) pushValue('SUC', input.suc);
+    if (colsSet.has('OPV')) pushValue('OPV', input.opv);
+    if (colsSet.has('IDOPV')) pushValue('IDOPV', input.opv);
+    if (colsSet.has('TIPO')) pushValue('TIPO', input.form);
+    if (colsSet.has('RTXT')) pushValue('RTXT', rtxt);
+    if (colsSet.has('FCND')) pushNow('FCND');
+    if (colsSet.has('FCN')) pushNow('FCN');
+    if (colsSet.has('FCNR')) pushNow('FCNR');
+    if (colsSet.has('FECHA')) pushNow('FECHA');
+
+    await executor.query(
+      `
+      INSERT INTO ${tableName} (
+        ${cols.map((c) => `[${c}]`).join(',\n        ')}
+      )
+      VALUES (
+        ${values.join(',\n        ')}
+      )
+      `,
+      params,
+    );
+  }
+
+  private async tableExists(executor: SqlExecutor, tableName: string) {
+    const rows = await executor.query(
+      `SELECT CASE WHEN OBJECT_ID(@0) IS NULL THEN 0 ELSE 1 END AS EXISTS_TABLE`,
+      [tableName],
+    );
+    return (this.toInt((rows?.[0] ?? {})['EXISTS_TABLE']) ?? 0) === 1;
   }
 
   private async loadTableColumns(executor: SqlExecutor, tableName: string) {
@@ -712,7 +1561,7 @@ export class PvCotizacionesCierreService {
     const clientId = Number(clien);
     const clientRows = await executor.query(
       `
-      SELECT TOP 1 I_CRED
+      SELECT TOP 1 L_CRED
       FROM dbo.FACT_CLIENT_SHP
       WHERE IDC = @0
       `,
@@ -723,7 +1572,7 @@ export class PvCotizacionesCierreService {
     }
 
     const clientRow = (clientRows[0] ?? {}) as Record<string, unknown>;
-    const limite = this.round2(this.toNumber(clientRow.I_CRED) ?? 0);
+    const limite = this.round2(this.toNumber(clientRow.L_CRED) ?? 0);
     if (limite <= 0) {
       throw new BadRequestException(
         `Cliente ${clientId} no tiene limite de credito disponible`,
@@ -746,54 +1595,188 @@ export class PvCotizacionesCierreService {
     executor: SqlExecutor,
     clientId: number,
   ) {
-    try {
-      const tableRows = await executor.query(
-        `
-        SELECT OBJECT_ID('dbo.DAT_CTRL_CTAS') AS ID_OBJ
-        `,
-      );
-      const tableId = this.toInt((tableRows?.[0] ?? {})['ID_OBJ']);
-      if (!tableId) return 0;
+    const rows = await executor.query(
+      `
+      SELECT SUM(ABS(ISNULL(IMPT, 0))) AS SALDO_VIGENTE
+      FROM dbo.DAT_CTRL_CTAS
+      WHERE CTA = @0
+        AND CLIENT = @1
+      `,
+      [PvCotizacionesCierreService.CTA_CTRL_CTAS_CARGO_CREDITO, clientId],
+    );
+    const saldo = this.toNumber((rows?.[0] ?? {})['SALDO_VIGENTE']) ?? 0;
+    return this.round2(Math.max(saldo, 0));
+  }
 
-      const colsRows = await executor.query(
-        `
-        SELECT name
-        FROM sys.columns
-        WHERE object_id = OBJECT_ID('dbo.DAT_CTRL_CTAS')
-        `,
-      );
-      const cols = new Set(
-        (colsRows ?? []).map((row) =>
-          this.normalizeUpper((row as Record<string, unknown>).name),
-        ),
-      );
+  private async procedureExists(executor: SqlExecutor, procedureName: string) {
+    const rows = await executor.query(
+      `
+      SELECT CASE
+        WHEN OBJECT_ID(@0, 'P') IS NULL THEN 0
+        ELSE 1
+      END AS HAS_PROCEDURE
+      `,
+      [procedureName],
+    );
+    return (this.toInt((rows?.[0] ?? {})['HAS_PROCEDURE']) ?? 0) === 1;
+  }
 
-      const pick = (candidates: string[]) =>
-        candidates.find((name) => cols.has(this.normalizeUpper(name))) ?? null;
-
-      const clientCol = pick(['IDC', 'CLIEN', 'IDCLIENTE', 'NCLIENTE']);
-      const amountCol = pick(['SALDO', 'IMPD', 'DEBE', 'IMP_PEND', 'IMPT']);
-      const statusCol = pick(['ESTA', 'ESTATUS', 'STATUS']);
-
-      if (!clientCol || !amountCol) return 0;
-
-      const statusFilter = statusCol
-        ? ` AND UPPER(LTRIM(RTRIM(ISNULL([${statusCol}], '')))) NOT IN ('PAGADO', 'CERRADO', 'CANCELADO', 'CANCELADA')`
-        : '';
-
-      const sql = `
-        SELECT SUM(ISNULL([${amountCol}], 0)) AS SALDO_VIGENTE
-        FROM dbo.DAT_CTRL_CTAS
-        WHERE [${clientCol}] = @0
-        ${statusFilter}
-      `;
-      const rows = await executor.query(sql, [clientId]);
-      const saldo = this.toNumber((rows?.[0] ?? {})['SALDO_VIGENTE']) ?? 0;
-      return this.round2(Math.max(saldo, 0));
-    } catch (_) {
-      // Fallback defensivo: si no se puede resolver saldo en DAT_CTRL_CTAS,
-      // se asume 0 para no romper cierre en entornos sin esa estructura.
-      return 0;
+  private getRowValue(
+    row: Record<string, unknown>,
+    key: string,
+  ): unknown | undefined {
+    const target = key.toUpperCase();
+    for (const [rawKey, value] of Object.entries(row)) {
+      if (rawKey.toUpperCase() === target) return value;
     }
+    return undefined;
+  }
+
+  private async executeCloseWithStoredProcedure(
+    executor: SqlExecutor,
+    input: {
+      idfol: string;
+      suc: string | null;
+      tipotran: TipoTran;
+      rqfac: boolean;
+      opv: string | null;
+      formas: FormaNormalizada[];
+    },
+  ) {
+    const formasJson = JSON.stringify(
+      input.formas.map((item) => ({
+        form: item.form,
+        impp: this.round2(item.impp),
+        aut: item.aut,
+      })),
+    );
+
+    const rows = await executor.query(
+      `
+      EXEC dbo.sp_pv_cotizacion_cerrar
+        @IDFOL = @0,
+        @SUC = @1,
+        @TIPOTRAN = @2,
+        @RQFAC = @3,
+        @IDOPV = @4,
+        @FORMAS_JSON = @5
+      `,
+      [
+        input.idfol,
+        input.suc,
+        input.tipotran,
+        input.rqfac ? 1 : 0,
+        input.opv,
+        formasJson,
+      ],
+    );
+
+    const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+    if (!row) {
+      throw new ConflictException(
+        'El SP de cierre no devolvio resultado de totales',
+      );
+    }
+
+    const tipotranRes =
+      this.normalizeTipoTran(
+        String(this.getRowValue(row, 'tipotran') ?? input.tipotran),
+      ) ?? input.tipotran;
+    const rqfacValue = this.toInt(this.getRowValue(row, 'rqfac'));
+    const rqfacRes =
+      rqfacValue == null
+        ? Boolean(this.getRowValue(row, 'rqfac') ?? input.rqfac)
+        : rqfacValue === 1;
+    const totalBase = this.round2(
+      this.toNumber(this.getRowValue(row, 'totalBase')) ?? 0,
+    );
+    const subtotal = this.round2(
+      this.toNumber(this.getRowValue(row, 'subtotal')) ?? 0,
+    );
+    const iva = this.round2(this.toNumber(this.getRowValue(row, 'iva')) ?? 0);
+    const total = this.round2(
+      this.toNumber(this.getRowValue(row, 'total')) ?? 0,
+    );
+    const ivaIntegrado = this.toInt(this.getRowValue(row, 'ivaIntegrado'));
+    const sumPagos = this.round2(
+      this.toNumber(this.getRowValue(row, 'sumPagos')) ?? 0,
+    );
+    const cambio = this.round2(
+      this.toNumber(this.getRowValue(row, 'cambio')) ?? 0,
+    );
+    const idfolRes = this.normalizeText(this.getRowValue(row, 'idfol') ?? '') ||
+      input.idfol;
+
+    return {
+      ok: true,
+      idfol: idfolRes,
+      tipotran: tipotranRes,
+      rqfac: tipotranRes === 'CA' ? false : rqfacRes,
+      totales: {
+        subtotal,
+        iva,
+        total,
+        totalBase,
+        ivaIntegrado,
+        tipotran: tipotranRes,
+        rqfac: tipotranRes === 'CA' ? false : rqfacRes,
+      },
+      sumPagos,
+      cambio,
+    };
+  }
+
+  private mapCloseError(error: unknown) {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ConflictException ||
+      error instanceof ForbiddenException ||
+      error instanceof NotFoundException
+    ) {
+      return error;
+    }
+
+    if (error instanceof QueryFailedError) {
+      const message = this.extractSqlMessage(error);
+      if (message) {
+        if (message.includes('No existe dbo.sp_pv_cotizacion_cerrar')) {
+          return new ConflictException(message);
+        }
+        if (message.includes('La cotizacion no existe')) {
+          return new NotFoundException(message);
+        }
+        return new BadRequestException(message);
+      }
+      return new BadRequestException('Error SQL al cerrar cotizacion');
+    }
+
+    const message = this.normalizeText((error as any)?.message ?? '');
+    if (
+      message.toUpperCase().includes('TRANSACTION HAS BEEN ABORTED') ||
+      (error as any)?.code === 'EABORT'
+    ) {
+      return new BadRequestException(
+        'La transaccion fue abortada por SQL Server. Revise las validaciones del cierre e intente nuevamente.',
+      );
+    }
+
+    if (error instanceof Error) return error;
+    return new InternalServerErrorException('Error interno al cerrar cotizacion');
+  }
+
+  private extractSqlMessage(error: QueryFailedError) {
+    const errAny = error as any;
+    const driver = errAny?.driverError ?? errAny?.originalError ?? null;
+    const driverMessage = this.normalizeText(driver?.message ?? '');
+    const baseMessage = this.normalizeText(errAny?.message ?? '');
+
+    const raw = driverMessage || baseMessage;
+    if (!raw) return '';
+
+    return raw
+      .replace(/^QueryFailedError:\s*/i, '')
+      .replace(/^RequestError:\s*/i, '')
+      .replace(/\s+\bat line \d+\b/i, '')
+      .trim();
   }
 }

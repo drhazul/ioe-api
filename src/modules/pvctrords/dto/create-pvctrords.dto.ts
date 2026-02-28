@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsInt, IsNumber, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsDateString,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Length,
+} from 'class-validator';
 
 export class CreatePvCtrOrdsDto {
   @ApiProperty()
@@ -37,7 +44,7 @@ export class CreatePvCtrOrdsDto {
 
   @ApiPropertyOptional({ type: Number })
   @IsOptional()
-  @IsInt()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   CLIEN?: number;
 
   @ApiPropertyOptional()
@@ -64,7 +71,7 @@ export class CreatePvCtrOrdsDto {
 
   @ApiPropertyOptional({ type: Number })
   @IsOptional()
-  @IsInt()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   ESTATUS?: number;
 
   @ApiPropertyOptional({ type: Number })

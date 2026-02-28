@@ -31,7 +31,15 @@ export class AuditInterceptor implements NestInterceptor {
 
     // Sanitizar body (evitar passwords/tokens)
     const body = { ...(req.body ?? {}) };
-    for (const k of ['password', 'PASSWORD', 'PASSWORD_HASH', 'refreshToken', 'accessToken']) {
+    for (const k of [
+      'password',
+      'PASSWORD',
+      'PASSWORD_HASH',
+      'AUTH_PASSWORD',
+      'authPassword',
+      'refreshToken',
+      'accessToken',
+    ]) {
       if (k in body) body[k] = '[REDACTED]';
     }
 

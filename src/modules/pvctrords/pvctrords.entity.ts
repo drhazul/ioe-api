@@ -20,7 +20,7 @@ export class PvCtrOrdsEntity {
   @Column({ name: 'FCNM', type: 'datetime', nullable: true })
   FCNM: Date | null;
 
-  @Column({ name: 'CLIEN', type: 'int', nullable: true })
+  @Column({ name: 'CLIEN', type: 'float', nullable: true })
   CLIEN: number | null;
 
   @Column({ name: 'MAT', type: 'nvarchar', length: 255, nullable: true })

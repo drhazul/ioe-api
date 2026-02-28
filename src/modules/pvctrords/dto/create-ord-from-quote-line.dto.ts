@@ -2,7 +2,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
-  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -44,7 +43,7 @@ export class CreateOrdFromQuoteLineDto {
 
   @ApiProperty({ type: Number })
   @Type(() => Number)
-  @IsInt()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   clien: number;
 
   @ApiProperty()

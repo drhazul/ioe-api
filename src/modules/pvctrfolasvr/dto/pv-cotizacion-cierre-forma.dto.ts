@@ -12,7 +12,7 @@ export class PvCotizacionCierreFormaDto {
   @ApiProperty({
     example: 'EFECTIVO',
     description:
-      'Forma de pago: EFECTIVO, TARJETA, CHEQUE, TRANSFERENCIA, CREDITO, DEUDOR',
+      'Forma de pago: EFECTIVO, TARJETA, CHEQUE, TRANSFERENCIA, DEPOSITO 3RO, CREDITO, DEUDOR',
   })
   @Transform(({ value }) => toTrimmedString(value))
   @IsString()
@@ -27,7 +27,7 @@ export class PvCotizacionCierreFormaDto {
 
   @ApiPropertyOptional({
     description:
-      'Autorizacion o referencia requerida para TARJETA/CHEQUE/TRANSFERENCIA',
+      'Autorizacion o referencia requerida para TARJETA/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO',
   })
   @Transform(({ value }) => toOptionalTrimmedString(value))
   @IsOptional()

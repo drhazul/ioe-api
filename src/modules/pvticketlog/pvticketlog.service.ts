@@ -1,15 +1,28 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import * as bcrypt from 'bcrypt';
+import { DataSource, QueryFailedError, Repository } from 'typeorm';
+import { AuditService } from '../audit/audit.service';
+import type { JwtPayload } from '../auth/jwt.strategy';
 import { PvTicketLogEntity } from './pvticketlog.entity';
 import { CreatePvTicketLogDto } from './dto/create-pvticketlog.dto';
 import { UpdatePvTicketLogDto } from './dto/update-pvticketlog.dto';
+import { AuthorizePvTicketLogPriceDto } from './dto/authorize-pvticketlog-price.dto';
+import { UpdatePvTicketLogPriceDto } from './dto/update-pvticketlog-price.dto';
 
 @Injectable()
 export class PvTicketLogService {
   constructor(
     @InjectRepository(PvTicketLogEntity)
     private readonly repo: Repository<PvTicketLogEntity>,
+    private readonly dataSource: DataSource,
+    private readonly audit: AuditService,
   ) {}
 
   findAll(idfol?: string) {
@@ -55,6 +68,12 @@ export class PvTicketLogService {
   async update(id: string, dto: UpdatePvTicketLogDto) {
     const row = await this.findOne(id);
 
+    if (dto.PVTA !== undefined) {
+      throw new ForbiddenException(
+        'Para actualizar PVTA usa el endpoint de autorizacion /pvticketlog/:id/precio',
+      );
+    }
+
     const partial: Partial<PvTicketLogEntity> = {};
     if (dto.IDFOL !== undefined) partial.IDFOL = dto.IDFOL ?? null;
     if (dto.UPC !== undefined) partial.UPC = dto.UPC ?? null;
@@ -75,6 +94,127 @@ export class PvTicketLogService {
     return this.repo.save(updated);
   }
 
+  async updatePrice(
+    id: string,
+    dto: UpdatePvTicketLogPriceDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
+    const row = await this.findOne(id);
+
+    const nextPvtaRaw = Number(dto.PVTA);
+    if (!Number.isFinite(nextPvtaRaw) || nextPvtaRaw <= 0) {
+      throw new BadRequestException('PVTA inválido');
+    }
+    const nextPvta = this.round2(nextPvtaRaw);
+
+    const qty = Number(row.CTD ?? NaN);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new BadRequestException(
+        'No se puede actualizar precio sin cantidad válida en el renglón',
+      );
+    }
+
+    const oldPvta = this.round2(Number(row.PVTA ?? 0));
+    const oldPvtat = this.round2(Number(row.PVTAT ?? qty * oldPvta));
+    const nextPvtat = this.round2(qty * nextPvta);
+
+    const requester = await this.loadUserWithRole(user.sub);
+    const requesterRoleCode = this.normalizeUpper(
+      requester?.roleCode ?? '',
+    );
+    const isSupervisor = requesterRoleCode === 'SUPERPV';
+
+    let authorizedBy = requester;
+    let authMode = 'SELF_SUPERVISOR';
+
+    if (!isSupervisor) {
+      const authPassword = (dto.AUTH_PASSWORD ?? '').trim();
+      if (!authPassword) {
+        throw new ForbiddenException(
+          'Se requiere autorización de usuario SUPERPV',
+        );
+      }
+      const superPvAuthorizer = await this.findSuperPvAuthorizerByPassword(
+        authPassword,
+      );
+      if (!superPvAuthorizer) {
+        throw new ForbiddenException('Autorización SUPERPV inválida');
+      }
+      authorizedBy = superPvAuthorizer;
+      authMode = 'SUPERPV_PASSWORD';
+    }
+
+    row.PVTA = nextPvta;
+    row.PVTAT = nextPvtat;
+    row.UPDATED_AT = new Date();
+    const updated = await this.repo.save(row);
+
+    const metadata = {
+      idfol: row.IDFOL,
+      art: row.ART,
+      upc: row.UPC,
+      ctd: qty,
+      pvtaBefore: oldPvta,
+      pvtaAfter: nextPvta,
+      pvtatBefore: oldPvtat,
+      pvtatAfter: nextPvtat,
+      requestedBy: {
+        idUsuario: Number(user.sub ?? 0) || null,
+        username: requester?.username ?? user.username ?? null,
+        roleId: Number(user.roleId ?? 0) || null,
+        roleCode: requesterRoleCode || null,
+      },
+      authorization: {
+        mode: authMode,
+        authorizedBy: authorizedBy
+          ? {
+              idUsuario: authorizedBy.idUsuario,
+              username: authorizedBy.username,
+              roleCode: authorizedBy.roleCode,
+            }
+          : null,
+      },
+    };
+
+    const auditUserId =
+      authorizedBy?.idUsuario ?? (Number(user.sub ?? 0) || null);
+
+    await this.audit.log({
+      IDUSUARIO: auditUserId,
+      ACTION: 'PVTA_OVERRIDE',
+      MODULO: 'punto-venta',
+      ENTIDAD: 'PV_TICKET_LOG',
+      ENTIDAD_ID: id,
+      SUC: user.suc ?? requester?.suc ?? null,
+      METADATA_JSON: JSON.stringify(metadata),
+      IP: ip,
+    });
+
+    return updated;
+  }
+
+  async authorizePrice(dto: AuthorizePvTicketLogPriceDto, _user: JwtPayload) {
+    const authPassword = (dto.AUTH_PASSWORD ?? '').trim();
+    if (!authPassword) {
+      throw new ForbiddenException('Se requiere autorización de usuario SUPERPV');
+    }
+
+    const superPvAuthorizer = await this.findSuperPvAuthorizerByPassword(
+      authPassword,
+    );
+    if (!superPvAuthorizer) {
+      throw new ForbiddenException('Autorización SUPERPV inválida');
+    }
+
+    return {
+      authorized: true,
+      idUsuario: superPvAuthorizer.idUsuario,
+      username: superPvAuthorizer.username,
+      roleCode: superPvAuthorizer.roleCode,
+    };
+  }
+
   async remove(id: string) {
     const row = await this.findOne(id);
     try {
@@ -86,5 +226,72 @@ export class PvTicketLogService {
       throw err;
     }
     return { deleted: true, ID: id };
+  }
+
+  private normalizeUpper(value: unknown) {
+    return String(value ?? '').trim().toUpperCase();
+  }
+
+  private round2(value: number) {
+    return Math.round(value * 100) / 100;
+  }
+
+  private async loadUserWithRole(idUsuario: number) {
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        u.IDUSUARIO,
+        u.USERNAME,
+        u.SUC,
+        r.CODIGO AS ROLE_CODE
+      FROM dbo.USUARIO u
+      LEFT JOIN dbo.ROL r ON r.IDROL = u.IDROL
+      WHERE u.IDUSUARIO = @0
+      `,
+      [idUsuario],
+    );
+
+    const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+    if (!row) return null;
+    return {
+      idUsuario: Number(row.IDUSUARIO ?? 0) || 0,
+      username: String(row.USERNAME ?? '').trim(),
+      suc: String(row.SUC ?? '').trim() || null,
+      roleCode: String(row.ROLE_CODE ?? '').trim(),
+    };
+  }
+
+  private async findSuperPvAuthorizerByPassword(password: string) {
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        u.IDUSUARIO,
+        u.USERNAME,
+        u.PASSWORD_HASH,
+        u.SUC,
+        r.CODIGO AS ROLE_CODE
+      FROM dbo.USUARIO u
+      INNER JOIN dbo.ROL r ON r.IDROL = u.IDROL
+      WHERE u.ESTATUS = 'ACTIVO'
+        AND r.ACTIVO = 1
+        AND UPPER(r.CODIGO) = 'SUPERPV'
+      `,
+    );
+
+    for (const raw of rows ?? []) {
+      const row = raw as Record<string, unknown>;
+      const hash = String(row.PASSWORD_HASH ?? '');
+      if (!hash) continue;
+      const valid = await bcrypt.compare(password, hash);
+      if (!valid) continue;
+      return {
+        idUsuario: Number(row.IDUSUARIO ?? 0) || 0,
+        username: String(row.USERNAME ?? '').trim(),
+        suc: String(row.SUC ?? '').trim() || null,
+        roleCode: String(row.ROLE_CODE ?? '').trim(),
+      };
+    }
+
+    return null;
   }
 }

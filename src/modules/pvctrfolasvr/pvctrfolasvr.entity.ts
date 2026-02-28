@@ -5,7 +5,7 @@ export class PvCtrFolAsvrEntity {
   @PrimaryColumn({ name: 'IDFOL', type: 'nvarchar', length: 255 })
   IDFOL: string;
 
-  @Column({ name: 'CLIEN', type: 'int', nullable: true })
+  @Column({ name: 'CLIEN', type: 'float', nullable: true })
   CLIEN: number | null;
 
   @Column({ name: 'DOC', type: 'nvarchar', length: 255, nullable: true })

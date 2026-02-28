@@ -23,6 +23,7 @@ import { Datmb51Module } from './modules/datmb51/datmb51.module';
 import { Datmb52Module } from './modules/datmb52/datmb52.module';
 import { DatCmovModule } from './modules/dat-cmov/dat-cmov.module';
 import { DatAlmacenModule } from './modules/dat-almacen/dat-almacen.module';
+import { DatFormModule } from './modules/dat-form/dat-form.module';
 import { DatContCapModule } from './modules/datcontcap/datcontcap.module';
 import { DatDetSvrModule } from './modules/datdetsvr/datdetsvr.module';
 import { DatContCtrlModule } from './modules/datcontctrl/datcontctrl.module';
@@ -51,6 +52,8 @@ import { UsrModSucModule } from './modules/usr-mod-suc/usr-mod-suc.module';
 import { AltaMasivaModule } from './modules/articulos/alta-masiva/alta-masiva.module';
 import { CatCtasModule } from './modules/cat-ctas/cat-ctas.module';
 import { CtrlCtasModule } from './modules/ctrl-ctas/ctrl-ctas.module';
+import { RelojChecadorModule } from './modules/reloj-checador/reloj-checador.module';
+import { PvDevolucionesModule } from './modules/pv-devoluciones/pv-devoluciones.module';
 
 @Module({
   imports: [
@@ -76,6 +79,7 @@ import { CtrlCtasModule } from './modules/ctrl-ctas/ctrl-ctas.module';
     Datmb52Module,
     DatCmovModule,
     DatAlmacenModule,
+    DatFormModule,
     DatContCapModule,
     DatDetSvrModule,
     DatContCtrlModule,
@@ -104,6 +108,8 @@ import { CtrlCtasModule } from './modules/ctrl-ctas/ctrl-ctas.module';
     AltaMasivaModule,
     CatCtasModule,
     CtrlCtasModule,
+    RelojChecadorModule,
+    PvDevolucionesModule,
   ],
   providers: [
     {

@@ -28,6 +28,11 @@ export class PvCotizacionesCierreController {
     return this.service.preview(idfol, dto, user);
   }
 
+  @Get(':idfol/cierre/print-preview')
+  printPreview(@Param('idfol') idfol: string, @CurrentUser() user: JwtPayload) {
+    return this.service.getPrintPreview(idfol, user);
+  }
+
   @Post(':idfol/cierre')
   close(
     @Param('idfol') idfol: string,
