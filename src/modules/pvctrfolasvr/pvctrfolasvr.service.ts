@@ -5,6 +5,7 @@ import { PvCtrFolAsvrEntity } from './pvctrfolasvr.entity';
 import { CreatePvCtrFolAsvrDto } from './dto/create-pvctrfolasvr.dto';
 import { UpdatePvCtrFolAsvrDto } from './dto/update-pvctrfolasvr.dto';
 import { CreatePvCtrFolAsvrAutoDto } from './dto/create-pvctrfolasvr-auto.dto';
+import { ListPvCtrFolAsvrQueryDto } from './dto/list-pvctrfolasvr-query.dto';
 import type { JwtPayload } from '../auth/jwt.strategy';
 
 @Injectable()
@@ -15,8 +16,80 @@ export class PvCtrFolAsvrService {
     private readonly dataSource: DataSource,
   ) {}
 
-  findAll() {
-    return this.repo.find({ order: { IDFOL: 'ASC' } });
+  async findAll(query: ListPvCtrFolAsvrQueryDto, user: JwtPayload) {
+    const isAdmin = this.isAdmin(user);
+    const actorSuc = this.normalizeText(user?.suc ?? '');
+    const actorOpv = this.normalizeText(user?.username ?? '');
+
+    const requestedSuc = this.normalizeText(query?.suc ?? '');
+    const requestedOpv = this.normalizeText(query?.opv ?? '');
+    const search = this.normalizeText(query?.search ?? '');
+
+    const hasRequestedFilters =
+      requestedSuc.length > 0 || requestedOpv.length > 0 || search.length > 0;
+    if (!hasRequestedFilters) {
+      return this.repo.find({ order: { IDFOL: 'ASC' } });
+    }
+
+    const suc = requestedSuc || (isAdmin ? '' : actorSuc);
+    const opv = requestedOpv || (isAdmin ? '' : actorOpv);
+
+    if (
+      !isAdmin &&
+      requestedSuc &&
+      this.normalizeUpper(requestedSuc) !== this.normalizeUpper(actorSuc)
+    ) {
+      throw new ForbiddenException('No autorizado para consultar otra sucursal');
+    }
+    if (
+      !isAdmin &&
+      requestedOpv &&
+      this.normalizeUpper(requestedOpv) !== this.normalizeUpper(actorOpv)
+    ) {
+      throw new ForbiddenException('No autorizado para consultar cotizaciones de otro OPV');
+    }
+
+    if (!isAdmin && suc.length == 0) {
+      throw new BadRequestException('No se pudo resolver sucursal para consultar cotizaciones');
+    }
+    if (!isAdmin && opv.length == 0) {
+      throw new BadRequestException('No se pudo resolver OPV para consultar cotizaciones');
+    }
+
+    const params: unknown[] = [];
+    const where: string[] = ["a.ESTA IN ('PENDIENTE','PAGADO','EDITANDO')"];
+
+    if (suc.length > 0) {
+      where.push(`a.SUC = @${params.length}`);
+      params.push(suc);
+    }
+
+    if (opv.length > 0) {
+      where.push(`(a.OPV = @${params.length} OR a.OPVM = @${params.length})`);
+      params.push(opv);
+    }
+
+    if (search.length > 0) {
+      const like = `%${search}%`;
+      where.push(
+        `(a.IDFOL LIKE @${params.length} OR ISNULL(c.RazonSocialReceptor, '') LIKE @${params.length} OR CAST(ISNULL(a.CLIEN, 0) AS NVARCHAR(50)) LIKE @${params.length})`,
+      );
+      params.push(like);
+    }
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        a.*
+      FROM dbo.PV_CTR_FOL_ASVR a
+      LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
+      WHERE ${where.join(' AND ')}
+      ORDER BY a.FCN DESC, a.TRA DESC;
+      `,
+      params,
+    );
+
+    return rows ?? [];
   }
 
   async findOne(idfol: string) {
@@ -140,5 +213,17 @@ export class PvCtrFolAsvrService {
       throw err;
     }
     return { deleted: true, IDFOL: idfol };
+  }
+
+  private isAdmin(user: JwtPayload) {
+    return Number(user?.roleId ?? 0) === 1;
+  }
+
+  private normalizeText(value: string) {
+    return String(value ?? '').trim();
+  }
+
+  private normalizeUpper(value: string) {
+    return this.normalizeText(value).toUpperCase();
   }
 }

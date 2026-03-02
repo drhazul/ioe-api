@@ -94,6 +94,8 @@ Opcionales:
 - Nota de integracion UI: el filtro `!= 0` inicia activo por defecto en la pantalla de resumen (comportamiento solo frontend).
 - Punto de venta:
 - `/factclientshp`, `/pvctrfolasvr`, `/pvctrfolform`, `/pvctrords`, `/pvctrordsdet`, `/pvticketlog`, `/refdetalle`
+- `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','PAGADO','EDITANDO')` y busqueda por folio/cliente.
+- compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
 - `/pv/devoluciones/*` (flujo de devoluciones de cotizaciones/ventas/apartados)
 - `/pv/refdetalle` (flujo PV de creacion/asignacion/eliminacion de referencias por folio)
 - `/pvticketlog/:id/precio` (edicion de `PVTA` con control de autorizacion `SUPERPV`)

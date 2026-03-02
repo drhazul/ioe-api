@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -6,6 +6,7 @@ import { PvCtrFolAsvrService } from './pvctrfolasvr.service';
 import { CreatePvCtrFolAsvrDto } from './dto/create-pvctrfolasvr.dto';
 import { UpdatePvCtrFolAsvrDto } from './dto/update-pvctrfolasvr.dto';
 import { CreatePvCtrFolAsvrAutoDto } from './dto/create-pvctrfolasvr-auto.dto';
+import { ListPvCtrFolAsvrQueryDto } from './dto/list-pvctrfolasvr-query.dto';
 import type { JwtPayload } from '../auth/jwt.strategy';
 
 @ApiTags('pvctrfolasvr')
@@ -16,8 +17,11 @@ export class PvCtrFolAsvrController {
   constructor(private readonly service: PvCtrFolAsvrService) {}
 
   @Get()
-  findAll() {
-    return this.service.findAll();
+  findAll(
+    @Query() query: ListPvCtrFolAsvrQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.findAll(query, user);
   }
 
   @Get(':idfol')
