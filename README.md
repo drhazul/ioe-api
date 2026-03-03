@@ -83,6 +83,8 @@ Opcionales:
 - `/usr-mod-suc`
 - Catalogos:
 - `/datart`, `/datcatreg`, `/datcatuso`, `/dat-almacen`, `/dat-cmov`
+- Trazabilidad frontend (2026-03): `ioe_app` incorporó impresión de etiquetas en catálogo `DAT_ART` con selección local por renglón/filtrados y vista previa de impresión (PDF `76mm x 56mm`, una etiqueta por artículo), sin endpoints nuevos en API.
+- Regla EAN13 aplicada en app: de `UPC` se toman los 12 dígitos derechos (si excede) y se calcula dígito verificador para render de código de barras.
 - `/dat-form` (CRUD de catalogo de formas de pago sobre `DAT_FORM`)
 - Inventarios:
 - `/conteos/*`, `/capturas/*`, `/datcontctrl`, `/datdetsvr`, `/datmb51`, `/dat-mb51/search`, `/dat-mb52/resumen`
@@ -97,6 +99,7 @@ Opcionales:
 - `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','PAGADO','EDITANDO')` y busqueda por folio/cliente.
 - compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
 - `/pv/devoluciones/*` (flujo de devoluciones de cotizaciones/ventas/apartados)
+- `/ps/*` (modulo Pago de Servicios: panel, ticket, referencias, pago y terminar)
 - `/pv/refdetalle` (flujo PV de creacion/asignacion/eliminacion de referencias por folio)
 - `/pvticketlog/:id/precio` (edicion de `PVTA` con control de autorizacion `SUPERPV`)
 - `/dat-form` (GET lista, POST crea; por defecto lista solo activas, opcional `includeInactive=true`)
@@ -104,6 +107,45 @@ Opcionales:
 - `/dat-form/:idform/estado` (PATCH para activar/inactivar forma de pago)
 - Clasificadores:
 - `/jrqdepa`, `/jrqsubd`, `/jrqclas`, `/jrqscla`, `/jrqscla2`, `/jrqguia`
+
+## Pago de Servicios PS (nuevo flujo 2026-03)
+
+- Modulo NestJS:
+- `src/modules/pagos-servicios/pagos-servicios.module.ts`
+- `src/modules/pagos-servicios/pagos-servicios.controller.ts`
+- `src/modules/pagos-servicios/pagos-servicios.service.ts`
+- `src/modules/pagos-servicios/dto/*`
+- Script SQL:
+- `sql/sp_ps_module_create.sql` (crea/siembra `PV_DAT_PS`, `DAT_REF_GTO` y SPs `sp_ps_*`).
+- Endpoints:
+- `GET /ps/folios?suc&esta&search`
+- `POST /ps/folios`
+- `GET /ps/folios/:idFol`
+- `PUT /ps/folios/:idFol/cliente`
+- `POST /ps/folios/:idFol/ticket/service`
+- `GET /ps/clientes/:client/adeudos`
+- `POST /ps/folios/:idFol/ticket/reference/folio`
+- `POST /ps/folios/:idFol/ticket/reference/gasto`
+- `PUT /ps/folios/:idFol/ticket/pvta`
+- `DELETE /ps/folios/:idFol/ticket/line`
+- `POST /ps/folios/:idFol/procesar`
+- `POST /ps/folios/:idFol/formas-pago`
+- `DELETE /ps/folios/:idFol/formas-pago/:idF`
+- `GET /ps/folios/:idFol/formas-pago/summary`
+- `POST /ps/folios/:idFol/terminar`
+- Reglas de negocio relevantes:
+- el ticket PS se inserta con `PVTA` nulo y su captura se realiza después de asignar referencia.
+- el cliente del folio PS se cambia por `PUT /ps/folios/:idFol/cliente` y se bloquea cuando el ticket (`PV_TICKET_LOG`) ya tiene líneas.
+- edición de PVTA valida referencia (`ORD`) y límite de adeudo usando la misma fuente de adeudos de cliente (`DAT_CTRL_CTAS` + relación de `DAT_CAT_CTAS`), considerando el saldo disponible de la referencia en el ticket.
+- al procesar tipo `DG/DC`, el folio guarda `IMPT` negativo y crea forma `EFECTIVO` en `PV_CTR_FOL_FORMTMP`.
+- todas las mutaciones del módulo registran `AUDIT_LOG` (`MODULO='pago-servicios'`).
+- el script PS crea/siembra `PV_TIPO_ESTA` (incluye `RELACION` para AD/AP/CR/DC/DG) para evitar error `Invalid object name 'dbo.PV_TIPO_ESTA'.`
+- `sp_ps_adeudos_cliente` usa `@CLIENT BIGINT` y compara `TRY_CONVERT(BIGINT, CLIENT)` para IDs grandes de cliente.
+- `sp_ps_adeudos_cliente` prioriza `DAT_CTRL_CTAS` agregando por `SUC/CLIENT/CTA/IDFOL` (alineado al query histórico de Access); `adeudosRes` se deriva de ese conjunto con `ADEUDO < 0`.
+- Referencia de error corregido (2026-03-03): `POST /ps/folios/:idFol/ticket/reference/folio` devolvía `400` con `No existe DAT_CTRL_CTAS_RES para validar referencia de folio`; `sp_ps_ticket_set_reference_folio` se depuró para tomar/validar la referencia desde `DAT_CTRL_CTAS` del cliente seleccionado.
+- Regla vigente (2026-03-03): `POST /ps/folios/:idFol/ticket/reference/folio` bloquea referencias duplicadas en el mismo ticket (`La referencia ya fue asignada a otra linea del ticket`).
+- Tabla ticket oficial PS: `PV_TICKET_LOG` (no `PV_TICKET_LOG_SVR`).
+- Referencia de error corregido (2026-03-03): `GET /ps/folios/:idFol` devolvía `400` con `Invalid object name 'dbo.PV_TICKET_LOG_SVR'.`; se normalizó SQL/SPs/auditoría para usar `dbo.PV_TICKET_LOG`.
 
 ## Alta de cotizacion desde panel (integracion app)
 
@@ -125,7 +167,8 @@ Opcionales:
 - Reglas:
 - usuario con rol `SUPERPV` puede autorizar su propio cambio de precio.
 - usuario sin rol `SUPERPV` debe proveer contraseña valida de un usuario activo `SUPERPV`.
-- Si la contraseña no coincide con un `SUPERPV` activo, backend rechaza la autorización y el frontend no debe abrir captura de importe.
+- Compatibilidad frontend (2026-03): el cliente puede intentar `PATCH /pvticketlog/:id/precio` sin `AUTH_PASSWORD`; si el solicitante no es `SUPERPV`, backend responde `403` para solicitar autorización y reintentar con `AUTH_PASSWORD`.
+- Si la contraseña no coincide con un `SUPERPV` activo, backend rechaza la autorización y no se aplica el cambio de precio.
 - Seguridad:
 - `PATCH /pvticketlog/:id` no acepta cambios de `PVTA`; cualquier cambio de precio debe pasar por `PATCH /pvticketlog/:id/precio`.
 - Actualizaciones:

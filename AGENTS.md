@@ -49,6 +49,8 @@
 ### Catalogos y maestros operativos
 
 - `datart`: `DAT_ART` (`SUC`, `ART`, `UPC`, `DES`, `TIPO`, `PVTA`, `CTOP`, `DEPA`, `SUBD`, `CLAS`, `SCLA`, `SCLA2`, ...).
+- Trazabilidad app (2026-03): `ioe_app` agregó impresión de etiquetas en `datart_page.dart` (selección local por renglón/filtrados + impresión masiva), usando endpoints existentes de `datart` sin cambios de contrato API.
+- Regla EAN13 en app: para `UPC` mayor a 12 dígitos, frontend usa los 12 dígitos derechos para calcular dígito verificador y renderizar código de barras en etiqueta `76mm x 56mm` (una página por artículo).
 - `datcatreg`: `DAT_CAT_REG` (`C_REGIMENFISCAL`, `DESCRIPCION`).
 - `datcatuso`: `DAT_CAT_USO` (`USOCFDI`, `DESCRIPCION`).
 - `dat-almacen`: `DAT_ALMACEN` (`ALMACEN`, `DESCRIPCION`, `ACTIVO`, `FCNR`).
@@ -80,6 +82,13 @@
 - `pvctrordsdet`: `PV_CTR_ORDS_DET` (`IORDP`, `IORD`, `ART`, `JOB`, `ESF`, `CIL`, `EJE`).
 - `pvticketlog`: `PV_TICKET_LOG` (`ID`, `IDFOL`, `ART`, `UPC`, `CTD`, `PVTA`, `CTDD`, `CTDDF`, `UPDATED_AT`).
 - `pv-devoluciones`: flujo transaccional de devoluciones PV sobre `PV_CTR_FOL_ASVR`, `PV_TICKET_LOG`, `PV_CTR_FOL_FORM(_SVR)`, `PV_CTR_ORDS`, `FAC_SVR_SHAP`, `FACT_IDFOLDEV`, `DAT_CTRL_CTAS`.
+- `pagos-servicios`: flujo PS sobre `PV_CTR_FOL_ASVR`, `PV_TICKET_LOG`, `PV_CTR_FOL_FORMTMP`, `DAT_CTRL_CTAS`, `PV_DAT_PS`, `DAT_REF_GTO`.
+- PS cliente: endpoint `PUT /ps/folios/:idFol/cliente` actualiza `PV_CTR_FOL_ASVR.CLIEN`; regla bloqueante cuando ya existen líneas en `PV_TICKET_LOG`.
+- Script PS crea/siembra `PV_TIPO_ESTA` con `RELACION` (AD/AP/CR/DC/DG -> PAD/PAP/PCR/PDC/PDG) para normalizar `AUT` al agregar primer servicio.
+- Adeudos PS soporta clientes grandes: `sp_ps_adeudos_cliente(@CLIENT BIGINT)` con filtros `TRY_CONVERT(BIGINT, CLIENT)`.
+- Adeudos PS fuente primaria (2026-03): `sp_ps_adeudos_cliente` consulta `DAT_CTRL_CTAS` agrupando por `SUC/CLIENT/CTA/IDFOL`; `ADEUDOS_RES_JSON` se forma desde ese agregado con `ADEUDO < 0`.
+- Referencia folio PS (2026-03): `sp_ps_ticket_set_reference_folio` quedó depurado para no depender de `DAT_CTRL_CTAS_RES`; valida/toma el folio de referencia directamente desde `DAT_CTRL_CTAS` del cliente activo del folio PS.
+- Referencia folio PS (2026-03): se mantiene bloqueo de referencia repetida entre líneas del mismo ticket (`ORD` ya usado en otra línea => rechazo).
 - `refdetalle`: `REF_DETALLE` (`IDREF`, `SUC`, `FCNR`, `FCND`, `OPV`, `IDFOL`, `IDC`, `RFCEMISOR`, `TIPO`, `IMPT`, `ESTATUS`).
 - `pv/refdetalle`: flujo PV para crear/asignar/eliminar referencia ligada a folio, sobre `REF_DETALLE`.
 - `PATCH /pvticketlog/:id/precio`: actualiza `PVTA/PVTAT` con autorizacion de supervisor PV.
@@ -87,6 +96,7 @@
 - Regla autorizacion precio PV:
 - si solicitante tiene rol `SUPERPV`, autoriza directo.
 - si no es `SUPERPV`, exige `AUTH_PASSWORD` valida de cualquier usuario activo con rol `SUPERPV`.
+- Compatibilidad frontend (2026-03): el cliente puede intentar `PATCH /pvticketlog/:id/precio` sin `AUTH_PASSWORD`; si backend detecta no-`SUPERPV`, responde `403` para que frontend solicite autorizacion y reintente con `AUTH_PASSWORD`.
 - `PATCH /pvticketlog/:id` (update general) ya no permite editar `PVTA`; para precio se exige el endpoint dedicado.
 - Auditoria especifica: al cambiar precio se registra `ACTION='PVTA_OVERRIDE'` en `AUDIT_LOG` con metadata de antes/despues y autorizador.
 - `AUDIT_LOG.IDUSUARIO` en `PVTA_OVERRIDE` corresponde al `IDUSUARIO` del `SUPERPV` que autorizo (o al mismo usuario cuando el solicitante ya es `SUPERPV`).
@@ -189,6 +199,36 @@
 - `POST /pv/devoluciones/:idfolDev/pago/preview`
 - `POST /pv/devoluciones/:idfolDev/pago/finalizar`
 - `GET /pv/devoluciones/:idfolDev/print-preview`
+
+## Pago de Servicios PS (implementado 2026-03)
+
+- Modulo backend:
+- `src/modules/pagos-servicios/pagos-servicios.module.ts`
+- `src/modules/pagos-servicios/pagos-servicios.controller.ts`
+- `src/modules/pagos-servicios/pagos-servicios.service.ts`
+- `src/modules/pagos-servicios/dto/*`
+- Script SQL:
+- `sql/sp_ps_module_create.sql` (catalogos `PV_DAT_PS` y `DAT_REF_GTO` + SPs `sp_ps_*`).
+- Endpoints:
+- `GET /ps/folios?suc&esta&search`
+- `POST /ps/folios`
+- `GET /ps/folios/:idFol`
+- `POST /ps/folios/:idFol/ticket/service`
+- `GET /ps/clientes/:client/adeudos`
+- `POST /ps/folios/:idFol/ticket/reference/folio`
+- `POST /ps/folios/:idFol/ticket/reference/gasto`
+- `PUT /ps/folios/:idFol/ticket/pvta`
+- `DELETE /ps/folios/:idFol/ticket/line`
+- `POST /ps/folios/:idFol/procesar`
+- `POST /ps/folios/:idFol/formas-pago`
+- `DELETE /ps/folios/:idFol/formas-pago/:idF`
+- `GET /ps/folios/:idFol/formas-pago/summary`
+- `POST /ps/folios/:idFol/terminar`
+- Reglas clave:
+- el ticket PS inserta servicio con `PVTA=NULL` y requiere captura posterior.
+- `PUT /ps/folios/:idFol/ticket/pvta` valida `ORD` y tope de adeudo con la fuente `DAT_CTRL_CTAS` (misma consulta base de adeudos PS), aplicando saldo disponible por referencia en el ticket.
+- para `DG/DC`, `sp_ps_procesar` guarda `IMPT` negativo y registra forma `EFECTIVO` en `PV_CTR_FOL_FORMTMP`.
+- todas las mutaciones PS registran `AUDIT_LOG` en API (`MODULO='pago-servicios'`).
 - Validaciones núcleo:
 - alta exige contraseña de supervisor `SUPERPV` (401 contraseña inválida, 403 usuario sin rol supervisor).
 - folio origen debe tener `AUT in ('VF','CA','APF')`.

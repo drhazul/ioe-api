@@ -54,6 +54,7 @@ import { CatCtasModule } from './modules/cat-ctas/cat-ctas.module';
 import { CtrlCtasModule } from './modules/ctrl-ctas/ctrl-ctas.module';
 import { RelojChecadorModule } from './modules/reloj-checador/reloj-checador.module';
 import { PvDevolucionesModule } from './modules/pv-devoluciones/pv-devoluciones.module';
+import { PagosServiciosModule } from './modules/pagos-servicios/pagos-servicios.module';
 
 @Module({
   imports: [
@@ -110,6 +111,7 @@ import { PvDevolucionesModule } from './modules/pv-devoluciones/pv-devoluciones.
     CtrlCtasModule,
     RelojChecadorModule,
     PvDevolucionesModule,
+    PagosServiciosModule,
   ],
   providers: [
     {
