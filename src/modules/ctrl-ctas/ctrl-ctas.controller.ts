@@ -49,17 +49,26 @@ export class CtrlCtasController {
   }
 
   @Post('consulta/resumen-cliente')
-  resumenCliente(@CurrentUser() user: JwtPayload, @Body() dto: CtrlCtasConsultaDto) {
+  resumenCliente(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CtrlCtasConsultaDto,
+  ) {
     return this.service.resumenCliente(dto, user);
   }
 
   @Post('consulta/resumen-transaccion')
-  resumenTransaccion(@CurrentUser() user: JwtPayload, @Body() dto: CtrlCtasConsultaDto) {
+  resumenTransaccion(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CtrlCtasConsultaDto,
+  ) {
     return this.service.resumenTransaccion(dto, user);
   }
 
   @Post('consulta/detalle')
-  detalleTransaccion(@CurrentUser() user: JwtPayload, @Body() dto: CtrlCtasConsultaDto) {
+  detalleTransaccion(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CtrlCtasConsultaDto,
+  ) {
     return this.service.detalleTransaccion(dto, user);
   }
 }

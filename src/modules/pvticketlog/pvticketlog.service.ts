@@ -120,9 +120,7 @@ export class PvTicketLogService {
     const nextPvtat = this.round2(qty * nextPvta);
 
     const requester = await this.loadUserWithRole(user.sub);
-    const requesterRoleCode = this.normalizeUpper(
-      requester?.roleCode ?? '',
-    );
+    const requesterRoleCode = this.normalizeUpper(requester?.roleCode ?? '');
     const isSupervisor = requesterRoleCode === 'SUPERPV';
 
     let authorizedBy = requester;
@@ -135,9 +133,8 @@ export class PvTicketLogService {
           'Se requiere autorización de usuario SUPERPV',
         );
       }
-      const superPvAuthorizer = await this.findSuperPvAuthorizerByPassword(
-        authPassword,
-      );
+      const superPvAuthorizer =
+        await this.findSuperPvAuthorizerByPassword(authPassword);
       if (!superPvAuthorizer) {
         throw new ForbiddenException('Autorización SUPERPV inválida');
       }
@@ -197,12 +194,13 @@ export class PvTicketLogService {
   async authorizePrice(dto: AuthorizePvTicketLogPriceDto, _user: JwtPayload) {
     const authPassword = (dto.AUTH_PASSWORD ?? '').trim();
     if (!authPassword) {
-      throw new ForbiddenException('Se requiere autorización de usuario SUPERPV');
+      throw new ForbiddenException(
+        'Se requiere autorización de usuario SUPERPV',
+      );
     }
 
-    const superPvAuthorizer = await this.findSuperPvAuthorizerByPassword(
-      authPassword,
-    );
+    const superPvAuthorizer =
+      await this.findSuperPvAuthorizerByPassword(authPassword);
     if (!superPvAuthorizer) {
       throw new ForbiddenException('Autorización SUPERPV inválida');
     }
@@ -221,7 +219,9 @@ export class PvTicketLogService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar PV_TICKET_LOG ${id} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar PV_TICKET_LOG ${id} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }
@@ -229,7 +229,9 @@ export class PvTicketLogService {
   }
 
   private normalizeUpper(value: unknown) {
-    return String(value ?? '').trim().toUpperCase();
+    return String(value ?? '')
+      .trim()
+      .toUpperCase();
   }
 
   private round2(value: number) {

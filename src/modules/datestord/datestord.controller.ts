@@ -50,4 +50,3 @@ export class DatEstOrdController {
     return this.service.remove(id);
   }
 }
-

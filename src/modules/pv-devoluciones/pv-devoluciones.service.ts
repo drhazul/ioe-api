@@ -135,13 +135,17 @@ export class PvDevolucionesService {
     const requestedSuc = this.normalizeText(query.suc);
     const suc = requestedSuc || userSuc;
     if (!suc) {
-      throw new BadRequestException('Debe indicar sucursal para listar devoluciones');
+      throw new BadRequestException(
+        'Debe indicar sucursal para listar devoluciones',
+      );
     }
     this.assertUserSucAccess(user, suc);
 
     const actorOpv = this.resolveOpv(user);
     if (!actorOpv) {
-      throw new BadRequestException('No se pudo resolver OPV para listar devoluciones');
+      throw new BadRequestException(
+        'No se pudo resolver OPV para listar devoluciones',
+      );
     }
     const requestedOpv = this.normalizeText(query.opv);
     const opv = requestedOpv || actorOpv;
@@ -150,7 +154,9 @@ export class PvDevolucionesService {
       requestedOpv &&
       this.normalizeUpper(requestedOpv) !== this.normalizeUpper(actorOpv)
     ) {
-      throw new ForbiddenException('No autorizado para consultar devoluciones de otro OPV');
+      throw new ForbiddenException(
+        'No autorizado para consultar devoluciones de otro OPV',
+      );
     }
 
     const search = this.normalizeText(query.search);
@@ -195,7 +201,9 @@ export class PvDevolucionesService {
 
     const opvActor = this.resolveOpv(user);
     if (!opvActor) {
-      throw new BadRequestException('No se pudo resolver OPV del usuario actual');
+      throw new BadRequestException(
+        'No se pudo resolver OPV del usuario actual',
+      );
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -206,7 +214,10 @@ export class PvDevolucionesService {
       await this.ensureStagingTable(queryRunner);
       await this.ensureFacturacionTable(queryRunner);
 
-      const supervisor = await this.validateSupervisor(authPassword, queryRunner);
+      const supervisor = await this.validateSupervisor(
+        authPassword,
+        queryRunner,
+      );
       const original = await this.loadFolio(queryRunner, idfolOrig, true);
       this.assertFolioOriginalDevolvible(original);
       this.assertUserSucAccess(user, original.suc);
@@ -313,7 +324,11 @@ export class PvDevolucionesService {
 
     try {
       await this.ensureStagingTable(queryRunner);
-      const context = await this.loadDevolucionContext(queryRunner, idfolDev, true);
+      const context = await this.loadDevolucionContext(
+        queryRunner,
+        idfolDev,
+        true,
+      );
       this.assertUserSucAccess(user, context.suc);
       this.assertDevolucionEditable(context);
 
@@ -363,7 +378,11 @@ export class PvDevolucionesService {
 
     try {
       await this.ensureStagingTable(queryRunner);
-      const context = await this.loadDevolucionContext(queryRunner, idfolDev, true);
+      const context = await this.loadDevolucionContext(
+        queryRunner,
+        idfolDev,
+        true,
+      );
       this.assertUserSucAccess(user, context.suc);
       this.assertDevolucionEditable(context);
 
@@ -377,7 +396,9 @@ export class PvDevolucionesService {
         [lineId, idfolDev],
       );
       if (!lineRows?.length) {
-        throw new NotFoundException(`La línea ${lineId} no existe en ${idfolDev}`);
+        throw new NotFoundException(
+          `La línea ${lineId} no existe en ${idfolDev}`,
+        );
       }
       const lineRaw = lineRows[0] as Record<string, unknown>;
       const difd = this.round4(this.toNumber(lineRaw.DIFD) ?? 0);
@@ -399,7 +420,11 @@ export class PvDevolucionesService {
       }
 
       if (nextCtdd != null && ord) {
-        const bloqueante = await this.isOrdBloqueante(queryRunner, context.idfolOrig, ord);
+        const bloqueante = await this.isOrdBloqueante(
+          queryRunner,
+          context.idfolOrig,
+          ord,
+        );
         if (bloqueante) {
           throw new ConflictException(
             `La ORD ${ord} está bloqueada (ESTSEGU >= ${this.ordBlockThreshold})`,
@@ -440,7 +465,11 @@ export class PvDevolucionesService {
 
     try {
       await this.ensureStagingTable(queryRunner);
-      const context = await this.loadDevolucionContext(queryRunner, idfolDev, true);
+      const context = await this.loadDevolucionContext(
+        queryRunner,
+        idfolDev,
+        true,
+      );
       this.assertUserSucAccess(user, context.suc);
       this.assertDevolucionEditable(context);
 
@@ -451,13 +480,20 @@ export class PvDevolucionesService {
       );
       const selected = lines.filter((line) => (line.ctdd ?? 0) > 0);
       if (!selected.length) {
-        throw new ConflictException('Debe capturar al menos una línea con CTDD > 0');
+        throw new ConflictException(
+          'Debe capturar al menos una línea con CTDD > 0',
+        );
       }
 
       await this.validateSelectedLines(queryRunner, context, selected);
       await this.regenerateTicketDevolucion(queryRunner, context.idfolDev);
-      const items = await this.loadTicketDevolucionLines(queryRunner, context.idfolDev);
-      const total = this.round2(items.reduce((acc, item) => acc + item.importe, 0));
+      const items = await this.loadTicketDevolucionLines(
+        queryRunner,
+        context.idfolDev,
+      );
+      const total = this.round2(
+        items.reduce((acc, item) => acc + item.importe, 0),
+      );
 
       await queryRunner.commitTransaction();
 
@@ -506,7 +542,10 @@ export class PvDevolucionesService {
       context.idfolDev,
       context.idfolOrig,
     );
-    const ivaIntegrado = await this.loadIvaIntegrado(this.dataSource, context.suc);
+    const ivaIntegrado = await this.loadIvaIntegrado(
+      this.dataSource,
+      context.suc,
+    );
     const totalBase = this.calculateTotalBase(lines);
     const rqfac =
       context.tipotran === 'CA'
@@ -559,7 +598,9 @@ export class PvDevolucionesService {
 
     const opvActor = this.resolveOpv(user);
     if (!opvActor) {
-      throw new BadRequestException('No se pudo resolver OPV del usuario actual');
+      throw new BadRequestException(
+        'No se pudo resolver OPV del usuario actual',
+      );
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -569,7 +610,11 @@ export class PvDevolucionesService {
     try {
       await this.ensureStagingTable(queryRunner);
       await this.ensureFacturacionTable(queryRunner);
-      const context = await this.loadDevolucionContext(queryRunner, idfolDev, true);
+      const context = await this.loadDevolucionContext(
+        queryRunner,
+        idfolDev,
+        true,
+      );
       this.assertUserSucAccess(user, context.suc);
       this.assertDevolucionEditable(context);
 
@@ -582,11 +627,16 @@ export class PvDevolucionesService {
       );
       const selected = lines.filter((line) => (line.ctdd ?? 0) > 0);
       if (!selected.length) {
-        throw new ConflictException('Debe capturar al menos una línea con CTDD > 0');
+        throw new ConflictException(
+          'Debe capturar al menos una línea con CTDD > 0',
+        );
       }
       await this.validateSelectedLines(queryRunner, context, selected);
 
-      const ivaIntegrado = await this.loadIvaIntegrado(queryRunner, context.suc);
+      const ivaIntegrado = await this.loadIvaIntegrado(
+        queryRunner,
+        context.suc,
+      );
       const rqfac =
         context.tipotran === 'CA'
           ? false
@@ -599,7 +649,9 @@ export class PvDevolucionesService {
         rqfac,
       });
 
-      const sumPagos = this.round2(formas.reduce((acc, item) => acc + item.impp, 0));
+      const sumPagos = this.round2(
+        formas.reduce((acc, item) => acc + item.impp, 0),
+      );
       const hasEfectivo = formas.some((item) => item.form === 'EFECTIVO');
 
       if (sumPagos + PvDevolucionesService.EPSILON < totals.total) {
@@ -607,7 +659,10 @@ export class PvDevolucionesService {
           `Las formas no cubren el total de la devolución (${totals.total.toFixed(2)})`,
         );
       }
-      if (!hasEfectivo && sumPagos - totals.total > PvDevolucionesService.EPSILON) {
+      if (
+        !hasEfectivo &&
+        sumPagos - totals.total > PvDevolucionesService.EPSILON
+      ) {
         throw new ConflictException(
           'El total de formas excede el total de devolución y no incluye EFECTIVO',
         );
@@ -642,7 +697,11 @@ export class PvDevolucionesService {
         opv: opvActor,
         formas,
       });
-      await this.updateOrdsAnuladas(queryRunner, context.idfolDev, context.idfolOrig);
+      await this.updateOrdsAnuladas(
+        queryRunner,
+        context.idfolDev,
+        context.idfolOrig,
+      );
       await this.updateDevolucionHeaderFinal(queryRunner, {
         idfolDev: context.idfolDev,
         autFinal,
@@ -695,7 +754,10 @@ export class PvDevolucionesService {
     const context = await this.loadDevolucionContext(this.dataSource, idfolDev);
     this.assertUserSucAccess(user, context.suc);
 
-    const ivaIntegrado = await this.loadIvaIntegrado(this.dataSource, context.suc);
+    const ivaIntegrado = await this.loadIvaIntegrado(
+      this.dataSource,
+      context.suc,
+    );
     const itemRows = await this.dataSource.query(
       `
       SELECT
@@ -741,7 +803,10 @@ export class PvDevolucionesService {
       rqfac: context.rqfacDefault,
     });
 
-    const formas = await this.loadFormasFolio(this.dataSource, context.idfolDev);
+    const formas = await this.loadFormasFolio(
+      this.dataSource,
+      context.idfolDev,
+    );
     const sumPagos = this.round2(
       formas.reduce((acc, item) => acc + Math.abs(item.impp), 0),
     );
@@ -930,13 +995,17 @@ export class PvDevolucionesService {
       if (matchedAny.roleCode === 'SUPERPV') {
         return matchedAny;
       }
-      throw new ForbiddenException('El usuario autenticado no es supervisor SUPERPV');
+      throw new ForbiddenException(
+        'El usuario autenticado no es supervisor SUPERPV',
+      );
     }
 
     if (!matchedAny) {
       throw new UnauthorizedException('Contraseña de supervisor inválida');
     }
-    throw new ForbiddenException('El usuario autenticado no es supervisor SUPERPV');
+    throw new ForbiddenException(
+      'El usuario autenticado no es supervisor SUPERPV',
+    );
   }
 
   private async loadFolio(
@@ -1011,7 +1080,9 @@ export class PvDevolucionesService {
     const row = rows[0] as Record<string, unknown>;
     const autDev = this.normalizeUpper(row.AUT_DEV);
     if (!PvDevolucionesService.DEV_AUT_ALL.has(autDev)) {
-      throw new NotFoundException(`El folio ${idfolDev} no es una devolución PV`);
+      throw new NotFoundException(
+        `El folio ${idfolDev} no es una devolución PV`,
+      );
     }
 
     const idfolOrig = this.normalizeText(row.IDFOL_ORIG);
@@ -1021,9 +1092,12 @@ export class PvDevolucionesService {
       );
     }
 
-    const suc = this.normalizeText(row.SUC_DEV) || this.normalizeText(row.SUC_ORIG);
+    const suc =
+      this.normalizeText(row.SUC_DEV) || this.normalizeText(row.SUC_ORIG);
     if (!suc) {
-      throw new BadRequestException(`La devolución ${idfolDev} no tiene SUC válida`);
+      throw new BadRequestException(
+        `La devolución ${idfolDev} no tiene SUC válida`,
+      );
     }
 
     const autOrig = this.normalizeUpper(row.AUT_ORIG);
@@ -1034,7 +1108,8 @@ export class PvDevolucionesService {
     }
 
     const tipotran: 'CA' | 'VF' = autOrig === 'CA' ? 'CA' : 'VF';
-    const reqfOrig = (this.toInt(row.REQF_ORIG) ?? this.toInt(row.REQF_DEV) ?? 0) === 1;
+    const reqfOrig =
+      (this.toInt(row.REQF_ORIG) ?? this.toInt(row.REQF_DEV) ?? 0) === 1;
 
     return {
       idfolDev: this.normalizeText(row.IDFOL_DEV),
@@ -1051,7 +1126,10 @@ export class PvDevolucionesService {
     };
   }
 
-  private async assertFolioNoFacturado(executor: SqlExecutor, idfolOrig: string) {
+  private async assertFolioNoFacturado(
+    executor: SqlExecutor,
+    idfolOrig: string,
+  ) {
     const rows = await executor.query(
       `
       SELECT TOP 1 ESTATUS
@@ -1122,7 +1200,13 @@ export class PvDevolucionesService {
         OPVM = NULL
       WHERE IDFOL = @0
       `,
-      [input.idfolDev, input.idfolOrig, input.clien, input.autDev, input.reqf ? 1 : 0],
+      [
+        input.idfolDev,
+        input.idfolOrig,
+        input.clien,
+        input.autDev,
+        input.reqf ? 1 : 0,
+      ],
     );
   }
 
@@ -1260,7 +1344,10 @@ export class PvDevolucionesService {
         ord,
         ctddf: this.round4(this.toNumber(row.CTDDF) ?? 0),
         difd: this.round4(this.toNumber(row.DIFD) ?? 0),
-        ctdd: this.toNumber(row.CTDD) == null ? null : this.round4(this.toNumber(row.CTDD) ?? 0),
+        ctdd:
+          this.toNumber(row.CTDD) == null
+            ? null
+            : this.round4(this.toNumber(row.CTDD) ?? 0),
         ordBloqueante: ordKey.length > 0 && blockedOrds.has(ordKey),
       } satisfies DevolucionLine;
     });
@@ -1330,7 +1417,10 @@ export class PvDevolucionesService {
     }
   }
 
-  private async loadTicketDevolucionLines(executor: SqlExecutor, idfolDev: string) {
+  private async loadTicketDevolucionLines(
+    executor: SqlExecutor,
+    idfolDev: string,
+  ) {
     const rows = await executor.query(
       `
       SELECT
@@ -1434,7 +1524,9 @@ export class PvDevolucionesService {
         `No existe configuración de sucursal en DAT_SUC para ${suc}`,
       );
     }
-    return this.toInt((rows[0] as Record<string, unknown>).IVA_INTEGRADO) ?? null;
+    return (
+      this.toInt((rows[0] as Record<string, unknown>).IVA_INTEGRADO) ?? null
+    );
   }
 
   private async suggestFormasPago(
@@ -1446,7 +1538,8 @@ export class PvDevolucionesService {
     if (total <= 0) return [];
 
     const formaOrig = await this.loadPrimaryFormaOriginal(executor, idfolOrig);
-    const sugeridas: Array<{ form: string; impp: number; aut: string | null }> = [];
+    const sugeridas: Array<{ form: string; impp: number; aut: string | null }> =
+      [];
 
     if (formaOrig === 'CREDITO' || formaOrig === 'DEUDOR') {
       const debeRows = await executor.query(
@@ -1487,7 +1580,10 @@ export class PvDevolucionesService {
     ];
   }
 
-  private async loadPrimaryFormaOriginal(executor: SqlExecutor, idfolOrig: string) {
+  private async loadPrimaryFormaOriginal(
+    executor: SqlExecutor,
+    idfolOrig: string,
+  ) {
     const tableName = await this.resolveFolioFormTable(executor);
     const cols = await this.loadTableColumns(executor, tableName);
     if (!cols.has('FORM')) return null;
@@ -1663,7 +1759,10 @@ export class PvDevolucionesService {
     );
   }
 
-  private async regenerateTicketDevolucion(executor: SqlExecutor, idfolDev: string) {
+  private async regenerateTicketDevolucion(
+    executor: SqlExecutor,
+    idfolDev: string,
+  ) {
     await executor.query(
       `
       DELETE FROM dbo.PV_TICKET_LOG
@@ -1871,7 +1970,12 @@ export class PvDevolucionesService {
     },
   ) {
     const cols = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
-    const sets: string[] = ['ESTA = @1', 'AUT = @2', 'IMPT = @3', 'FCNM = GETDATE()'];
+    const sets: string[] = [
+      'ESTA = @1',
+      'AUT = @2',
+      'IMPT = @3',
+      'FCNM = GETDATE()',
+    ];
     const params: unknown[] = [
       input.idfolDev,
       'PAGADO',
@@ -2136,7 +2240,8 @@ export class PvDevolucionesService {
 
     if (colsSet.has('IDFOL')) pushValue('IDFOL', input.idfol);
     if (colsSet.has('CLIENT')) pushValue('CLIENT', input.clientId);
-    if (colsSet.has('CTA')) pushValue('CTA', PvDevolucionesService.CTA_CTRL_CTAS);
+    if (colsSet.has('CTA'))
+      pushValue('CTA', PvDevolucionesService.CTA_CTRL_CTAS);
     if (classColumn != null) pushValue(classColumn, input.classCode);
     if (colsSet.has('IMPT')) pushValue('IMPT', this.round2(input.impt));
     if (colsSet.has('SUC')) pushValue('SUC', input.suc);

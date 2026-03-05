@@ -100,7 +100,9 @@ export class AltaMasivaService {
 
     const rows = this.parseExcelRows(file.buffer);
     if (!rows.length) {
-      throw new BadRequestException('El archivo no contiene renglones con datos');
+      throw new BadRequestException(
+        'El archivo no contiene renglones con datos',
+      );
     }
 
     const batchId = randomUUID();
@@ -139,7 +141,11 @@ export class AltaMasivaService {
 
     let workbook: XLSX.WorkBook;
     try {
-      workbook = XLSX.read(file.buffer, { type: 'buffer', cellDates: false, raw: false });
+      workbook = XLSX.read(file.buffer, {
+        type: 'buffer',
+        cellDates: false,
+        raw: false,
+      });
     } catch (_err) {
       throw new BadRequestException('No se pudo leer el archivo Excel');
     }
@@ -167,7 +173,10 @@ export class AltaMasivaService {
 
     const headerRow = cleaned[0];
     const headerHasData = headerRow.some((h) => h.length > 0);
-    const maxLen = cleaned.reduce((prev, row) => (row.length > prev ? row.length : prev), 0);
+    const maxLen = cleaned.reduce(
+      (prev, row) => (row.length > prev ? row.length : prev),
+      0,
+    );
     const headers = headerHasData
       ? headerRow.map((h, idx) => (h.length > 0 ? h : `COL${idx + 1}`))
       : Array.from({ length: maxLen }, (_, i) => `COL${i + 1}`);
@@ -175,7 +184,9 @@ export class AltaMasivaService {
     const dataRows = cleaned
       .slice(headerHasData ? 1 : 0, (headerHasData ? 1 : 0) + 8)
       .map((row) =>
-        Array.from({ length: headers.length }, (_, idx) => String(row[idx] ?? '').trim()),
+        Array.from({ length: headers.length }, (_, idx) =>
+          String(row[idx] ?? '').trim(),
+        ),
       );
 
     return { headers, rows: dataRows };
@@ -184,7 +195,10 @@ export class AltaMasivaService {
   async validate(batchId: string): Promise<AltaMasivaValidationResult> {
     if (!batchId) throw new BadRequestException('BatchId requerido');
 
-    await this.dataSource.query('EXEC dbo.sp_art_masiva_validate_batch @BatchId = @0', [batchId]);
+    await this.dataSource.query(
+      'EXEC dbo.sp_art_masiva_validate_batch @BatchId = @0',
+      [batchId],
+    );
 
     const summary = await this.dataSource.query(
       `
@@ -235,7 +249,10 @@ export class AltaMasivaService {
 
     let rows: any[];
     try {
-      rows = await this.dataSource.query('EXEC dbo.sp_art_masiva_commit_batch @BatchId = @0', [batchId]);
+      rows = await this.dataSource.query(
+        'EXEC dbo.sp_art_masiva_commit_batch @BatchId = @0',
+        [batchId],
+      );
     } catch (err: any) {
       const message = err?.message ?? 'No se pudo completar el commit';
       throw new BadRequestException(message);
@@ -259,7 +276,11 @@ export class AltaMasivaService {
   private parseExcelRows(buffer: Buffer): StagingRow[] {
     let workbook: XLSX.WorkBook;
     try {
-      workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: false });
+      workbook = XLSX.read(buffer, {
+        type: 'buffer',
+        cellDates: false,
+        raw: false,
+      });
     } catch (_err) {
       throw new BadRequestException('No se pudo leer el archivo Excel');
     }
@@ -270,15 +291,21 @@ export class AltaMasivaService {
     }
 
     const worksheet = workbook.Sheets[firstSheet];
-    const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-      defval: null,
-      raw: false,
-      blankrows: false,
-    });
+    const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+      worksheet,
+      {
+        defval: null,
+        raw: false,
+        blankrows: false,
+      },
+    );
     if (!jsonRows.length) return [];
 
     const normalizeKey = (key: string) =>
-      key.toUpperCase().replace(/[\s\-]+/g, '').replace(/[^A-Z0-9_]/g, '');
+      key
+        .toUpperCase()
+        .replace(/[\s\-]+/g, '')
+        .replace(/[^A-Z0-9_]/g, '');
 
     const rows: StagingRow[] = [];
     jsonRows.forEach((raw, index) => {
@@ -307,7 +334,9 @@ export class AltaMasivaService {
         STOCK: this.toNullableString(pick('STOCK')),
         STOCK_MIN: this.toNullableString(pick('STOCK_MIN', 'STOCKMIN')),
         ESTATUS: this.toNullableString(pick('ESTATUS'), 255),
-        DIA_REABASTO: this.toNullableString(pick('DIA_REABASTO', 'DIAREABASTO')),
+        DIA_REABASTO: this.toNullableString(
+          pick('DIA_REABASTO', 'DIAREABASTO'),
+        ),
         PVTA: this.toNullableString(pick('PVTA')),
         CTOP: this.toNullableString(pick('CTOP')),
         PROV_1: this.toNullableString(pick('PROV_1', 'PROV1')),
@@ -339,7 +368,8 @@ export class AltaMasivaService {
       };
 
       const hasAnyValue = Object.entries(row).some(
-        ([key, value]) => key !== 'BatchId' && key !== 'RowNum' && value != null,
+        ([key, value]) =>
+          key !== 'BatchId' && key !== 'RowNum' && value != null,
       );
       if (hasAnyValue) rows.push(row);
     });

@@ -26,8 +26,12 @@ export class Datmb52Service {
     }
     if (pairSet.size === 0) return rows;
 
-    const sucs = Array.from(new Set(Array.from(pairSet.values()).map((p) => p.suc)));
-    const arts = Array.from(new Set(Array.from(pairSet.values()).map((p) => p.art)));
+    const sucs = Array.from(
+      new Set(Array.from(pairSet.values()).map((p) => p.suc)),
+    );
+    const arts = Array.from(
+      new Set(Array.from(pairSet.values()).map((p) => p.art)),
+    );
     const desRows = await this.dataSource.query(
       `
       SELECT SUC, ART, MAX(DES) AS DES

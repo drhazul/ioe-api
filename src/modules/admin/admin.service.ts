@@ -12,7 +12,6 @@ import { GrupmodFrontEntity } from '../me/entities/grupmod-front.entity';
 import { ModFrontEntity } from '../me/entities/mod-front.entity';
 import { GrupmodFrontModEntity } from '../me/entities/grupmod-front-mod.entity';
 
-
 @Injectable()
 export class AdminService {
   constructor(
@@ -63,7 +62,9 @@ export class AdminService {
   }
 
   async getFrontGroups(roleId: number) {
-    const rows = await this.rgfRepo.find({ where: { IDROL: roleId, ACTIVO: true } });
+    const rows = await this.rgfRepo.find({
+      where: { IDROL: roleId, ACTIVO: true },
+    });
     const groupIds = rows.map((r) => r.IDGRUPMOD_FRONT);
     return { roleId, groupIds, accesoTotal: groupIds.includes(0) };
   }
@@ -81,11 +82,15 @@ export class AdminService {
     // Validación ligera: si no es 0, verificar que existe el grupo
     const idsNoCero = perms.map((p) => p.idGrupModulo).filter((x) => x !== 0);
     if (idsNoCero.length > 0) {
-      const found = await this.grupRepo.find({ where: { IDGRUP_MODULO: In(idsNoCero) } });
+      const found = await this.grupRepo.find({
+        where: { IDGRUP_MODULO: In(idsNoCero) },
+      });
       const foundSet = new Set(found.map((g) => g.IDGRUP_MODULO));
       const missing = idsNoCero.filter((id) => !foundSet.has(id));
       if (missing.length) {
-        throw new NotFoundException(`No existen grupos backend: ${missing.join(', ')}`);
+        throw new NotFoundException(
+          `No existen grupos backend: ${missing.join(', ')}`,
+        );
       }
     }
 
@@ -116,7 +121,9 @@ export class AdminService {
   }
 
   async getBackendPerms(roleId: number) {
-    const rows = await this.rgmpRepo.find({ where: { IDROL: roleId, ACTIVO: true } });
+    const rows = await this.rgmpRepo.find({
+      where: { IDROL: roleId, ACTIVO: true },
+    });
     return {
       roleId,
       accesoTotal: rows.some((r) => r.IDGRUP_MODULO === 0),
@@ -129,60 +136,75 @@ export class AdminService {
       })),
     };
   }
-// --------- CATALOG BACKEND ----------
-async getCatalogBackend() {
-  const grupos = await this.grupRepo.find({ where: { ACTIVO: true } });
-  const mods = await this.modRepo.find({ where: { ACTIVO: true } });
-  const rel = await this.gmmRepo.find();
+  // --------- CATALOG BACKEND ----------
+  async getCatalogBackend() {
+    const grupos = await this.grupRepo.find({ where: { ACTIVO: true } });
+    const mods = await this.modRepo.find({ where: { ACTIVO: true } });
+    const rel = await this.gmmRepo.find();
 
-  const modsById = new Map(mods.map(m => [m.IDMODULO, m]));
-  const map = new Map<number, { id: number; nombre: string; modulos: any[] }>();
+    const modsById = new Map(mods.map((m) => [m.IDMODULO, m]));
+    const map = new Map<
+      number,
+      { id: number; nombre: string; modulos: any[] }
+    >();
 
-  for (const g of grupos) {
-    map.set(g.IDGRUP_MODULO, { id: g.IDGRUP_MODULO, nombre: g.NOMBRE, modulos: [] });
-  }
-
-  for (const r of rel) {
-    const g = map.get(r.IDGRUP_MODULO);
-    const m = modsById.get(r.IDMODULO);
-    if (!g || !m) continue;
-    g.modulos.push({ id: m.IDMODULO, codigo: m.CODIGO, nombre: m.NOMBRE });
-  }
-
-  const out = Array.from(map.values()).sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  for (const g of out) g.modulos.sort((a,b)=>a.nombre.localeCompare(b.nombre));
-
-  return { grupos: out };
-}
-
-// --------- CATALOG FRONT ----------
-async getCatalogFront() {
-  // QueryBuilder para traer grupo + modulo
-  const rows = await this.gfmRepo
-    .createQueryBuilder('gfm')
-    .leftJoinAndSelect('gfm.GRUPO', 'grupo')
-    .leftJoinAndSelect('gfm.MODULO', 'mod')
-    .where('grupo.ACTIVO = 1')
-    .andWhere('mod.ACTIVO = 1')
-    .getMany();
-
-  const map = new Map<number, { id: number; nombre: string; modulos: any[] }>();
-
-  for (const r of rows) {
-    const gid = r.IDGRUPMOD_FRONT;
-    if (!map.has(gid)) {
-      map.set(gid, { id: gid, nombre: r.GRUPO.NOMBRE, modulos: [] });
+    for (const g of grupos) {
+      map.set(g.IDGRUP_MODULO, {
+        id: g.IDGRUP_MODULO,
+        nombre: g.NOMBRE,
+        modulos: [],
+      });
     }
-    map.get(gid)!.modulos.push({
-      id: r.MODULO.IDMOD_FRONT,
-      codigo: r.MODULO.CODIGO,
-      nombre: r.MODULO.NOMBRE,
-    });
+
+    for (const r of rel) {
+      const g = map.get(r.IDGRUP_MODULO);
+      const m = modsById.get(r.IDMODULO);
+      if (!g || !m) continue;
+      g.modulos.push({ id: m.IDMODULO, codigo: m.CODIGO, nombre: m.NOMBRE });
+    }
+
+    const out = Array.from(map.values()).sort((a, b) =>
+      a.nombre.localeCompare(b.nombre),
+    );
+    for (const g of out)
+      g.modulos.sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+    return { grupos: out };
   }
 
-  const grupos = Array.from(map.values()).sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  for (const g of grupos) g.modulos.sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  return { grupos };
-}
+  // --------- CATALOG FRONT ----------
+  async getCatalogFront() {
+    // QueryBuilder para traer grupo + modulo
+    const rows = await this.gfmRepo
+      .createQueryBuilder('gfm')
+      .leftJoinAndSelect('gfm.GRUPO', 'grupo')
+      .leftJoinAndSelect('gfm.MODULO', 'mod')
+      .where('grupo.ACTIVO = 1')
+      .andWhere('mod.ACTIVO = 1')
+      .getMany();
 
+    const map = new Map<
+      number,
+      { id: number; nombre: string; modulos: any[] }
+    >();
+
+    for (const r of rows) {
+      const gid = r.IDGRUPMOD_FRONT;
+      if (!map.has(gid)) {
+        map.set(gid, { id: gid, nombre: r.GRUPO.NOMBRE, modulos: [] });
+      }
+      map.get(gid)!.modulos.push({
+        id: r.MODULO.IDMOD_FRONT,
+        codigo: r.MODULO.CODIGO,
+        nombre: r.MODULO.NOMBRE,
+      });
+    }
+
+    const grupos = Array.from(map.values()).sort((a, b) =>
+      a.nombre.localeCompare(b.nombre),
+    );
+    for (const g of grupos)
+      g.modulos.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    return { grupos };
+  }
 }

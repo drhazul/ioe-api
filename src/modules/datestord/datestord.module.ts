@@ -10,4 +10,3 @@ import { DatEstOrdEntity } from './datestord.entity';
   providers: [DatEstOrdService],
 })
 export class DatEstOrdModule {}
-

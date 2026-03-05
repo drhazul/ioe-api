@@ -11,7 +11,9 @@ import {
 } from 'class-validator';
 
 export class CreateIncidenciaDto {
-  @ApiPropertyOptional({ description: 'Usuario de la incidencia (default usuario JWT)' })
+  @ApiPropertyOptional({
+    description: 'Usuario de la incidencia (default usuario JWT)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -24,9 +26,27 @@ export class CreateIncidenciaDto {
   @Length(1, 10)
   SUC?: string;
 
-  @ApiProperty({ enum: ['VACACIONES', 'PERMISO_GOCE', 'PERMISO_SIN_GOCE', 'INCAPACIDAD', 'FALTA', 'RETARDO', 'OTRO'] })
+  @ApiProperty({
+    enum: [
+      'VACACIONES',
+      'PERMISO_GOCE',
+      'PERMISO_SIN_GOCE',
+      'INCAPACIDAD',
+      'FALTA',
+      'RETARDO',
+      'OTRO',
+    ],
+  })
   @IsString()
-  @IsIn(['VACACIONES', 'PERMISO_GOCE', 'PERMISO_SIN_GOCE', 'INCAPACIDAD', 'FALTA', 'RETARDO', 'OTRO'])
+  @IsIn([
+    'VACACIONES',
+    'PERMISO_GOCE',
+    'PERMISO_SIN_GOCE',
+    'INCAPACIDAD',
+    'FALTA',
+    'RETARDO',
+    'OTRO',
+  ])
   TIPO: string;
 
   @ApiProperty({ description: 'Fecha inicio YYYY-MM-DD' })
@@ -43,7 +63,9 @@ export class CreateIncidenciaDto {
   @Length(1, 250)
   MOTIVO?: string;
 
-  @ApiPropertyOptional({ enum: ['SOLICITADA', 'APROBADA', 'RECHAZADA', 'CERRADA'] })
+  @ApiPropertyOptional({
+    enum: ['SOLICITADA', 'APROBADA', 'RECHAZADA', 'CERRADA'],
+  })
   @IsOptional()
   @IsString()
   @IsIn(['SOLICITADA', 'APROBADA', 'RECHAZADA', 'CERRADA'])

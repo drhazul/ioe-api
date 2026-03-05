@@ -9,4 +9,3 @@ export class UpdateDatFormEstadoDto {
   @IsBoolean()
   estado!: boolean;
 }
-

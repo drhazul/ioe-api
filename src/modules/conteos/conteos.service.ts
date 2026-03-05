@@ -79,7 +79,7 @@ export class ConteosService {
     );
 
     // Debug trace to verify data returned and filters applied
-    // eslint-disable-next-line no-console
+
     console.log(
       '[conteos] listConteos rows:',
       rows?.length ?? 0,
@@ -219,8 +219,8 @@ export class ConteosService {
       );
       const totalDetRow = detCountRows?.[0] ?? {};
       const totalDetVal =
-        (totalDetRow as any).total ??
-        (totalDetRow as any).TOTAL ??
+        totalDetRow.total ??
+        totalDetRow.TOTAL ??
         Object.values(totalDetRow as Record<string, unknown>)[0] ??
         0;
       const totalDet = Number(totalDetVal) || 0;
@@ -268,8 +268,8 @@ export class ConteosService {
       );
       const totalDetRow = detCountRows?.[0] ?? {};
       const totalDetVal =
-        (totalDetRow as any).total ??
-        (totalDetRow as any).TOTAL ??
+        totalDetRow.total ??
+        totalDetRow.TOTAL ??
         Object.values(totalDetRow as Record<string, unknown>)[0] ??
         0;
       const totalDet = Number(totalDetVal) || 0;
@@ -348,8 +348,8 @@ export class ConteosService {
 
       const totalDetRow = countRows?.[0] ?? {};
       const totalDetVal =
-        (totalDetRow as any).total ??
-        (totalDetRow as any).TOTAL ??
+        totalDetRow.total ??
+        totalDetRow.TOTAL ??
         Object.values(totalDetRow as Record<string, unknown>)[0] ??
         0;
       const totalDet = Number(totalDetVal) || 0;
@@ -534,8 +534,10 @@ export class ConteosService {
         `,
         [sucToUse, contCode],
       );
-      const captureSummary = (captureSummaryRows?.[0] ??
-        {}) as Record<string, unknown>;
+      const captureSummary = (captureSummaryRows?.[0] ?? {}) as Record<
+        string,
+        unknown
+      >;
       const capturesTotal =
         this.pickNumber(captureSummary, ['capturesTotal']) ?? 0;
       const articulosCapturados =
@@ -803,13 +805,13 @@ export class ConteosService {
     const row = rows?.[0] ?? {};
     const totalRecords =
       Number(
-        (row as any).totalRecords ??
-          (row as any).TOTALRECORDS ??
+        row.totalRecords ??
+          row.TOTALRECORDS ??
           Object.values(row as Record<string, unknown>)[0] ??
           0,
       ) || 0;
-    const sumDifCtop = Number((row as any).sumDifCtop ?? 0) || 0;
-    const sumDifT = Number((row as any).sumDifT ?? 0) || 0;
+    const sumDifCtop = Number(row.sumDifCtop ?? 0) || 0;
+    const sumDifT = Number(row.sumDifT ?? 0) || 0;
 
     return {
       cont: contCode,

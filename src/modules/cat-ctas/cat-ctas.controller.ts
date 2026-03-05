@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CatCtasService } from './cat-ctas.service';
@@ -34,7 +45,11 @@ export class CatCtasController {
   }
 
   @Put(':cta')
-  update(@Param('cta') cta: string, @Body() dto: UpdateCatCtaDto, @Req() req?: any) {
+  update(
+    @Param('cta') cta: string,
+    @Body() dto: UpdateCatCtaDto,
+    @Req() req?: any,
+  ) {
     return this.service.update(cta, dto, req?.user);
   }
 

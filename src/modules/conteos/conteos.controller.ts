@@ -60,17 +60,29 @@ export class ConteosController {
   }
 
   @Post(':cont/process')
-  process(@Param('cont') cont: string, @Query('suc') suc: string | undefined, @CurrentUser() user: JwtPayload) {
+  process(
+    @Param('cont') cont: string,
+    @Query('suc') suc: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.processConteo(cont, user, suc);
   }
 
   @Post(':cont/apply-adjustment')
-  applyAdjustment(@Param('cont') cont: string, @Query('suc') suc: string | undefined, @CurrentUser() user: JwtPayload) {
+  applyAdjustment(
+    @Param('cont') cont: string,
+    @Query('suc') suc: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.applyAdjustment(cont, user, suc);
   }
 
   @Post(':cont/sync-capturas')
-  syncCapturas(@Param('cont') cont: string, @Query('suc') suc: string | undefined, @CurrentUser() user: JwtPayload) {
+  syncCapturas(
+    @Param('cont') cont: string,
+    @Query('suc') suc: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.syncCapturasFromDetalle(cont, user, suc);
   }
 
@@ -86,7 +98,11 @@ export class ConteosController {
   }
 
   @Get(':cont/summary')
-  summary(@Param('cont') cont: string, @Query('suc') suc: string | undefined, @CurrentUser() user: JwtPayload) {
+  summary(
+    @Param('cont') cont: string,
+    @Query('suc') suc: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.summaryConteo(cont, user, suc);
   }
 }

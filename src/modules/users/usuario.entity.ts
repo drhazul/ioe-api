@@ -1,4 +1,10 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { RolEntity } from '../roles/rol.entity';
 import { DepartamentoEntity } from '../deptos/departamento.entity';
 import { PuestoEntity } from '../puestos/puesto.entity';

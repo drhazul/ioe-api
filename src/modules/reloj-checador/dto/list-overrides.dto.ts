@@ -5,7 +5,8 @@ import { IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 const toBool = ({ value }: { value: unknown }) => {
   if (value == null) return undefined;
   const text = String(value).trim().toLowerCase();
-  if (text == '1' || text == 'true' || text == 'si' || text == 'yes') return true;
+  if (text == '1' || text == 'true' || text == 'si' || text == 'yes')
+    return true;
   if (text == '0' || text == 'false' || text == 'no') return false;
   return undefined;
 };

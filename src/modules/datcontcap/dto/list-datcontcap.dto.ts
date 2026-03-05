@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Min,
+} from 'class-validator';
 
 const ALMACENES = ['001', '002', 'M001', 'T001', 'TODOS'] as const;
 
@@ -10,7 +17,10 @@ export class ListDatContCapDto {
   @Length(1, 30)
   cont: string;
 
-  @ApiPropertyOptional({ description: 'Filtro por almacén. TODOS no filtra.', enum: ALMACENES })
+  @ApiPropertyOptional({
+    description: 'Filtro por almacén. TODOS no filtra.',
+    enum: ALMACENES,
+  })
   @IsOptional()
   @IsString()
   @IsIn(ALMACENES)
@@ -21,7 +31,10 @@ export class ListDatContCapDto {
   })
   almacen?: string;
 
-  @ApiPropertyOptional({ description: 'Filtro por UPC (prefijo)', example: '7501' })
+  @ApiPropertyOptional({
+    description: 'Filtro por UPC (prefijo)',
+    example: '7501',
+  })
   @IsOptional()
   @IsString()
   @Length(1, 50)
@@ -50,7 +63,11 @@ export class ListDatContCapDto {
   @Min(1)
   page?: number;
 
-  @ApiPropertyOptional({ description: 'Límite por página', default: 50, maximum: 500 })
+  @ApiPropertyOptional({
+    description: 'Límite por página',
+    default: 50,
+    maximum: 500,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

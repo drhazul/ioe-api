@@ -47,13 +47,17 @@ export class DatFormService {
 
     if (cols.hasEstado) {
       if (estadoFilter != null) {
-        filters.push(`ISNULL(TRY_CONVERT(INT, ESTADO), 1) = ${estadoFilter ? 1 : 0}`);
+        filters.push(
+          `ISNULL(TRY_CONVERT(INT, ESTADO), 1) = ${estadoFilter ? 1 : 0}`,
+        );
       } else if (!includeInactive) {
         filters.push('ISNULL(TRY_CONVERT(INT, ESTADO), 1) = 1');
       }
     }
 
-    const formText = String(query?.form ?? '').trim().toUpperCase();
+    const formText = String(query?.form ?? '')
+      .trim()
+      .toUpperCase();
     if (formText.length > 0) {
       filters.push(
         `UPPER(LTRIM(RTRIM(ISNULL(FORM, '')))) LIKE ${this.param(params.length)}`,
@@ -61,7 +65,9 @@ export class DatFormService {
       params.push(`%${formText}%`);
     }
 
-    const nomText = String(query?.nom ?? '').trim().toUpperCase();
+    const nomText = String(query?.nom ?? '')
+      .trim()
+      .toUpperCase();
     if (cols.hasNom && nomText.length > 0) {
       filters.push(
         `UPPER(LTRIM(RTRIM(ISNULL(NOM, '')))) LIKE ${this.param(params.length)}`,
@@ -70,9 +76,10 @@ export class DatFormService {
     }
 
     const estadoExpr = cols.hasEstado
-      ? "CASE WHEN ISNULL(TRY_CONVERT(INT, ESTADO), 1) = 1 THEN 1 ELSE 0 END"
+      ? 'CASE WHEN ISNULL(TRY_CONVERT(INT, ESTADO), 1) = 1 THEN 1 ELSE 0 END'
       : '1';
-    const whereSql = filters.length == 0 ? '' : `WHERE ${filters.join(' AND ')}`;
+    const whereSql =
+      filters.length == 0 ? '' : `WHERE ${filters.join(' AND ')}`;
 
     const sql = `
       SELECT
@@ -110,7 +117,7 @@ export class DatFormService {
         ${cols.hasNom ? "LTRIM(RTRIM(ISNULL(NOM, '')))" : "''"} AS NOM,
         ${
           cols.hasEstado
-            ? "CASE WHEN ISNULL(TRY_CONVERT(INT, ESTADO), 1) = 1 THEN 1 ELSE 0 END"
+            ? 'CASE WHEN ISNULL(TRY_CONVERT(INT, ESTADO), 1) = 1 THEN 1 ELSE 0 END'
             : '1'
         } AS ESTADO
       FROM dbo.DAT_FORM
@@ -178,9 +185,13 @@ export class DatFormService {
         `,
         params,
       );
-      const createdId = this.toInt((rows?.[0] as Record<string, unknown>)?.IDFORM);
+      const createdId = this.toInt(
+        (rows?.[0] as Record<string, unknown>)?.IDFORM,
+      );
       if (createdId == null) {
-        throw new ConflictException('No se pudo recuperar IDFORM al crear DAT_FORM');
+        throw new ConflictException(
+          'No se pudo recuperar IDFORM al crear DAT_FORM',
+        );
       }
       return this.findOne(String(createdId));
     } catch (err) {
@@ -203,7 +214,8 @@ export class DatFormService {
     };
 
     if (dto.ASPEL !== undefined) {
-      if (!cols.hasAspel) throw new ConflictException('DAT_FORM no contiene columna ASPEL');
+      if (!cols.hasAspel)
+        throw new ConflictException('DAT_FORM no contiene columna ASPEL');
       addSet('ASPEL', dto.ASPEL == null ? null : Math.trunc(dto.ASPEL));
     }
 
@@ -214,7 +226,8 @@ export class DatFormService {
     }
 
     if (dto.NOM !== undefined) {
-      if (!cols.hasNom) throw new ConflictException('DAT_FORM no contiene columna NOM');
+      if (!cols.hasNom)
+        throw new ConflictException('DAT_FORM no contiene columna NOM');
       addSet('NOM', this.normalizeText(dto.NOM));
     }
 
@@ -288,8 +301,10 @@ export class DatFormService {
       `,
     );
     const exists =
-      Number((existsRows?.[0] as Record<string, unknown> | undefined)?.EXISTS_TABLE ?? 0) ===
-      1;
+      Number(
+        (existsRows?.[0] as Record<string, unknown> | undefined)
+          ?.EXISTS_TABLE ?? 0,
+      ) === 1;
     if (!exists) {
       throw new NotFoundException('No existe tabla dbo.DAT_FORM');
     }
@@ -303,7 +318,9 @@ export class DatFormService {
     );
     const cols = new Set<string>(
       (columns ?? []).map((row) =>
-        String((row as Record<string, unknown>).COL ?? '').trim().toUpperCase(),
+        String((row as Record<string, unknown>).COL ?? '')
+          .trim()
+          .toUpperCase(),
       ),
     );
 
@@ -344,7 +361,11 @@ export class DatFormService {
     }
   }
 
-  private async assertFormUnique(form: string, cols: DatFormColumns, excludeId?: number) {
+  private async assertFormUnique(
+    form: string,
+    cols: DatFormColumns,
+    excludeId?: number,
+  ) {
     const params: unknown[] = [form];
     let sql = `
       SELECT TOP 1 ${cols.hasId ? 'IDFORM' : 'FORM'} AS KEYVAL
@@ -365,7 +386,9 @@ export class DatFormService {
 
   private mapRow(row: unknown, cols: DatFormColumns): DatFormRow | null {
     const r = row as Record<string, unknown>;
-    const form = String(r.FORM ?? '').trim().toUpperCase();
+    const form = String(r.FORM ?? '')
+      .trim()
+      .toUpperCase();
     if (!form) return null;
 
     return {
@@ -378,7 +401,9 @@ export class DatFormService {
   }
 
   private normalizeForm(value: string) {
-    const form = String(value ?? '').trim().toUpperCase();
+    const form = String(value ?? '')
+      .trim()
+      .toUpperCase();
     if (form.length == 0) {
       throw new BadRequestException('FORM es requerido');
     }
@@ -434,12 +459,16 @@ export class DatFormService {
   }
 
   private toBool(value?: string) {
-    const text = String(value ?? '').trim().toLowerCase();
+    const text = String(value ?? '')
+      .trim()
+      .toLowerCase();
     return text === '1' || text === 'true' || text === 'yes' || text === 'si';
   }
 
   private toBoolOrNull(value?: string) {
-    const text = String(value ?? '').trim().toLowerCase();
+    const text = String(value ?? '')
+      .trim()
+      .toLowerCase();
     if (text.length == 0) return null;
     if (text === '1' || text === 'true' || text === 'yes' || text === 'si') {
       return true;

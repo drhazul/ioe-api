@@ -1,0 +1,109 @@
+CREATE OR ALTER PROCEDURE dbo.sp_cajon_estado_resumen
+  @OPV   nvarchar(255),
+  @FECHA date
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @DT_INI datetime = CAST(@FECHA AS datetime);
+  DECLARE @DT_FIN datetime = DATEADD(day, 1, @DT_INI);
+
+  ;WITH
+  Catalogo AS (
+    SELECT FORM, NOM
+    FROM dbo.DAT_FORM
+    WHERE ESTADO = 1
+  ),
+  Recibido AS (
+    SELECT
+      f.FORM,
+      SUM(ISNULL(f.IMPD, 0)) AS IMPT
+    FROM dbo.PV_CTR_FOL_FORM f
+    INNER JOIN dbo.PV_CTR_FOL_ASVR a
+      ON a.IDFOL = f.IDFOL
+    WHERE
+      a.OPVM = @OPV
+      AND a.FCNM >= @DT_INI
+      AND a.FCNM <  @DT_FIN
+    GROUP BY f.FORM
+  ),
+  Retiros AS (
+    SELECT
+      d.FORMA AS FORM,
+      SUM(ISNULL(d.IMPF, 0)) AS IMPR
+    FROM dbo.DAT_RET_CTR_SVR r
+    INNER JOIN dbo.DAT_RET_DET_SVR d
+      ON d.IDRET = r.IDRET
+    WHERE
+      r.OPV = @OPV
+      AND r.ESTA = 'FINALIZADO'
+      AND r.FCNR >= @DT_INI
+      AND r.FCNR <  @DT_FIN
+    GROUP BY d.FORMA
+  )
+  SELECT
+    @OPV AS OPV,
+    c.FORM,
+    c.NOM,
+    ISNULL(rc.IMPT, 0) AS IMPT,
+    ISNULL(rt.IMPR, 0) AS IMPR,
+    CAST(NULL AS money) AS IMPE,
+    (ISNULL(rc.IMPT,0) - ISNULL(rt.IMPR,0)) AS DIFD
+  FROM Catalogo c
+  LEFT JOIN Recibido rc ON rc.FORM = c.FORM
+  LEFT JOIN Retiros  rt ON rt.FORM = c.FORM
+  ORDER BY c.NOM;
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'IX_PV_CTR_FOL_ASVR_OPVM_FCNM'
+    AND object_id = OBJECT_ID('dbo.PV_CTR_FOL_ASVR')
+)
+BEGIN
+  CREATE INDEX IX_PV_CTR_FOL_ASVR_OPVM_FCNM
+    ON dbo.PV_CTR_FOL_ASVR (OPVM, FCNM)
+    INCLUDE (IDFOL);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'IX_PV_CTR_FOL_FORM_IDFOL_FORM'
+    AND object_id = OBJECT_ID('dbo.PV_CTR_FOL_FORM')
+)
+BEGIN
+  CREATE INDEX IX_PV_CTR_FOL_FORM_IDFOL_FORM
+    ON dbo.PV_CTR_FOL_FORM (IDFOL, FORM)
+    INCLUDE (IMPD);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'IX_DAT_RET_CTR_SVR_OPV_FCNR_ESTA'
+    AND object_id = OBJECT_ID('dbo.DAT_RET_CTR_SVR')
+)
+BEGIN
+  CREATE INDEX IX_DAT_RET_CTR_SVR_OPV_FCNR_ESTA
+    ON dbo.DAT_RET_CTR_SVR (OPV, FCNR, ESTA)
+    INCLUDE (IDRET);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'IX_DAT_RET_DET_SVR_IDRET_FORMA'
+    AND object_id = OBJECT_ID('dbo.DAT_RET_DET_SVR')
+)
+BEGIN
+  CREATE INDEX IX_DAT_RET_DET_SVR_IDRET_FORMA
+    ON dbo.DAT_RET_DET_SVR (IDRET, FORMA)
+    INCLUDE (IMPF);
+END;
+GO

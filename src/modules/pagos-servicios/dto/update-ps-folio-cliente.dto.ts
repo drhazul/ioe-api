@@ -9,4 +9,3 @@ export class UpdatePsFolioClienteDto {
   @Min(1)
   clien: number;
 }
-

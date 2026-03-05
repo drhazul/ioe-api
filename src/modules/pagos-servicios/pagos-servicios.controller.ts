@@ -23,6 +23,7 @@ import { SetPsTicketReferenceFolioDto } from './dto/set-ps-ticket-reference-foli
 import { SetPsTicketReferenceGastoDto } from './dto/set-ps-ticket-reference-gasto.dto';
 import { UpdatePsFolioClienteDto } from './dto/update-ps-folio-cliente.dto';
 import { UpdatePsTicketPvtaDto } from './dto/update-ps-ticket-pvta.dto';
+import { FinalizePsPagoDto } from './dto/finalize-ps-pago.dto';
 import { PagosServiciosService } from './pagos-servicios.service';
 
 @ApiTags('pagos-servicios')
@@ -33,7 +34,10 @@ export class PagosServiciosController {
   constructor(private readonly service: PagosServiciosService) {}
 
   @Get('folios')
-  listFolios(@Query() query: ListPsFoliosQueryDto, @CurrentUser() user: JwtPayload) {
+  listFolios(
+    @Query() query: ListPsFoliosQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.listFolios(query, user);
   }
 
@@ -58,7 +62,12 @@ export class PagosServiciosController {
     @CurrentUser() user: JwtPayload,
     @Req() req: any,
   ) {
-    return this.service.updateFolioCliente(idFol, dto, user, this.requestIp(req));
+    return this.service.updateFolioCliente(
+      idFol,
+      dto,
+      user,
+      this.requestIp(req),
+    );
   }
 
   @Post('folios/:idFol/ticket/service')
@@ -72,8 +81,20 @@ export class PagosServiciosController {
   }
 
   @Get('clientes/:client/adeudos')
-  getAdeudosCliente(@Param('client') client: string, @CurrentUser() user: JwtPayload) {
+  getAdeudosCliente(
+    @Param('client') client: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.getAdeudosCliente(client, user);
+  }
+
+  @Get('clientes/:client/adeudos/:idFol/detalle')
+  getAdeudosFolioDetalle(
+    @Param('client') client: string,
+    @Param('idFol') idFol: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.getAdeudosFolioDetalle(client, idFol, user);
   }
 
   @Post('folios/:idFol/ticket/reference/folio')
@@ -83,7 +104,12 @@ export class PagosServiciosController {
     @CurrentUser() user: JwtPayload,
     @Req() req: any,
   ) {
-    return this.service.setTicketReferenceFolio(idFol, dto, user, this.requestIp(req));
+    return this.service.setTicketReferenceFolio(
+      idFol,
+      dto,
+      user,
+      this.requestIp(req),
+    );
   }
 
   @Post('folios/:idFol/ticket/reference/gasto')
@@ -93,7 +119,12 @@ export class PagosServiciosController {
     @CurrentUser() user: JwtPayload,
     @Req() req: any,
   ) {
-    return this.service.setTicketReferenceGasto(idFol, dto, user, this.requestIp(req));
+    return this.service.setTicketReferenceGasto(
+      idFol,
+      dto,
+      user,
+      this.requestIp(req),
+    );
   }
 
   @Put('folios/:idFol/ticket/pvta')
@@ -146,17 +177,21 @@ export class PagosServiciosController {
   }
 
   @Get('folios/:idFol/formas-pago/summary')
-  summaryFormaPago(@Param('idFol') idFol: string, @CurrentUser() user: JwtPayload) {
+  summaryFormaPago(
+    @Param('idFol') idFol: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.summaryFormaPago(idFol, user);
   }
 
-  @Post('folios/:idFol/terminar')
-  terminar(
+  @Post('folios/:idFol/finalizar')
+  finalizarPago(
     @Param('idFol') idFol: string,
+    @Body() dto: FinalizePsPagoDto,
     @CurrentUser() user: JwtPayload,
     @Req() req: any,
   ) {
-    return this.service.terminar(idFol, user, this.requestIp(req));
+    return this.service.finalizarPago(idFol, dto, user, this.requestIp(req));
   }
 
   private requestIp(req: any) {

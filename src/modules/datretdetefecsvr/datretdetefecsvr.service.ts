@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { DatRetDetEfecSvrEntity } from './datretdetefecsvr.entity';
@@ -18,7 +22,8 @@ export class DatRetDetEfecSvrService {
 
   async findOne(id: string) {
     const row = await this.repo.findOne({ where: { ID: id } });
-    if (!row) throw new NotFoundException(`DAT_RET_DET_EFEC_SVR ${id} no existe`);
+    if (!row)
+      throw new NotFoundException(`DAT_RET_DET_EFEC_SVR ${id} no existe`);
     return row;
   }
 
@@ -56,7 +61,9 @@ export class DatRetDetEfecSvrService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar DAT_RET_DET_EFEC_SVR ${id} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar DAT_RET_DET_EFEC_SVR ${id} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

@@ -11,4 +11,3 @@ export class DatEstOrdEntity {
   @Column({ name: 'USR', type: 'nvarchar', length: 255, nullable: true })
   USR: string | null;
 }
-

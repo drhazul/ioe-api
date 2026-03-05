@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import type { JwtPayload } from '../auth/jwt.strategy';
@@ -163,8 +167,13 @@ export class CtrlCtasService {
     const fecIni = this.parseDate(dto.fecIni);
     const fecFin = this.parseDate(dto.fecFin);
 
-    if (procedureName === 'sp_ctrlctas_detalle_transaccion' && idfols.length === 0) {
-      throw new BadRequestException('Para detalle se requiere al menos un IDFOL');
+    if (
+      procedureName === 'sp_ctrlctas_detalle_transaccion' &&
+      idfols.length === 0
+    ) {
+      throw new BadRequestException(
+        'Para detalle se requiere al menos un IDFOL',
+      );
     }
 
     const rows = await this.dataSource.query(
@@ -256,7 +265,10 @@ export class CtrlCtasService {
     return this.executeConsulta('sp_ctrlctas_detalle_transaccion', dto, user);
   }
 
-  async catalogCtas(user: JwtPayload, query?: { search?: string; sucs?: string; limit?: string }) {
+  async catalogCtas(
+    user: JwtPayload,
+    query?: { search?: string; sucs?: string; limit?: string },
+  ) {
     const sucs = await this.resolveSucs(user, this.parseSucsQuery(query?.sucs));
     const search = String(query?.search ?? '').trim();
     const limit = this.normalizeLimit(query?.limit, 200);
@@ -294,7 +306,10 @@ export class CtrlCtasService {
     );
   }
 
-  async catalogClientes(user: JwtPayload, query?: { search?: string; sucs?: string; limit?: string }) {
+  async catalogClientes(
+    user: JwtPayload,
+    query?: { search?: string; sucs?: string; limit?: string },
+  ) {
     const sucs = await this.resolveSucs(user, this.parseSucsQuery(query?.sucs));
     const search = String(query?.search ?? '').trim();
     const limit = this.normalizeLimit(query?.limit, 200);
@@ -331,7 +346,10 @@ export class CtrlCtasService {
     );
   }
 
-  async catalogOpvs(user: JwtPayload, query?: { search?: string; sucs?: string; limit?: string }) {
+  async catalogOpvs(
+    user: JwtPayload,
+    query?: { search?: string; sucs?: string; limit?: string },
+  ) {
     const hasIdopv = await this.hasIdopvColumn();
     if (!hasIdopv) return [];
 

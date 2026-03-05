@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { UsrModSucService } from './usr-mod-suc.service';
@@ -23,7 +33,11 @@ export class UsrModSucController {
   }
 
   @Get(':modulo/:usuario/:suc')
-  findOne(@Param('modulo') modulo: string, @Param('usuario') usuario: string, @Param('suc') suc: string) {
+  findOne(
+    @Param('modulo') modulo: string,
+    @Param('usuario') usuario: string,
+    @Param('suc') suc: string,
+  ) {
     return this.service.findOne(modulo, usuario, suc);
   }
 
@@ -43,7 +57,11 @@ export class UsrModSucController {
   }
 
   @Delete(':modulo/:usuario/:suc')
-  remove(@Param('modulo') modulo: string, @Param('usuario') usuario: string, @Param('suc') suc: string) {
+  remove(
+    @Param('modulo') modulo: string,
+    @Param('usuario') usuario: string,
+    @Param('suc') suc: string,
+  ) {
     return this.service.remove(modulo, usuario, suc);
   }
 }

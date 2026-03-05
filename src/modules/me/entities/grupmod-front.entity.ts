@@ -1,7 +1,6 @@
 import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { GrupmodFrontModEntity } from './grupmod-front-mod.entity';
 
-
 @Entity({ name: 'GRUPMOD_FRONT', schema: 'dbo' })
 export class GrupmodFrontEntity {
   @PrimaryGeneratedColumn()

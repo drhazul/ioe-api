@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { PvCtrFolAsvrEntity } from './pvctrfolasvr.entity';
@@ -39,21 +45,29 @@ export class PvCtrFolAsvrService {
       requestedSuc &&
       this.normalizeUpper(requestedSuc) !== this.normalizeUpper(actorSuc)
     ) {
-      throw new ForbiddenException('No autorizado para consultar otra sucursal');
+      throw new ForbiddenException(
+        'No autorizado para consultar otra sucursal',
+      );
     }
     if (
       !isAdmin &&
       requestedOpv &&
       this.normalizeUpper(requestedOpv) !== this.normalizeUpper(actorOpv)
     ) {
-      throw new ForbiddenException('No autorizado para consultar cotizaciones de otro OPV');
+      throw new ForbiddenException(
+        'No autorizado para consultar cotizaciones de otro OPV',
+      );
     }
 
     if (!isAdmin && suc.length == 0) {
-      throw new BadRequestException('No se pudo resolver sucursal para consultar cotizaciones');
+      throw new BadRequestException(
+        'No se pudo resolver sucursal para consultar cotizaciones',
+      );
     }
     if (!isAdmin && opv.length == 0) {
-      throw new BadRequestException('No se pudo resolver OPV para consultar cotizaciones');
+      throw new BadRequestException(
+        'No se pudo resolver OPV para consultar cotizaciones',
+      );
     }
 
     const params: unknown[] = [];
@@ -80,7 +94,8 @@ export class PvCtrFolAsvrService {
     const rows = await this.dataSource.query(
       `
       SELECT
-        a.*
+        a.*,
+        c.RazonSocialReceptor AS RazonSocialReceptor
       FROM dbo.PV_CTR_FOL_ASVR a
       LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
       WHERE ${where.join(' AND ')}
@@ -90,6 +105,23 @@ export class PvCtrFolAsvrService {
     );
 
     return rows ?? [];
+  }
+
+  async findOneForRead(idfol: string) {
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        a.*,
+        c.RazonSocialReceptor AS RazonSocialReceptor
+      FROM dbo.PV_CTR_FOL_ASVR a
+      LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
+      WHERE a.IDFOL = @0;
+      `,
+      [idfol],
+    );
+    const row = rows?.[0];
+    if (!row) throw new NotFoundException(`PV_CTR_FOL_ASVR ${idfol} no existe`);
+    return row;
   }
 
   async findOne(idfol: string) {
@@ -158,10 +190,13 @@ export class PvCtrFolAsvrService {
     }
 
     const firstRow = result?.[0] ?? null;
-    let idfol: any = firstRow?.IDFOL ?? firstRow?.Idfol ?? firstRow?.idfol ?? null;
+    let idfol: any =
+      firstRow?.IDFOL ?? firstRow?.Idfol ?? firstRow?.idfol ?? null;
     if (!idfol && firstRow) {
-      const key = Object.keys(firstRow).find((k) => k.toLowerCase() === 'idfol');
-      if (key) idfol = (firstRow as any)[key];
+      const key = Object.keys(firstRow).find(
+        (k) => k.toLowerCase() === 'idfol',
+      );
+      if (key) idfol = firstRow[key];
     }
 
     if (!idfol || String(idfol).trim().length === 0) {
@@ -172,7 +207,8 @@ export class PvCtrFolAsvrService {
       `SELECT TOP 1 * FROM ${this.repo.metadata.tablePath} WHERE IDFOL = @0`,
       [idfol],
     );
-    if (!rows?.length) throw new NotFoundException(`PV_CTR_FOL_ASVR ${idfol} no existe`);
+    if (!rows?.length)
+      throw new NotFoundException(`PV_CTR_FOL_ASVR ${idfol} no existe`);
     return rows[0];
   }
 
@@ -193,7 +229,8 @@ export class PvCtrFolAsvrService {
     if (dto.IMPP !== undefined) partial.IMPP = dto.IMPP ?? null;
     if (dto.AUT !== undefined) partial.AUT = dto.AUT ?? null;
     if (dto.REQF !== undefined) partial.REQF = dto.REQF ?? null;
-    if (dto.FCNM !== undefined) partial.FCNM = dto.FCNM ? new Date(dto.FCNM) : null;
+    if (dto.FCNM !== undefined)
+      partial.FCNM = dto.FCNM ? new Date(dto.FCNM) : null;
     if (dto.OPVM !== undefined) partial.OPVM = dto.OPVM ?? null;
     if (dto.MOD !== undefined) partial.MOD = dto.MOD ?? null;
     if (dto.IDFOLORIG !== undefined) partial.IDFOLORIG = dto.IDFOLORIG ?? null;
@@ -208,7 +245,9 @@ export class PvCtrFolAsvrService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar PV_CTR_FOL_ASVR ${idfol} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar PV_CTR_FOL_ASVR ${idfol} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

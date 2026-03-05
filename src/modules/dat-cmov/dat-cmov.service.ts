@@ -6,7 +6,8 @@ export class DatCmovService {
   constructor(private readonly dataSource: DataSource) {}
 
   async findAll() {
-    let columns: Array<{ name: string; type_name: string; column_id: number }> = [];
+    let columns: Array<{ name: string; type_name: string; column_id: number }> =
+      [];
     try {
       columns = await this.dataSource.query(
         `
@@ -60,14 +61,26 @@ export class DatCmovService {
     ]);
 
     const codeColumn =
-      pick(['CLSM', 'CLASE', 'CLAS', 'CLMOV', 'CMOV', 'MOV', 'CLASEMOV', 'CLASE_MOV']) ??
-      columns.find(col => numericTypes.has((col.type_name ?? '').toLowerCase()))?.name ??
+      pick([
+        'CLSM',
+        'CLASE',
+        'CLAS',
+        'CLMOV',
+        'CMOV',
+        'MOV',
+        'CLASEMOV',
+        'CLASE_MOV',
+      ]) ??
+      columns.find((col) =>
+        numericTypes.has((col.type_name ?? '').toLowerCase()),
+      )?.name ??
       columns[0]?.name ??
       null;
 
     const descColumn =
       pick(['DESCRIPCION', 'DES', 'TXT', 'NOMBRE', 'DESCR', 'DESCRIP']) ??
-      columns.find(col => textTypes.has((col.type_name ?? '').toLowerCase()))?.name ??
+      columns.find((col) => textTypes.has((col.type_name ?? '').toLowerCase()))
+        ?.name ??
       null;
 
     const selectParts: string[] = [];

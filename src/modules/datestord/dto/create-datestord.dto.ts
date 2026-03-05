@@ -20,4 +20,3 @@ export class CreateDatEstOrdDto {
   @Length(0, 255)
   USR?: string;
 }
-

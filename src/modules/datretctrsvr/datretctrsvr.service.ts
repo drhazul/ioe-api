@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { DatRetCtrSvrEntity } from './datretctrsvr.entity';
@@ -44,7 +48,8 @@ export class DatRetCtrSvrService {
     const partial: Partial<DatRetCtrSvrEntity> = {};
     if (dto.TER !== undefined) partial.TER = dto.TER ?? null;
     if (dto.OPV !== undefined) partial.OPV = dto.OPV ?? null;
-    if (dto.FCNR !== undefined) partial.FCNR = dto.FCNR ? new Date(dto.FCNR) : null;
+    if (dto.FCNR !== undefined)
+      partial.FCNR = dto.FCNR ? new Date(dto.FCNR) : null;
     if (dto.IMPR !== undefined) partial.IMPR = dto.IMPR ?? null;
     if (dto.ESTA !== undefined) partial.ESTA = dto.ESTA ?? null;
 
@@ -58,7 +63,9 @@ export class DatRetCtrSvrService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar DAT_RET_CTR_SVR ${idret} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar DAT_RET_CTR_SVR ${idret} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

@@ -17,7 +17,9 @@ export class AddPsFormaPagoDto {
   @Min(0.0001)
   impp: number;
 
-  @ApiPropertyOptional({ description: 'Autorizacion/referencia cuando aplique' })
+  @ApiPropertyOptional({
+    description: 'Autorizacion/referencia cuando aplique',
+  })
   @Transform(({ value }) => toTrimmedString(value))
   @IsOptional()
   @IsString()

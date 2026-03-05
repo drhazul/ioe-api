@@ -13,9 +13,15 @@ export class AuthController {
 
   @Post('login')
   login(@Body() dto: LoginDto, @Req() req: Request) {
-    const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || undefined;
+    const ip =
+      (req.headers['x-forwarded-for'] as string) ||
+      req.socket.remoteAddress ||
+      undefined;
     const userAgent = req.headers['user-agent'] || undefined;
-    return this.service.login(dto.username, dto.password, { ip, userAgent: String(userAgent) });
+    return this.service.login(dto.username, dto.password, {
+      ip,
+      userAgent: String(userAgent),
+    });
   }
 
   @Post('refresh')

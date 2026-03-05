@@ -84,7 +84,9 @@ export class AccessService {
     if (!row) throw new NotFoundException(`MODULO ${id} no existe`);
 
     if (dto.CODIGO && dto.CODIGO !== row.CODIGO) {
-      const exists = await this.modRepo.exist({ where: { CODIGO: dto.CODIGO } });
+      const exists = await this.modRepo.exist({
+        where: { CODIGO: dto.CODIGO },
+      });
       if (exists) throw new ConflictException(`CODIGO ${dto.CODIGO} ya existe`);
     }
 
@@ -198,7 +200,9 @@ export class AccessService {
       const found = new Set(mods.map((m) => m.IDMODULO));
       const missing = ids.filter((mid) => !found.has(mid));
       if (missing.length) {
-        throw new NotFoundException(`No existen módulos: ${missing.join(', ')}`);
+        throw new NotFoundException(
+          `No existen módulos: ${missing.join(', ')}`,
+        );
       }
     }
 
@@ -206,7 +210,10 @@ export class AccessService {
       await manager.delete(GrupmodModuloEntity, { IDGRUP_MODULO: id });
       if (ids.length === 0) return;
       const rows = ids.map((mid) =>
-        manager.create(GrupmodModuloEntity, { IDGRUP_MODULO: id, IDMODULO: mid }),
+        manager.create(GrupmodModuloEntity, {
+          IDGRUP_MODULO: id,
+          IDMODULO: mid,
+        }),
       );
       await manager.save(GrupmodModuloEntity, rows);
     });
@@ -262,7 +269,11 @@ export class AccessService {
     const items = grupos.map((g) => {
       const perm = permByGroup.get(g.IDGRUP_MODULO);
       const modList = (modsByGroup.get(g.IDGRUP_MODULO) ?? [])
-        .map((m) => ({ idModulo: m.IDMODULO, codigo: m.CODIGO, nombre: m.NOMBRE }))
+        .map((m) => ({
+          idModulo: m.IDMODULO,
+          codigo: m.CODIGO,
+          nombre: m.NOMBRE,
+        }))
         .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
       return {
@@ -295,8 +306,11 @@ export class AccessService {
   async setBackendPerm(roleId: number, dto: AssignGroupToRolePermDto) {
     const groupId = Number(dto.idGrupModulo);
     if (groupId !== 0) {
-      const group = await this.grupRepo.findOne({ where: { IDGRUP_MODULO: groupId } });
-      if (!group) throw new NotFoundException(`GRUP_MODULO ${groupId} no existe`);
+      const group = await this.grupRepo.findOne({
+        where: { IDGRUP_MODULO: groupId },
+      });
+      if (!group)
+        throw new NotFoundException(`GRUP_MODULO ${groupId} no existe`);
     }
 
     const payload: Partial<RolGrupModuloPermEntity> = {
@@ -331,7 +345,9 @@ export class AccessService {
   }
 
   async createModFront(dto: CreateModFrontDto) {
-    const exists = await this.modFrontRepo.exist({ where: { CODIGO: dto.CODIGO } });
+    const exists = await this.modFrontRepo.exist({
+      where: { CODIGO: dto.CODIGO },
+    });
     if (exists) throw new ConflictException(`CODIGO ${dto.CODIGO} ya existe`);
 
     const entity = this.modFrontRepo.create({
@@ -349,7 +365,9 @@ export class AccessService {
     if (!row) throw new NotFoundException(`MOD_FRONT ${id} no existe`);
 
     if (dto.CODIGO && dto.CODIGO !== row.CODIGO) {
-      const exists = await this.modFrontRepo.exist({ where: { CODIGO: dto.CODIGO } });
+      const exists = await this.modFrontRepo.exist({
+        where: { CODIGO: dto.CODIGO },
+      });
       if (exists) throw new ConflictException(`CODIGO ${dto.CODIGO} ya existe`);
     }
 
@@ -401,7 +419,9 @@ export class AccessService {
   }
 
   async updateGrupoFront(id: number, dto: UpdateGrupmodFrontDto) {
-    const row = await this.grupFrontRepo.findOne({ where: { IDGRUPMOD_FRONT: id } });
+    const row = await this.grupFrontRepo.findOne({
+      where: { IDGRUPMOD_FRONT: id },
+    });
     if (!row) throw new NotFoundException(`GRUPMOD_FRONT ${id} no existe`);
 
     const partial: Partial<GrupmodFrontEntity> = {
@@ -415,7 +435,9 @@ export class AccessService {
   }
 
   async deleteGrupoFront(id: number) {
-    const row = await this.grupFrontRepo.findOne({ where: { IDGRUPMOD_FRONT: id } });
+    const row = await this.grupFrontRepo.findOne({
+      where: { IDGRUPMOD_FRONT: id },
+    });
     if (!row) throw new NotFoundException(`GRUPMOD_FRONT ${id} no existe`);
 
     try {
@@ -433,14 +455,18 @@ export class AccessService {
   }
 
   async getGrupoFrontMods(id: number) {
-    const group = await this.grupFrontRepo.findOne({ where: { IDGRUPMOD_FRONT: id } });
+    const group = await this.grupFrontRepo.findOne({
+      where: { IDGRUPMOD_FRONT: id },
+    });
     if (!group) throw new NotFoundException(`GRUPMOD_FRONT ${id} no existe`);
 
     const rel = await this.gfmRepo.find({ where: { IDGRUPMOD_FRONT: id } });
     const ids = rel.map((r) => r.IDMOD_FRONT);
     if (ids.length === 0) return [];
 
-    const mods = await this.modFrontRepo.find({ where: { IDMOD_FRONT: In(ids) } });
+    const mods = await this.modFrontRepo.find({
+      where: { IDMOD_FRONT: In(ids) },
+    });
     const byId = new Map(mods.map((m) => [m.IDMOD_FRONT, m]));
 
     return ids
@@ -458,19 +484,25 @@ export class AccessService {
 
   async setGrupoFrontMods(id: number, dto: AssignFrontModulesToGroupDto) {
     // TEMP: log para validar payload y persistencia
-    // eslint-disable-next-line no-console
+
     console.log('[access.setGrupoFrontMods] id:', id, 'dto:', dto);
-    const group = await this.grupFrontRepo.findOne({ where: { IDGRUPMOD_FRONT: id } });
+    const group = await this.grupFrontRepo.findOne({
+      where: { IDGRUPMOD_FRONT: id },
+    });
     if (!group) throw new NotFoundException(`GRUPMOD_FRONT ${id} no existe`);
 
     const ids = Array.from(new Set((dto.idModFront ?? []).map(Number)));
 
     if (ids.length > 0) {
-      const mods = await this.modFrontRepo.find({ where: { IDMOD_FRONT: In(ids) } });
+      const mods = await this.modFrontRepo.find({
+        where: { IDMOD_FRONT: In(ids) },
+      });
       const found = new Set(mods.map((m) => m.IDMOD_FRONT));
       const missing = ids.filter((mid) => !found.has(mid));
       if (missing.length) {
-        throw new NotFoundException(`No existen módulos front: ${missing.join(', ')}`);
+        throw new NotFoundException(
+          `No existen módulos front: ${missing.join(', ')}`,
+        );
       }
     }
 
@@ -478,12 +510,14 @@ export class AccessService {
       await manager.delete(GrupmodFrontModEntity, { IDGRUPMOD_FRONT: id });
       if (ids.length === 0) return;
       const rows = ids.map((mid) =>
-        manager.create(GrupmodFrontModEntity, { IDGRUPMOD_FRONT: id, IDMOD_FRONT: mid }),
+        manager.create(GrupmodFrontModEntity, {
+          IDGRUPMOD_FRONT: id,
+          IDMOD_FRONT: mid,
+        }),
       );
       await manager.save(GrupmodFrontModEntity, rows);
     });
 
-    // eslint-disable-next-line no-console
     console.log('[access.setGrupoFrontMods] saved ids:', ids);
     return { idGrupmodFront: id, idModFront: ids };
   }
@@ -553,8 +587,11 @@ export class AccessService {
   async setFrontEnrollment(roleId: number, dto: AssignFrontGroupToRoleDto) {
     const groupId = Number(dto.idGrupmodFront);
     if (groupId !== 0) {
-      const group = await this.grupFrontRepo.findOne({ where: { IDGRUPMOD_FRONT: groupId } });
-      if (!group) throw new NotFoundException(`GRUPMOD_FRONT ${groupId} no existe`);
+      const group = await this.grupFrontRepo.findOne({
+        where: { IDGRUPMOD_FRONT: groupId },
+      });
+      if (!group)
+        throw new NotFoundException(`GRUPMOD_FRONT ${groupId} no existe`);
     }
 
     const payload: Partial<RolGrupmodFrontEntity> = {
@@ -579,12 +616,16 @@ export class AccessService {
   // -------- FRONT MENU --------
   async getFrontMenu(roleId: number) {
     // TEMP: log para validar rol y grupos aplicados
-    // eslint-disable-next-line no-console
+
     console.log('[access.getFrontMenu] roleId:', roleId);
     if (roleId === 0) {
       const rows = await this.modFrontRepo.find({ where: { ACTIVO: true } });
       return rows
-        .map((m) => ({ codigo: m.CODIGO, nombre: m.NOMBRE, depto: m.DEPTO ?? null }))
+        .map((m) => ({
+          codigo: m.CODIGO,
+          nombre: m.NOMBRE,
+          depto: m.DEPTO ?? null,
+        }))
         .sort((a, b) => {
           const deptoA = (a.depto ?? '').trim();
           const deptoB = (b.depto ?? '').trim();
@@ -596,16 +637,20 @@ export class AccessService {
       where: { IDROL: roleId, ACTIVO: true },
     });
 
-    // eslint-disable-next-line no-console
     console.log(
       '[access.getFrontMenu] assigns:',
-      assigns.map((a) => ({ IDROL: a.IDROL, IDGRUPMOD_FRONT: a.IDGRUPMOD_FRONT, ACTIVO: a.ACTIVO })),
+      assigns.map((a) => ({
+        IDROL: a.IDROL,
+        IDGRUPMOD_FRONT: a.IDGRUPMOD_FRONT,
+        ACTIVO: a.ACTIVO,
+      })),
     );
 
-    const groupIds = assigns.map((a) => a.IDGRUPMOD_FRONT).filter((x) => x !== 0);
+    const groupIds = assigns
+      .map((a) => a.IDGRUPMOD_FRONT)
+      .filter((x) => x !== 0);
     if (!groupIds.length) return [];
 
-    // eslint-disable-next-line no-console
     console.log('[access.getFrontMenu] groupIds:', groupIds);
 
     const rel = await this.gfmRepo
@@ -617,7 +662,6 @@ export class AccessService {
       .andWhere('gfm.IDGRUPMOD_FRONT IN (:...ids)', { ids: groupIds })
       .getMany();
 
-    // eslint-disable-next-line no-console
     console.log('[access.getFrontMenu] rel count:', rel.length);
 
     const byId = new Map<number, ModFrontEntity>();

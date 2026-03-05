@@ -1,7 +1,6 @@
 import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { GrupmodFrontModEntity } from './grupmod-front-mod.entity';
 
-
 @Entity({ name: 'MOD_FRONT', schema: 'dbo' })
 export class ModFrontEntity {
   @PrimaryGeneratedColumn()
@@ -22,6 +21,9 @@ export class ModFrontEntity {
   @Column({ type: 'nvarchar', length: 100, nullable: true })
   DEPTO: string | null;
 
-  @OneToMany(() => GrupmodFrontModEntity, (x: GrupmodFrontModEntity) => x.MODULO)
+  @OneToMany(
+    () => GrupmodFrontModEntity,
+    (x: GrupmodFrontModEntity) => x.MODULO,
+  )
   GRUPOS: GrupmodFrontModEntity[];
 }

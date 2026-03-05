@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { PvCtrFolFormEntity } from './pvctrfolform.entity';
@@ -68,7 +72,9 @@ export class PvCtrFolFormService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar PV_CTR_FOL_FORM ${idf} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar PV_CTR_FOL_FORM ${idf} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

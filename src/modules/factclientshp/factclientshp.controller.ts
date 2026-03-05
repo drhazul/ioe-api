@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { FactClientShpService } from './factclientshp.service';
@@ -28,7 +37,11 @@ export class FactClientShpController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateFactClientShpDto, @Req() req: any) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateFactClientShpDto,
+    @Req() req: any,
+  ) {
     return this.service.update(Number(id), dto, req.user);
   }
 }

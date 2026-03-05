@@ -30,4 +30,3 @@ export class PagoFinalizarFormaDto {
   @Length(1, 255)
   aut?: string;
 }
-

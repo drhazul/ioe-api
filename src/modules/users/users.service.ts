@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
@@ -8,11 +12,19 @@ import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectRepository(UsuarioEntity) private readonly repo: Repository<UsuarioEntity>) {}
+  constructor(
+    @InjectRepository(UsuarioEntity)
+    private readonly repo: Repository<UsuarioEntity>,
+  ) {}
 
   findAll() {
     return this.repo.find({
-      relations: { ROL: true, DEPARTAMENTO: true, PUESTO: true, SUCURSAL: true },
+      relations: {
+        ROL: true,
+        DEPARTAMENTO: true,
+        PUESTO: true,
+        SUCURSAL: true,
+      },
       order: { IDUSUARIO: 'ASC' },
     });
   }
@@ -20,7 +32,12 @@ export class UsersService {
   async findOne(id: number) {
     const row = await this.repo.findOne({
       where: { IDUSUARIO: id },
-      relations: { ROL: true, DEPARTAMENTO: true, PUESTO: true, SUCURSAL: true },
+      relations: {
+        ROL: true,
+        DEPARTAMENTO: true,
+        PUESTO: true,
+        SUCURSAL: true,
+      },
     });
     if (!row) throw new NotFoundException(`USUARIO ${id} no existe`);
     return row;
@@ -31,8 +48,11 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto) {
-    const existsUser = await this.repo.exist({ where: { USERNAME: dto.USERNAME } });
-    if (existsUser) throw new ConflictException(`USERNAME ${dto.USERNAME} ya existe`);
+    const existsUser = await this.repo.exist({
+      where: { USERNAME: dto.USERNAME },
+    });
+    if (existsUser)
+      throw new ConflictException(`USERNAME ${dto.USERNAME} ya existe`);
 
     const existsMail = await this.repo.exist({ where: { MAIL: dto.MAIL } });
     if (existsMail) throw new ConflictException(`MAIL ${dto.MAIL} ya existe`);
@@ -58,7 +78,7 @@ export class UsersService {
 
   async update(id: number, dto: UpdateUserDto) {
     // Debug log to verify incoming payload values during updates
-    // eslint-disable-next-line no-console
+
     console.log('UpdateUserDto', { id, dto });
     const row = await this.findOne(id);
 
@@ -70,8 +90,11 @@ export class UsersService {
 
     // No permitir cambiar USERNAME/MAIL a duplicados
     if (dto.USERNAME && dto.USERNAME !== row.USERNAME) {
-      const exists = await this.repo.exist({ where: { USERNAME: dto.USERNAME } });
-      if (exists) throw new ConflictException(`USERNAME ${dto.USERNAME} ya existe`);
+      const exists = await this.repo.exist({
+        where: { USERNAME: dto.USERNAME },
+      });
+      if (exists)
+        throw new ConflictException(`USERNAME ${dto.USERNAME} ya existe`);
     }
     if (dto.MAIL && dto.MAIL !== row.MAIL) {
       const exists = await this.repo.exist({ where: { MAIL: dto.MAIL } });
@@ -85,7 +108,7 @@ export class UsersService {
       ...rest,
       PASSWORD_HASH,
     };
-    Object.keys(payload).forEach(key => {
+    Object.keys(payload).forEach((key) => {
       if (payload[key as keyof typeof payload] === undefined) {
         delete payload[key as keyof typeof payload];
       }

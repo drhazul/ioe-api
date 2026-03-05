@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsNumber, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+} from 'class-validator';
 
 const ALMACENES = ['001', '002', 'M001', 'T001'] as const;
 type Almacen = (typeof ALMACENES)[number];
@@ -11,19 +18,28 @@ export class CreateDatContCapDto {
   @Length(1, 30)
   cont: string;
 
-  @ApiPropertyOptional({ description: 'Solo admin puede sobrescribir. Por defecto se usa SUC del token.' })
+  @ApiPropertyOptional({
+    description:
+      'Solo admin puede sobrescribir. Por defecto se usa SUC del token.',
+  })
   @IsOptional()
   @IsString()
   @Length(1, 5)
   suc?: string;
 
-  @ApiPropertyOptional({ example: '7501031311309', description: 'UPC/EAN13 del artículo' })
+  @ApiPropertyOptional({
+    example: '7501031311309',
+    description: 'UPC/EAN13 del artículo',
+  })
   @IsOptional()
   @IsString()
   @Length(1, 15)
   upc?: string;
 
-  @ApiPropertyOptional({ example: 'A12345', description: 'Código ART si ya se conoce' })
+  @ApiPropertyOptional({
+    example: 'A12345',
+    description: 'Código ART si ya se conoce',
+  })
   @IsOptional()
   @IsString()
   @Length(1, 50)
@@ -34,7 +50,11 @@ export class CreateDatContCapDto {
   @IsIn(ALMACENES)
   almacen: Almacen;
 
-  @ApiProperty({ example: 5.5, description: 'Cantidad capturada; se admite delta negativo para correcciones.' })
+  @ApiProperty({
+    example: 5.5,
+    description:
+      'Cantidad capturada; se admite delta negativo para correcciones.',
+  })
   @Type(() => Number)
   @IsNumber()
   cantidad: number;

@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Like, Repository } from 'typeorm';
 import { Datmb51Entity } from './datmb51.entity';
@@ -34,8 +38,12 @@ export class Datmb51Service {
     }
     if (pairSet.size === 0) return rows;
 
-    const sucs = Array.from(new Set(Array.from(pairSet.values()).map((p) => p.suc)));
-    const arts = Array.from(new Set(Array.from(pairSet.values()).map((p) => p.art)));
+    const sucs = Array.from(
+      new Set(Array.from(pairSet.values()).map((p) => p.suc)),
+    );
+    const arts = Array.from(
+      new Set(Array.from(pairSet.values()).map((p) => p.art)),
+    );
     const desRows = await this.dataSource.query(
       `
       SELECT SUC, ART, MAX(DES) AS DES
@@ -70,7 +78,13 @@ export class Datmb51Service {
     });
   }
 
-  findAll(q?: { idpd?: string; user?: string; art?: string; almacen?: string; suc?: string }) {
+  findAll(q?: {
+    idpd?: string;
+    user?: string;
+    art?: string;
+    almacen?: string;
+    suc?: string;
+  }) {
     const where: any = {};
     if (q?.idpd) where.IDPD = Like(`%${q.idpd}%`);
     if (q?.user) where.USER = Like(`%${q.user}%`);
@@ -140,10 +154,18 @@ export class Datmb51Service {
   }
 
   async search(dto: SearchDatMb51Dto) {
-    const fechaDocDesde = dto.fechaDocDesde ? new Date(dto.fechaDocDesde) : null;
-    const fechaDocHasta = dto.fechaDocHasta ? new Date(dto.fechaDocHasta) : null;
-    const fechaContDesde = dto.fechaContDesde ? new Date(dto.fechaContDesde) : null;
-    const fechaContHasta = dto.fechaContHasta ? new Date(dto.fechaContHasta) : null;
+    const fechaDocDesde = dto.fechaDocDesde
+      ? new Date(dto.fechaDocDesde)
+      : null;
+    const fechaDocHasta = dto.fechaDocHasta
+      ? new Date(dto.fechaDocHasta)
+      : null;
+    const fechaContDesde = dto.fechaContDesde
+      ? new Date(dto.fechaContDesde)
+      : null;
+    const fechaContHasta = dto.fechaContHasta
+      ? new Date(dto.fechaContHasta)
+      : null;
 
     if (fechaDocHasta) fechaDocHasta.setHours(23, 59, 59, 999);
     if (fechaContHasta) fechaContHasta.setHours(23, 59, 59, 999);
@@ -151,19 +173,23 @@ export class Datmb51Service {
     const wantsAll = dto.page == null && dto.limit == null;
     const rawPage = Number(dto.page ?? 1);
     const rawLimit = Number(dto.limit ?? 50);
-    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 50;
+    const page =
+      Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+    const limit =
+      Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 50;
     const safeLimit = wantsAll ? null : limit;
 
     const normalizeStringList = (list?: string[]) => {
       const values = (list ?? [])
-        .map(v => String(v ?? '').trim())
-        .filter(v => v.length > 0);
+        .map((v) => String(v ?? '').trim())
+        .filter((v) => v.length > 0);
       return values;
     };
 
     const normalizeNumList = (list?: number[]) => {
-      const values = (list ?? []).filter(v => Number.isFinite(Number(v))).map(v => Number(v));
+      const values = (list ?? [])
+        .filter((v) => Number.isFinite(Number(v)))
+        .map((v) => Number(v));
       return values;
     };
 
@@ -177,11 +203,22 @@ export class Datmb51Service {
     const almacenesCsv = almacenes.length > 1 ? almacenes.join(',') : null;
     const clsmsCsv = clsms.length > 1 ? clsms.join(',') : null;
 
-    const artSingle = arts.length > 1 ? null : arts.length === 1 ? arts[0] : dto.art ?? null;
-    const sucSingle = sucs.length > 1 ? null : sucs.length === 1 ? sucs[0] : dto.suc ?? null;
+    const artSingle =
+      arts.length > 1 ? null : arts.length === 1 ? arts[0] : (dto.art ?? null);
+    const sucSingle =
+      sucs.length > 1 ? null : sucs.length === 1 ? sucs[0] : (dto.suc ?? null);
     const almacenSingle =
-      almacenes.length > 1 ? null : almacenes.length === 1 ? almacenes[0] : dto.almacen ?? null;
-    const clsmSingle = clsms.length > 1 ? null : clsms.length === 1 ? clsms[0] : dto.clsm ?? null;
+      almacenes.length > 1
+        ? null
+        : almacenes.length === 1
+          ? almacenes[0]
+          : (dto.almacen ?? null);
+    const clsmSingle =
+      clsms.length > 1
+        ? null
+        : clsms.length === 1
+          ? clsms[0]
+          : (dto.clsm ?? null);
 
     const paramsByName: Record<string, any> = {
       fecha_doc_desde: fechaDocDesde,
@@ -216,7 +253,9 @@ export class Datmb51Service {
         WHERE object_id = OBJECT_ID('dbo.sp_dat_mb51_search')
         `,
       );
-      const names = (paramRows ?? []).map((row: any) => String(row?.name ?? '').toLowerCase());
+      const names = (paramRows ?? []).map((row: any) =>
+        String(row?.name ?? '').toLowerCase(),
+      );
       paramCount = names.length;
       const nameSet = new Set(names);
       supportsTxt = nameSet.has('@txt');
@@ -233,7 +272,9 @@ export class Datmb51Service {
       supportsLists = false;
     }
     const hasSp = paramCount > 0;
-    const wantsListFilters = Boolean(artsCsv || almacenesCsv || sucsCsv || clsmsCsv);
+    const wantsListFilters = Boolean(
+      artsCsv || almacenesCsv || sucsCsv || clsmsCsv,
+    );
 
     let rows: any[] = [];
     if (hasSp && (!wantsListFilters || supportsLists)) {
@@ -254,8 +295,10 @@ export class Datmb51Service {
       if (supportsLists) order.push('arts', 'almacenes', 'sucs', 'clsms');
       if (supportsPaging) order.push('page', 'limit');
 
-      const params = order.map(name => paramsByName[name]);
-      const assignments = order.map((name, idx) => `@${name}=@${idx}`).join(',\n          ');
+      const params = order.map((name) => paramsByName[name]);
+      const assignments = order
+        .map((name, idx) => `@${name}=@${idx}`)
+        .join(',\n          ');
       rows = await this.dataSource.query(
         `
         EXEC dbo.sp_dat_mb51_search
@@ -358,8 +401,11 @@ export class Datmb51Service {
     }
 
     rows = await this.appendDescripcion(rows);
-    const totalFromRow = rows?.[0]?.TOTAL_COUNT ?? rows?.[0]?.total_count ?? rows?.[0]?.Total_Count;
-    let items = (rows ?? []).map(row => {
+    const totalFromRow =
+      rows?.[0]?.TOTAL_COUNT ??
+      rows?.[0]?.total_count ??
+      rows?.[0]?.Total_Count;
+    let items = (rows ?? []).map((row) => {
       if (row && Object.prototype.hasOwnProperty.call(row, 'TOTAL_COUNT')) {
         const { TOTAL_COUNT, ...rest } = row;
         return rest;
@@ -375,7 +421,9 @@ export class Datmb51Service {
       return row;
     });
 
-    let total = Number.isFinite(Number(totalFromRow)) ? Number(totalFromRow) : rows.length;
+    let total = Number.isFinite(Number(totalFromRow))
+      ? Number(totalFromRow)
+      : rows.length;
     if (!wantsAll && hasSp && !supportsPaging) {
       total = items.length;
       const start = (page - 1) * limit;

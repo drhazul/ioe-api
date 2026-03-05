@@ -238,9 +238,8 @@ export class PvCotizacionesCierreService {
     }
     const folio = (folioRows[0] ?? {}) as Record<string, unknown>;
     const tipotran = this.normalizeTipoTranFromFolio(folio.AUT);
-    const rqfac = tipotran === 'CA'
-      ? false
-      : (this.toInt(folio.REQF) ?? 0) === 1;
+    const rqfac =
+      tipotran === 'CA' ? false : (this.toInt(folio.REQF) ?? 0) === 1;
 
     const totals = this.calculateTotals({
       totalBase: context.totalBase,
@@ -256,14 +255,14 @@ export class PvCotizacionesCierreService {
       this.loadPrintOrds(this.dataSource, idfol),
     ]);
 
-    const sumPagos = this.round2(formas.reduce((acc, item) => acc + item.impp, 0));
+    const sumPagos = this.round2(
+      formas.reduce((acc, item) => acc + item.impp, 0),
+    );
     const faltante = this.round2(Math.max(totals.total - sumPagos, 0));
     const cambio = this.round2(Math.max(sumPagos - totals.total, 0));
 
     const opv =
-      this.normalizeText(folio.OPVM) ||
-      this.normalizeText(folio.OPV) ||
-      null;
+      this.normalizeText(folio.OPVM) || this.normalizeText(folio.OPV) || null;
     const clienteId = context.clien;
     const [opvNombre, clienteNombre] = await Promise.all([
       this.loadOpvNombre(this.dataSource, opv),
@@ -306,7 +305,9 @@ export class PvCotizacionesCierreService {
       null;
     const formas = this.normalizeFormas(dto.formas ?? []);
     if (!formas.length) {
-      throw new BadRequestException('Debe registrar al menos una forma de pago');
+      throw new BadRequestException(
+        'Debe registrar al menos una forma de pago',
+      );
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -496,11 +497,10 @@ export class PvCotizacionesCierreService {
         const imppCol = this.toNumber(this.getRowValue(row, 'IMPP'));
         const impdCol = this.toNumber(this.getRowValue(row, 'IMPD'));
         const imppRaw =
-          imppCol != null && imppCol > 0
-            ? imppCol
-            : (impdCol ?? imppCol ?? 0);
+          imppCol != null && imppCol > 0 ? imppCol : (impdCol ?? imppCol ?? 0);
         return {
-          idf: this.normalizeText(this.getRowValue(row, 'IDF') ?? '') ||
+          idf:
+            this.normalizeText(this.getRowValue(row, 'IDF') ?? '') ||
             `F-${index + 1}`,
           form: this.normalizeText(this.getRowValue(row, 'FORM') ?? ''),
           impp: this.round2(imppRaw),
@@ -560,7 +560,10 @@ export class PvCotizacionesCierreService {
     for (const ord of headers) {
       if (ord.iord) byIord.set(this.normalizeUpper(ord.iord), ord);
     }
-    if (!byIord.size || !(await this.tableExists(executor, 'dbo.PV_CTR_ORDS_DET'))) {
+    if (
+      !byIord.size ||
+      !(await this.tableExists(executor, 'dbo.PV_CTR_ORDS_DET'))
+    ) {
       return headers.filter((item) => item.iord);
     }
 
@@ -1704,8 +1707,8 @@ export class PvCotizacionesCierreService {
     const cambio = this.round2(
       this.toNumber(this.getRowValue(row, 'cambio')) ?? 0,
     );
-    const idfolRes = this.normalizeText(this.getRowValue(row, 'idfol') ?? '') ||
-      input.idfol;
+    const idfolRes =
+      this.normalizeText(this.getRowValue(row, 'idfol') ?? '') || input.idfol;
 
     return {
       ok: true,
@@ -1761,7 +1764,9 @@ export class PvCotizacionesCierreService {
     }
 
     if (error instanceof Error) return error;
-    return new InternalServerErrorException('Error interno al cerrar cotizacion');
+    return new InternalServerErrorException(
+      'Error interno al cerrar cotizacion',
+    );
   }
 
   private extractSqlMessage(error: QueryFailedError) {

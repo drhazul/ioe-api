@@ -28,7 +28,10 @@ export class PvDevolucionesController {
   constructor(private readonly service: PvDevolucionesService) {}
 
   @Get()
-  list(@Query() query: ListDevolucionesQueryDto, @CurrentUser() user: JwtPayload) {
+  list(
+    @Query() query: ListDevolucionesQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.list(query, user);
   }
 

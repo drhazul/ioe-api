@@ -11,7 +11,9 @@ import {
 } from 'class-validator';
 
 export class UploadDocumentoDto {
-  @ApiPropertyOptional({ description: 'Usuario dueño del documento (default usuario JWT)' })
+  @ApiPropertyOptional({
+    description: 'Usuario dueño del documento (default usuario JWT)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -31,7 +33,9 @@ export class UploadDocumentoDto {
   @Length(1, 10)
   SUC?: string;
 
-  @ApiProperty({ enum: ['EXPEDIENTE', 'JUSTIFICANTE', 'INE', 'CONTRATO', 'OTRO'] })
+  @ApiProperty({
+    enum: ['EXPEDIENTE', 'JUSTIFICANTE', 'INE', 'CONTRATO', 'OTRO'],
+  })
   @IsString()
   @IsIn(['EXPEDIENTE', 'JUSTIFICANTE', 'INE', 'CONTRATO', 'OTRO'])
   TIPO: string;

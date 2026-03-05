@@ -1,6 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsArray, IsDateString, IsInt, IsNumber, IsOptional, IsString, Length, Min } from 'class-validator';
+import {
+  IsArray,
+  IsDateString,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Length,
+  Min,
+} from 'class-validator';
 
 const trimOrUndefined = ({ value }: { value: unknown }) => {
   if (value === undefined || value === null) return undefined;

@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { DatCatRegEntity } from './datcatreg.entity';
@@ -23,8 +27,13 @@ export class DatCatRegService {
   }
 
   async create(dto: CreateDatCatRegDto) {
-    const exists = await this.repo.exist({ where: { C_REGIMENFISCAL: dto.C_REGIMENFISCAL } });
-    if (exists) throw new ConflictException(`C_RegimenFiscal ${dto.C_REGIMENFISCAL} ya existe`);
+    const exists = await this.repo.exist({
+      where: { C_REGIMENFISCAL: dto.C_REGIMENFISCAL },
+    });
+    if (exists)
+      throw new ConflictException(
+        `C_RegimenFiscal ${dto.C_REGIMENFISCAL} ya existe`,
+      );
 
     const entity = this.repo.create({
       C_REGIMENFISCAL: dto.C_REGIMENFISCAL,
@@ -38,7 +47,8 @@ export class DatCatRegService {
     const row = await this.findOne(id);
 
     const partial: Partial<DatCatRegEntity> = {};
-    if (dto.DESCRIPCION !== undefined) partial.DESCRIPCION = dto.DESCRIPCION ?? null;
+    if (dto.DESCRIPCION !== undefined)
+      partial.DESCRIPCION = dto.DESCRIPCION ?? null;
 
     const updated = this.repo.merge(row, partial);
     return this.repo.save(updated);
@@ -50,7 +60,9 @@ export class DatCatRegService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar DAT_CAT_REG ${id} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar DAT_CAT_REG ${id} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

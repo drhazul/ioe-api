@@ -1,6 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class ListTimelogsDto {
   @ApiPropertyOptional({ description: 'Sucursal (SUC)' })
@@ -9,7 +17,9 @@ export class ListTimelogsDto {
   @Length(1, 10)
   suc?: string;
 
-  @ApiPropertyOptional({ description: 'Usuario a consultar (solo admin/manager)' })
+  @ApiPropertyOptional({
+    description: 'Usuario a consultar (solo admin/manager)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

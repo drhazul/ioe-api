@@ -1,4 +1,10 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { UsuarioEntity } from '../users/usuario.entity';
 
 @Entity({ name: 'USUARIO_TOKEN', schema: 'dbo' })

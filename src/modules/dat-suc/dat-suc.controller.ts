@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { DatSucService } from './dat-suc.service';
 import { CreateDatSucDto } from './dto/create-dat-suc.dto';
@@ -6,7 +15,6 @@ import { UpdateDatSucDto } from './dto/update-dat-suc.dto';
 import { UseGuards } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-
 
 @ApiTags('dat-suc')
 @ApiBearerAuth('jwt-auth')
@@ -16,10 +24,7 @@ export class DatSucController {
   constructor(private readonly service: DatSucService) {}
 
   @Get()
-  findAll(
-    @Query('suc') suc?: string,
-    @Query('desc') desc?: string,
-  ) {
+  findAll(@Query('suc') suc?: string, @Query('desc') desc?: string) {
     return this.service.findAll({ suc, desc });
   }
 

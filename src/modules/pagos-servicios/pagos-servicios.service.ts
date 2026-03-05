@@ -17,6 +17,7 @@ import { SetPsTicketReferenceFolioDto } from './dto/set-ps-ticket-reference-foli
 import { SetPsTicketReferenceGastoDto } from './dto/set-ps-ticket-reference-gasto.dto';
 import { UpdatePsFolioClienteDto } from './dto/update-ps-folio-cliente.dto';
 import { UpdatePsTicketPvtaDto } from './dto/update-ps-ticket-pvta.dto';
+import { FinalizePsPagoDto } from './dto/finalize-ps-pago.dto';
 
 type FolioRow = {
   IDFOL: string;
@@ -37,30 +38,68 @@ export class PagosServiciosService {
     try {
       const isAdmin = this.isAdmin(user);
       const actorSuc = this.normalize(user?.suc ?? '');
+      const actorOpv = this.normalize(user?.username ?? '');
       const requestedSuc = this.normalize(query.suc ?? '');
-      const esta = this.normalize(query.esta ?? 'PENDIENTE').toUpperCase() || 'PENDIENTE';
+      const requestedOpv = this.normalize(query.opv ?? '');
+      const esta =
+        this.normalize(query.esta ?? 'PENDIENTE').toUpperCase() || 'PENDIENTE';
       const search = this.normalize(query.search ?? '');
 
       if (!isAdmin && actorSuc.length === 0) {
-        throw new BadRequestException('Usuario sin sucursal para consultar panel PS');
+        throw new BadRequestException(
+          'Usuario sin sucursal para consultar panel PS',
+        );
       }
-      if (!isAdmin && requestedSuc && this.normalizeUpper(requestedSuc) !== this.normalizeUpper(actorSuc)) {
-        throw new ForbiddenException('No autorizado para consultar folios PS de otra sucursal');
+      if (
+        !isAdmin &&
+        requestedSuc &&
+        this.normalizeUpper(requestedSuc) !== this.normalizeUpper(actorSuc)
+      ) {
+        throw new ForbiddenException(
+          'No autorizado para consultar folios PS de otra sucursal',
+        );
       }
 
-      const suc = isAdmin ? (requestedSuc || null) : (requestedSuc || actorSuc);
+      if (actorOpv.length === 0) {
+        throw new BadRequestException(
+          'Usuario sin OPV para consultar panel PS',
+        );
+      }
+      if (
+        requestedOpv &&
+        this.normalizeUpper(requestedOpv) !== this.normalizeUpper(actorOpv)
+      ) {
+        throw new ForbiddenException(
+          'No autorizado para consultar folios PS de otro OPV',
+        );
+      }
+
+      const suc = isAdmin ? requestedSuc || null : requestedSuc || actorSuc;
+      const opvNorm = this.normalizeUpper(actorOpv);
 
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_ps_folios_list @SUC=@0, @ESTA=@1, @SEARCH=@2',
         [suc, esta, search || null],
       );
 
+      const items = Array.isArray(rows)
+        ? rows.filter((row) => {
+            const rowObj = row as Record<string, unknown>;
+            const rowOpv = this.normalizeUpper(rowObj?.OPV ?? '');
+            const rowOpvm = this.normalizeUpper(rowObj?.OPVM ?? '');
+            return rowOpv === opvNorm || rowOpvm === opvNorm;
+          })
+        : [];
+
       return {
         ok: true,
-        items: rows ?? [],
+        items,
       };
     } catch (error) {
-      throw this.mapError(error, 'No se pudo consultar panel de Pago de Servicios');
+      throw this.mapError(
+        error,
+        'No se pudo consultar panel de Pago de Servicios',
+      );
     }
   }
 
@@ -87,13 +126,22 @@ export class PagosServiciosService {
 
       if (!isAdmin) {
         if (!actorSuc) {
-          throw new BadRequestException('Usuario sin sucursal para crear folio PS');
+          throw new BadRequestException(
+            'Usuario sin sucursal para crear folio PS',
+          );
         }
         if (this.normalizeUpper(suc) !== this.normalizeUpper(actorSuc)) {
-          throw new ForbiddenException('No autorizado para crear folio PS en otra sucursal');
+          throw new ForbiddenException(
+            'No autorizado para crear folio PS en otra sucursal',
+          );
         }
-        if (actorOpv && this.normalizeUpper(opv) !== this.normalizeUpper(actorOpv)) {
-          throw new ForbiddenException('No autorizado para crear folio PS con otro OPV');
+        if (
+          actorOpv &&
+          this.normalizeUpper(opv) !== this.normalizeUpper(actorOpv)
+        ) {
+          throw new ForbiddenException(
+            'No autorizado para crear folio PS con otro OPV',
+          );
         }
       }
 
@@ -127,7 +175,10 @@ export class PagosServiciosService {
   async getPanel(idFolRaw: string, user: JwtPayload) {
     try {
       const folio = await this.loadFolio(idFolRaw, user);
-      const rows = await this.dataSource.query('EXEC dbo.sp_ps_panel_get @IDFOL=@0', [folio.IDFOL]);
+      const rows = await this.dataSource.query(
+        'EXEC dbo.sp_ps_panel_get @IDFOL=@0',
+        [folio.IDFOL],
+      );
       const row = this.firstRow(rows);
 
       const header = this.parseJsonObject(row?.HEADER_JSON) ?? {
@@ -144,7 +195,10 @@ export class PagosServiciosService {
         referenciasGasto: this.parseJsonArray(row?.GASTOS_JSON),
       };
     } catch (error) {
-      throw this.mapError(error, 'No se pudo consultar detalle de Pago de Servicios');
+      throw this.mapError(
+        error,
+        'No se pudo consultar detalle de Pago de Servicios',
+      );
     }
   }
 
@@ -195,9 +249,13 @@ export class PagosServiciosService {
   ) {
     try {
       const folio = await this.loadFolio(idFolRaw, user);
+      const ids = this.normalizeUpper(dto.ids);
+      if (['AD', 'AP', 'CR'].includes(ids) && (folio.CLIEN ?? 0) <= 1) {
+        throw new BadRequestException('Seleccione Cliente');
+      }
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_ps_ticket_add_service @IDFOL=@0, @IDS=@1, @USER=@2',
-        [folio.IDFOL, this.normalizeUpper(dto.ids), this.auditActor(user)],
+        [folio.IDFOL, ids, this.auditActor(user)],
       );
       const result = this.firstRow(rows);
 
@@ -208,7 +266,7 @@ export class PagosServiciosService {
         suc: folio.SUC,
         metadata: {
           idfol: folio.IDFOL,
-          ids: this.normalizeUpper(dto.ids),
+          ids,
           result,
         },
         user,
@@ -259,6 +317,48 @@ export class PagosServiciosService {
     }
   }
 
+  async getAdeudosFolioDetalle(
+    clientRaw: string,
+    idFolRaw: string,
+    _user: JwtPayload,
+  ) {
+    try {
+      const clientText = this.normalize(clientRaw);
+      if (!/^\d+$/.test(clientText)) {
+        throw new BadRequestException('client debe ser entero positivo');
+      }
+      const clientBigInt = BigInt(clientText);
+      if (clientBigInt <= 0n) {
+        throw new BadRequestException('client debe ser entero positivo');
+      }
+
+      const idFol = this.normalize(idFolRaw);
+      if (!idFol) {
+        throw new BadRequestException('idFol es requerido');
+      }
+
+      const rows = await this.dataSource.query(
+        'EXEC dbo.sp_ps_adeudos_folio_detalle @CLIENT=@0, @IDFOL=@1',
+        [clientText, idFol],
+      );
+      const row = this.firstRow(rows);
+      const detalleJson = this.pickRowValue(row, [
+        'DETALLE_JSON',
+        'detalle_json',
+        'Detalle_Json',
+      ]);
+
+      return {
+        ok: true,
+        client: clientText,
+        idFol,
+        items: this.parseJsonArray(detalleJson),
+      };
+    } catch (error) {
+      throw this.mapError(error, 'No se pudo consultar detalle de adeudos por folio');
+    }
+  }
+
   async setTicketReferenceFolio(
     idFolRaw: string,
     dto: SetPsTicketReferenceFolioDto,
@@ -295,7 +395,10 @@ export class PagosServiciosService {
 
       return result;
     } catch (error) {
-      throw this.mapError(error, 'No se pudo asignar referencia de folio al ticket PS');
+      throw this.mapError(
+        error,
+        'No se pudo asignar referencia de folio al ticket PS',
+      );
     }
   }
 
@@ -335,7 +438,10 @@ export class PagosServiciosService {
 
       return result;
     } catch (error) {
-      throw this.mapError(error, 'No se pudo asignar referencia de gasto al ticket PS');
+      throw this.mapError(
+        error,
+        'No se pudo asignar referencia de gasto al ticket PS',
+      );
     }
   }
 
@@ -349,12 +455,7 @@ export class PagosServiciosService {
       const folio = await this.loadFolio(idFolRaw, user);
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_ps_ticket_update_pvta @IDFOL=@0, @ART=@1, @PVTA=@2, @USER=@3',
-        [
-          folio.IDFOL,
-          this.normalize(dto.art),
-          dto.pvta,
-          this.auditActor(user),
-        ],
+        [folio.IDFOL, this.normalize(dto.art), dto.pvta, this.auditActor(user)],
       );
       const result = this.firstRow(rows);
 
@@ -536,31 +637,60 @@ export class PagosServiciosService {
     }
   }
 
-  async terminar(idFolRaw: string, user: JwtPayload, ip: string | null) {
+  async finalizarPago(
+    idFolRaw: string,
+    dto: FinalizePsPagoDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
     try {
       const folio = await this.loadFolio(idFolRaw, user);
+      const formas = Array.isArray(dto?.formas)
+        ? dto.formas
+            .map((item) => ({
+              form: this.normalizeUpper(item?.form),
+              impp: this.toNumber(item?.impp),
+              aut: this.normalize(item?.aut ?? '') || null,
+            }))
+            .filter(
+              (item) =>
+                item.form.length > 0 && item.impp != null && item.impp > 0,
+            )
+        : [];
+      if (formas.length === 0) {
+        throw new BadRequestException(
+          'Debe enviar al menos una forma de pago válida',
+        );
+      }
+
       const rows = await this.dataSource.query(
-        'EXEC dbo.sp_ps_terminar @IDFOL=@0, @USER=@1',
-        [folio.IDFOL, this.auditActor(user)],
+        'EXEC dbo.sp_ps_pago_finalize @IDFOL=@0, @FORMAS_JSON=@1, @USER=@2',
+        [folio.IDFOL, JSON.stringify(formas), this.auditActor(user)],
       );
       const result = this.firstRow(rows);
+      const summary = await this.fetchSummary(folio.IDFOL);
 
       await this.auditMutation({
-        action: 'PS_TERMINAR',
+        action: 'PS_PAGO_FINALIZAR',
         entity: 'PV_CTR_FOL_ASVR',
         entityId: folio.IDFOL,
         suc: folio.SUC,
         metadata: {
           idfol: folio.IDFOL,
+          formas,
           result,
         },
         user,
         ip,
       });
 
-      return result;
+      return {
+        ok: true,
+        result: result ?? { idfol: folio.IDFOL },
+        summary,
+      };
     } catch (error) {
-      throw this.mapError(error, 'No se pudo terminar folio PS');
+      throw this.mapError(error, 'No se pudo finalizar pago de servicios');
     }
   }
 
@@ -572,7 +702,10 @@ export class PagosServiciosService {
     return this.mapSummaryRow(this.firstRow(rows));
   }
 
-  private async loadFolio(idFolRaw: string, user: JwtPayload): Promise<FolioRow> {
+  private async loadFolio(
+    idFolRaw: string,
+    user: JwtPayload,
+  ): Promise<FolioRow> {
     const idFol = this.normalize(idFolRaw);
     if (!idFol) {
       throw new BadRequestException('idFol es requerido');
@@ -608,11 +741,18 @@ export class PagosServiciosService {
     const folioSuc = this.normalize(folio?.SUC ?? '');
 
     if (!actorSuc) {
-      throw new ForbiddenException('Usuario sin sucursal para operar folios PS');
+      throw new ForbiddenException(
+        'Usuario sin sucursal para operar folios PS',
+      );
     }
 
-    if (folioSuc && this.normalizeUpper(actorSuc) !== this.normalizeUpper(folioSuc)) {
-      throw new ForbiddenException('No autorizado para operar folios PS de otra sucursal');
+    if (
+      folioSuc &&
+      this.normalizeUpper(actorSuc) !== this.normalizeUpper(folioSuc)
+    ) {
+      throw new ForbiddenException(
+        'No autorizado para operar folios PS de otra sucursal',
+      );
     }
   }
 
@@ -654,7 +794,9 @@ export class PagosServiciosService {
   }
 
   private auditActor(user: JwtPayload) {
-    return this.normalize(user?.username ?? String(user?.sub ?? '')) || 'system';
+    return (
+      this.normalize(user?.username ?? String(user?.sub ?? '')) || 'system'
+    );
   }
 
   private normalize(value: unknown) {
@@ -705,14 +847,19 @@ export class PagosServiciosService {
 
   private parseJsonArray(raw: unknown): Record<string, unknown>[] {
     if (Array.isArray(raw)) {
-      return raw.filter((item) => item && typeof item === 'object') as Record<string, unknown>[];
+      return raw.filter((item) => item && typeof item === 'object') as Record<
+        string,
+        unknown
+      >[];
     }
     const text = this.normalize(raw);
     if (!text) return [];
     try {
       const parsed = JSON.parse(text);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter((item) => item && typeof item === 'object') as Record<string, unknown>[];
+      return parsed.filter(
+        (item) => item && typeof item === 'object',
+      ) as Record<string, unknown>[];
     } catch {
       return [];
     }
@@ -720,7 +867,8 @@ export class PagosServiciosService {
 
   private toInt(value: unknown) {
     if (value == null) return null;
-    if (typeof value === 'number') return Number.isFinite(value) ? Math.trunc(value) : null;
+    if (typeof value === 'number')
+      return Number.isFinite(value) ? Math.trunc(value) : null;
     const parsed = Number.parseInt(String(value), 10);
     return Number.isFinite(parsed) ? parsed : null;
   }

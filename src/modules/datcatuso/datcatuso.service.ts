@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { DatCatUsoEntity } from './datcatuso.entity';
@@ -38,7 +42,8 @@ export class DatCatUsoService {
     const row = await this.findOne(id);
 
     const partial: Partial<DatCatUsoEntity> = {};
-    if (dto.DESCRIPCION !== undefined) partial.DESCRIPCION = dto.DESCRIPCION ?? null;
+    if (dto.DESCRIPCION !== undefined)
+      partial.DESCRIPCION = dto.DESCRIPCION ?? null;
 
     const updated = this.repo.merge(row, partial);
     return this.repo.save(updated);
@@ -50,7 +55,9 @@ export class DatCatUsoService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar DAT_CAT_USO ${id} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar DAT_CAT_USO ${id} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

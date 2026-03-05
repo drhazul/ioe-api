@@ -30,4 +30,3 @@ export class PagoFinalizarDto {
   @Type(() => PagoFinalizarFormaDto)
   formas: PagoFinalizarFormaDto[];
 }
-

@@ -1,6 +1,18 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, FindManyOptions, Like, QueryFailedError, QueryRunner, Repository } from 'typeorm';
+import {
+  DataSource,
+  FindManyOptions,
+  Like,
+  QueryFailedError,
+  QueryRunner,
+  Repository,
+} from 'typeorm';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 import { DatArtEntity } from './datart.entity';
@@ -102,7 +114,8 @@ export class DatArtService {
     const buildLikePattern = (value: string | undefined, maxLen: number) => {
       const trimmed = value?.trim();
       if (!trimmed) return undefined;
-      const normalized = trimmed.length > maxLen ? trimmed.slice(0, maxLen) : trimmed;
+      const normalized =
+        trimmed.length > maxLen ? trimmed.slice(0, maxLen) : trimmed;
       if (normalized.length + 2 <= maxLen) return `%${normalized}%`;
       if (normalized.length + 1 <= maxLen) return `${normalized}%`;
       return normalized;
@@ -156,8 +169,11 @@ export class DatArtService {
     const withTotal =
       query?.withTotal?.toString().trim().toLowerCase() === '1' ||
       query?.withTotal?.toString().trim().toLowerCase() === 'true';
-    const hasPaging = rawLimit !== undefined || rawPage !== undefined || withTotal;
-    const limit = hasPaging ? Math.min(Math.max(rawLimit ?? 200, 1), 500) : undefined;
+    const hasPaging =
+      rawLimit !== undefined || rawPage !== undefined || withTotal;
+    const limit = hasPaging
+      ? Math.min(Math.max(rawLimit ?? 200, 1), 500)
+      : undefined;
     const page = hasPaging ? Math.max(rawPage ?? 1, 1) : undefined;
     const skip = hasPaging ? (page! - 1) * limit! : undefined;
 
@@ -212,9 +228,11 @@ export class DatArtService {
       const desPattern = buildLikePattern(query?.des, 255);
       if (desPattern) qb.andWhere('art.DES LIKE :desPattern', { desPattern });
       const tipoPattern = buildLikePattern(query?.tipo, 255);
-      if (tipoPattern) qb.andWhere('art.TIPO LIKE :tipoPattern', { tipoPattern });
+      if (tipoPattern)
+        qb.andWhere('art.TIPO LIKE :tipoPattern', { tipoPattern });
       const modeloPattern = buildLikePattern(query?.modelo, 255);
-      if (modeloPattern) qb.andWhere('art.MODELO LIKE :modeloPattern', { modeloPattern });
+      if (modeloPattern)
+        qb.andWhere('art.MODELO LIKE :modeloPattern', { modeloPattern });
 
       if (depa !== undefined) qb.andWhere('art.DEPA = :depa', { depa });
       if (subd !== undefined) qb.andWhere('art.SUBD = :subd', { subd });
@@ -266,12 +284,18 @@ export class DatArtService {
   }
 
   async findOne(suc: string, art: string, upc: string) {
-    const row = await this.repo.findOne({ where: { SUC: suc, ART: art, UPC: upc } });
-    if (!row) throw new NotFoundException(`DAT_ART ${suc}-${art}-${upc} no existe`);
+    const row = await this.repo.findOne({
+      where: { SUC: suc, ART: art, UPC: upc },
+    });
+    if (!row)
+      throw new NotFoundException(`DAT_ART ${suc}-${art}-${upc} no existe`);
     return row;
   }
 
-  async massiveUpload(file: any, user: JwtPayload): Promise<DatArtMassiveUploadResult> {
+  async massiveUpload(
+    file: any,
+    user: JwtPayload,
+  ): Promise<DatArtMassiveUploadResult> {
     if (!file?.buffer) {
       throw new BadRequestException('Archivo Excel requerido');
     }
@@ -284,7 +308,9 @@ export class DatArtService {
 
     const rows = this.parseExcelRows(file.buffer);
     if (!rows.length) {
-      throw new BadRequestException('El archivo no contiene renglones con datos');
+      throw new BadRequestException(
+        'El archivo no contiene renglones con datos',
+      );
     }
 
     const loteId = randomUUID();
@@ -295,7 +321,10 @@ export class DatArtService {
 
     try {
       await this.insertMassiveRows(queryRunner, loteId, usuario, rows);
-      await queryRunner.query('EXEC dbo.sp_datart_massive_apply @LOTE_ID = @0, @USUARIO = @1', [loteId, usuario]);
+      await queryRunner.query(
+        'EXEC dbo.sp_datart_massive_apply @LOTE_ID = @0, @USUARIO = @1',
+        [loteId, usuario],
+      );
       await queryRunner.commitTransaction();
     } catch (err) {
       await queryRunner.rollbackTransaction();
@@ -485,7 +514,11 @@ export class DatArtService {
   private parseExcelRows(buffer: Buffer): DatArtStageRow[] {
     let workbook: XLSX.WorkBook;
     try {
-      workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: true });
+      workbook = XLSX.read(buffer, {
+        type: 'buffer',
+        cellDates: false,
+        raw: true,
+      });
     } catch (_err) {
       throw new BadRequestException('No se pudo leer el archivo Excel');
     }
@@ -496,19 +529,34 @@ export class DatArtService {
     }
 
     const worksheet = workbook.Sheets[firstSheet];
-    const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-      defval: null,
-      raw: true,
-      blankrows: false,
-    });
+    const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+      worksheet,
+      {
+        defval: null,
+        raw: true,
+        blankrows: false,
+      },
+    );
     if (!jsonRows.length) {
       return [];
     }
 
-    const normalizeKey = (key: string) => key.toUpperCase().replace(/[\s\-]+/g, '').replace(/[^A-Z0-9_]/g, '');
-    const firstKeys = new Set(Object.keys(jsonRows[0]).map((k) => normalizeKey(k)));
-    if (!firstKeys.has('SUC') || !firstKeys.has('ART') || !firstKeys.has('UPC')) {
-      throw new BadRequestException('El Excel debe incluir columnas SUC, ART y UPC');
+    const normalizeKey = (key: string) =>
+      key
+        .toUpperCase()
+        .replace(/[\s\-]+/g, '')
+        .replace(/[^A-Z0-9_]/g, '');
+    const firstKeys = new Set(
+      Object.keys(jsonRows[0]).map((k) => normalizeKey(k)),
+    );
+    if (
+      !firstKeys.has('SUC') ||
+      !firstKeys.has('ART') ||
+      !firstKeys.has('UPC')
+    ) {
+      throw new BadRequestException(
+        'El Excel debe incluir columnas SUC, ART y UPC',
+      );
     }
 
     const rows: DatArtStageRow[] = [];
@@ -537,7 +585,9 @@ export class DatArtService {
         STOCK: this.toNullableNumber(pick('STOCK')),
         STOCK_MIN: this.toNullableNumber(pick('STOCK_MIN', 'STOCKMIN')),
         ESTATUS: this.toNullableString(pick('ESTATUS'), 255),
-        DIA_REABASTO: this.toNullableNumber(pick('DIA_REABASTO', 'DIAREABASTO')),
+        DIA_REABASTO: this.toNullableNumber(
+          pick('DIA_REABASTO', 'DIAREABASTO'),
+        ),
         PVTA: this.toNullableNumber(pick('PVTA')),
         CTOP: this.toNullableNumber(pick('CTOP')),
         PROV_1: this.toNullableNumber(pick('PROV_1', 'PROV1')),
@@ -568,7 +618,9 @@ export class DatArtService {
         MODELO: this.toNullableString(pick('MODELO')),
       };
 
-      const hasAnyValue = Object.entries(stageRow).some(([key, value]) => key !== 'RENGLON' && value != null);
+      const hasAnyValue = Object.entries(stageRow).some(
+        ([key, value]) => key !== 'RENGLON' && value != null,
+      );
       if (hasAnyValue) {
         rows.push(stageRow);
       }
@@ -626,7 +678,9 @@ export class DatArtService {
       where: { SUC: dto.SUC, ART: dto.ART, UPC: dto.UPC },
     });
     if (exists) {
-      throw new ConflictException(`DAT_ART ${dto.SUC}-${dto.ART}-${dto.UPC} ya existe`);
+      throw new ConflictException(
+        `DAT_ART ${dto.SUC}-${dto.ART}-${dto.UPC} ya existe`,
+      );
     }
 
     const entity = this.repo.create({

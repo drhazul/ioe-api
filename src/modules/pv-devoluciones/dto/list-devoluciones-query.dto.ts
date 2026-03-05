@@ -26,4 +26,3 @@ export class ListDevolucionesQueryDto {
   @Length(1, 255)
   search?: string;
 }
-

@@ -71,7 +71,12 @@ export class RelojChecadorController {
     @Body() dto: UpdateTimelogDto,
     @Req() req: any,
   ) {
-    return this.service.updateTimelog(user, id, dto, this.requestMeta(req, dto));
+    return this.service.updateTimelog(
+      user,
+      id,
+      dto,
+      this.requestMeta(req, dto),
+    );
   }
 
   @Post('incidencias')
@@ -90,7 +95,12 @@ export class RelojChecadorController {
     @Body() dto: UpdateIncidenciaStatusDto,
     @Req() req: any,
   ) {
-    return this.service.updateIncidenciaStatus(user, id, dto, this.requestMeta(req, dto));
+    return this.service.updateIncidenciaStatus(
+      user,
+      id,
+      dto,
+      this.requestMeta(req, dto),
+    );
   }
 
   @Get('incidencias')
@@ -127,8 +137,14 @@ export class RelojChecadorController {
     @Req() req: any,
     @Res() res: Response,
   ) {
-    const file = await this.service.downloadDocumento(user, id, this.requestMeta(req));
-    const fileName = encodeURIComponent(file.fileName || `documento-${file.idDoc}`);
+    const file = await this.service.downloadDocumento(
+      user,
+      id,
+      this.requestMeta(req),
+    );
+    const fileName = encodeURIComponent(
+      file.fileName || `documento-${file.idDoc}`,
+    );
 
     res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
@@ -160,7 +176,12 @@ export class RelojChecadorController {
     @Body() dto: RevokeOverrideDto,
     @Req() req: any,
   ) {
-    return this.service.revokeOverride(user, id, dto, this.requestMeta(req, dto));
+    return this.service.revokeOverride(
+      user,
+      id,
+      dto,
+      this.requestMeta(req, dto),
+    );
   }
 
   @Get('policy')

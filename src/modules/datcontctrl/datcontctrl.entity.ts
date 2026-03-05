@@ -35,7 +35,12 @@ export class DatContCtrlEntity {
   @Column({ name: 'FILE_NAME', type: 'nvarchar', length: 255, nullable: true })
   FILE_NAME: string | null;
 
-  @Column({ name: 'LAST_ERROR', type: 'nvarchar', length: 4000, nullable: true })
+  @Column({
+    name: 'LAST_ERROR',
+    type: 'nvarchar',
+    length: 4000,
+    nullable: true,
+  })
   LAST_ERROR: string | null;
 
   @Column({ name: 'creado', type: 'datetime', nullable: true })
@@ -44,6 +49,11 @@ export class DatContCtrlEntity {
   @Column({ name: 'CREADO_POR', type: 'nvarchar', length: 255, nullable: true })
   CREADO_POR: string | null;
 
-  @Column({ name: 'MODIFICADO_POR', type: 'nvarchar', length: 255, nullable: true })
+  @Column({
+    name: 'MODIFICADO_POR',
+    type: 'nvarchar',
+    length: 255,
+    nullable: true,
+  })
   MODIFICADO_POR: string | null;
 }

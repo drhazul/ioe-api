@@ -5,6 +5,11 @@ export class DatCatUsoEntity {
   @PrimaryColumn({ name: 'UsoCFDI', type: 'nvarchar', length: 255 })
   USOCFDI: string;
 
-  @Column({ name: 'Descripcion', type: 'nvarchar', length: 255, nullable: true })
+  @Column({
+    name: 'Descripcion',
+    type: 'nvarchar',
+    length: 255,
+    nullable: true,
+  })
   DESCRIPCION: string | null;
 }

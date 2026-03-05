@@ -23,4 +23,3 @@ export class CreateDevolucionDto {
   @Length(1, 255)
   authPassword: string;
 }
-

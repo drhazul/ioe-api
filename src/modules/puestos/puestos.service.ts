@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository } from 'typeorm';
 import { PuestoEntity } from './puesto.entity';
@@ -9,7 +13,8 @@ import { DeptosService } from '../deptos/deptos.service';
 @Injectable()
 export class PuestosService {
   constructor(
-    @InjectRepository(PuestoEntity) private readonly repo: Repository<PuestoEntity>,
+    @InjectRepository(PuestoEntity)
+    private readonly repo: Repository<PuestoEntity>,
     private readonly deptosService: DeptosService,
   ) {}
 
@@ -41,10 +46,17 @@ export class PuestosService {
     await this.deptosService.findOne(dto.IDDEPTO);
 
     // respeta el UNIQUE(IDDEPTO, NOMBRE)
-    const exists = await this.repo.exist({ where: { IDDEPTO: dto.IDDEPTO, NOMBRE: dto.NOMBRE } });
-    if (exists) throw new ConflictException(`Puesto "${dto.NOMBRE}" ya existe en ese departamento`);
+    const exists = await this.repo.exist({
+      where: { IDDEPTO: dto.IDDEPTO, NOMBRE: dto.NOMBRE },
+    });
+    if (exists)
+      throw new ConflictException(
+        `Puesto "${dto.NOMBRE}" ya existe en ese departamento`,
+      );
 
-    return this.repo.save(this.repo.create({ ...dto, ACTIVO: dto.ACTIVO ?? true }));
+    return this.repo.save(
+      this.repo.create({ ...dto, ACTIVO: dto.ACTIVO ?? true }),
+    );
   }
 
   async update(id: number, dto: UpdatePuestoDto) {
@@ -57,8 +69,13 @@ export class PuestosService {
 
     // validar unique si cambia depto o nombre
     if (newDepto !== row.IDDEPTO || newNombre !== row.NOMBRE) {
-      const exists = await this.repo.exist({ where: { IDDEPTO: newDepto, NOMBRE: newNombre } });
-      if (exists) throw new ConflictException(`Puesto "${newNombre}" ya existe en ese departamento`);
+      const exists = await this.repo.exist({
+        where: { IDDEPTO: newDepto, NOMBRE: newNombre },
+      });
+      if (exists)
+        throw new ConflictException(
+          `Puesto "${newNombre}" ya existe en ese departamento`,
+        );
     }
 
     return this.repo.save(this.repo.merge(row, dto));

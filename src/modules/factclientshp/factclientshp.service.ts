@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { FactClientShpEntity } from './factclientshp.entity';
@@ -38,14 +44,21 @@ export class FactClientShpService {
     }
     const suc = (user?.suc ?? '').trim();
     if (!suc) return [];
-    return this.repo.query(`SELECT * FROM ${table} WHERE SUC = @0 ORDER BY IDC ASC`, [suc]);
+    return this.repo.query(
+      `SELECT * FROM ${table} WHERE SUC = @0 ORDER BY IDC ASC`,
+      [suc],
+    );
   }
 
   async findOne(id: number, user?: { roleId?: number; suc?: string | null }) {
     const table = this.repo.metadata.tablePath;
     if (this.isAdmin(user)) {
-      const rows = await this.repo.query(`SELECT TOP 1 * FROM ${table} WHERE IDC = @0`, [id]);
-      if (!rows?.length) throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
+      const rows = await this.repo.query(
+        `SELECT TOP 1 * FROM ${table} WHERE IDC = @0`,
+        [id],
+      );
+      if (!rows?.length)
+        throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
       return rows[0];
     }
     const suc = (user?.suc ?? '').trim();
@@ -54,11 +67,15 @@ export class FactClientShpService {
       `SELECT TOP 1 * FROM ${table} WHERE IDC = @0 AND SUC = @1`,
       [id, suc],
     );
-    if (!rows?.length) throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
+    if (!rows?.length)
+      throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
     return rows[0];
   }
 
-  async create(dto: CreateFactClientShpDto, user?: { roleId?: number; suc?: string | null }) {
+  async create(
+    dto: CreateFactClientShpDto,
+    user?: { roleId?: number; suc?: string | null },
+  ) {
     const isAdmin = this.isAdmin(user);
     const suc = (user?.suc ?? '').trim();
     if (!isAdmin && !suc) {
@@ -119,19 +136,28 @@ export class FactClientShpService {
     }
 
     const firstRow = result?.[0] ?? null;
-    let idc: any = firstRow?.IDC_GENERADO ?? firstRow?.IDC ?? firstRow?.Idc ?? firstRow?.idc ?? null;
+    let idc: any =
+      firstRow?.IDC_GENERADO ??
+      firstRow?.IDC ??
+      firstRow?.Idc ??
+      firstRow?.idc ??
+      null;
     if (!idc && firstRow) {
       const key = Object.keys(firstRow).find((k) => {
         const normalized = k.toLowerCase();
-        return normalized === 'idc' || normalized === 'idc_generado' || normalized === 'idc_out';
+        return (
+          normalized === 'idc' ||
+          normalized === 'idc_generado' ||
+          normalized === 'idc_out'
+        );
       });
-      if (key) idc = (firstRow as any)[key];
+      if (key) idc = firstRow[key];
     }
 
     const idcNumber = typeof idc === 'number' ? idc : Number(idc);
     if (!Number.isFinite(idcNumber)) {
       // Si el SP retornó directamente el registro, úsalo como respuesta
-      if (firstRow && (firstRow as any).IDC !== undefined) {
+      if (firstRow && firstRow.IDC !== undefined) {
         return firstRow;
       }
       throw new ConflictException('No se pudo generar IDC');
@@ -141,11 +167,16 @@ export class FactClientShpService {
       `SELECT * FROM ${this.repo.metadata.tablePath} WHERE IDC = @0`,
       [idcNumber],
     );
-    if (!rows?.length) throw new NotFoundException(`FACT_CLIENT_SHP ${idcNumber} no existe`);
+    if (!rows?.length)
+      throw new NotFoundException(`FACT_CLIENT_SHP ${idcNumber} no existe`);
     return rows[0];
   }
 
-  async update(id: number, dto: UpdateFactClientShpDto, user?: { roleId?: number; suc?: string | null }) {
+  async update(
+    id: number,
+    dto: UpdateFactClientShpDto,
+    user?: { roleId?: number; suc?: string | null },
+  ) {
     const row = await this.findOne(id, user);
     const isAdmin = this.isAdmin(user);
     const suc = (user?.suc ?? '').trim();
@@ -156,13 +187,16 @@ export class FactClientShpService {
     const partial: Partial<FactClientShpEntity> = {};
     if (dto.CLIEN_UNI !== undefined) partial.CLIEN_UNI = dto.CLIEN_UNI ?? null;
     if (dto.TIPO !== undefined) partial.TIPO = dto.TIPO ?? null;
-    if (dto.FCNR !== undefined) partial.FCNR = dto.FCNR ? new Date(dto.FCNR) : null;
-    if (dto.RAZONSOCIALRECEPTOR !== undefined) partial.RAZONSOCIALRECEPTOR = dto.RAZONSOCIALRECEPTOR;
+    if (dto.FCNR !== undefined)
+      partial.FCNR = dto.FCNR ? new Date(dto.FCNR) : null;
+    if (dto.RAZONSOCIALRECEPTOR !== undefined)
+      partial.RAZONSOCIALRECEPTOR = dto.RAZONSOCIALRECEPTOR;
     if (dto.DOMI !== undefined) partial.DOMI = dto.DOMI ?? null;
     if (dto.RFCRECEPTOR !== undefined) partial.RFCRECEPTOR = dto.RFCRECEPTOR;
     if (dto.NCEL !== undefined) partial.NCEL = dto.NCEL ?? null;
     if (dto.NTJT !== undefined) partial.NTJT = dto.NTJT ?? null;
-    if (dto.EMAILRECEPTOR !== undefined) partial.EMAILRECEPTOR = dto.EMAILRECEPTOR;
+    if (dto.EMAILRECEPTOR !== undefined)
+      partial.EMAILRECEPTOR = dto.EMAILRECEPTOR;
     if (dto.RFCEMISOR !== undefined) partial.RFCEMISOR = dto.RFCEMISOR;
     if (dto.OPTICA !== undefined) partial.OPTICA = dto.OPTICA ?? null;
     if (dto.USOCFDI !== undefined) partial.USOCFDI = dto.USOCFDI;
@@ -182,7 +216,8 @@ export class FactClientShpService {
     } else {
       partial.SUC = suc;
     }
-    if (dto.DESCUENTOAPLI !== undefined) partial.DESCUENTOAPLI = dto.DESCUENTOAPLI ?? null;
+    if (dto.DESCUENTOAPLI !== undefined)
+      partial.DESCUENTOAPLI = dto.DESCUENTOAPLI ?? null;
 
     const updated = this.repo.merge(row, partial);
     return this.repo.save(updated);

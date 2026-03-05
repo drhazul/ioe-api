@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { PvCtrOrdsDetEntity } from './pvctrordsdet.entity';
@@ -60,7 +64,9 @@ export class PvCtrOrdsDetService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar PV_CTR_ORDS_DET ${iordp} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar PV_CTR_ORDS_DET ${iordp} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

@@ -89,10 +89,17 @@ export class CatCtasService {
   private normalizePagination(page?: string, limit?: string) {
     const pageNum = Number(page ?? 1);
     const limitNum = Number(limit ?? 50);
-    const safePage = Number.isFinite(pageNum) && pageNum > 0 ? Math.floor(pageNum) : 1;
+    const safePage =
+      Number.isFinite(pageNum) && pageNum > 0 ? Math.floor(pageNum) : 1;
     const safeLimit =
-      Number.isFinite(limitNum) && limitNum > 0 ? Math.min(Math.floor(limitNum), 200) : 50;
-    return { page: safePage, limit: safeLimit, skip: (safePage - 1) * safeLimit };
+      Number.isFinite(limitNum) && limitNum > 0
+        ? Math.min(Math.floor(limitNum), 200)
+        : 50;
+    return {
+      page: safePage,
+      limit: safeLimit,
+      skip: (safePage - 1) * safeLimit,
+    };
   }
 
   async findAll(
@@ -101,15 +108,21 @@ export class CatCtasService {
   ) {
     const search = this.normalizeText(query?.search);
     const suc = this.normalizeText(query?.suc);
-    const { page, limit, skip } = this.normalizePagination(query?.page, query?.limit);
+    const { page, limit, skip } = this.normalizePagination(
+      query?.page,
+      query?.limit,
+    );
     const isAdmin = this.isAdmin(user);
 
     const qb = this.repo.createQueryBuilder('cat');
 
     if (search) {
-      qb.andWhere('(cat.CTA LIKE :search OR cat.DCTA LIKE :search OR cat.RELACION LIKE :search)', {
-        search: `%${search}%`,
-      });
+      qb.andWhere(
+        '(cat.CTA LIKE :search OR cat.DCTA LIKE :search OR cat.RELACION LIKE :search)',
+        {
+          search: `%${search}%`,
+        },
+      );
     }
 
     if (isAdmin) {
@@ -120,15 +133,23 @@ export class CatCtasService {
       const allowedSucs = await this.resolveAuthorizedSucs(user);
       if (suc) {
         if (!allowedSucs.includes(suc)) {
-          throw new ForbiddenException(`Sucursal ${suc} no autorizada para el usuario`);
+          throw new ForbiddenException(
+            `Sucursal ${suc} no autorizada para el usuario`,
+          );
         }
         qb.andWhere('cat.SUC = :suc', { suc });
       } else {
-        qb.andWhere('(cat.SUC IN (:...allowedSucs) OR cat.SUC IS NULL)', { allowedSucs });
+        qb.andWhere('(cat.SUC IN (:...allowedSucs) OR cat.SUC IS NULL)', {
+          allowedSucs,
+        });
       }
     }
 
-    const [items, total] = await qb.orderBy('cat.CTA', 'ASC').skip(skip).take(limit).getManyAndCount();
+    const [items, total] = await qb
+      .orderBy('cat.CTA', 'ASC')
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
 
     return { items, total, page, limit };
   }
@@ -137,10 +158,14 @@ export class CatCtasService {
     const key = this.normalizeText(cta);
     if (!key) throw new NotFoundException('CTA no especificada');
 
-    const qb = this.repo.createQueryBuilder('cat').where('cat.CTA = :cta', { cta: key });
+    const qb = this.repo
+      .createQueryBuilder('cat')
+      .where('cat.CTA = :cta', { cta: key });
     if (!this.isAdmin(user)) {
       const allowedSucs = await this.resolveAuthorizedSucs(user);
-      qb.andWhere('(cat.SUC IN (:...allowedSucs) OR cat.SUC IS NULL)', { allowedSucs });
+      qb.andWhere('(cat.SUC IN (:...allowedSucs) OR cat.SUC IS NULL)', {
+        allowedSucs,
+      });
     }
 
     const row = await qb.getOne();
@@ -164,13 +189,17 @@ export class CatCtasService {
 
       if (requestedSuc != null) {
         if (!allowedSucs.includes(requestedSuc)) {
-          throw new ForbiddenException(`Sucursal ${requestedSuc} no autorizada para el usuario`);
+          throw new ForbiddenException(
+            `Sucursal ${requestedSuc} no autorizada para el usuario`,
+          );
         }
         suc = requestedSuc;
       } else if (allowedSucs.length === 1) {
         suc = allowedSucs[0];
       } else {
-        throw new BadRequestException('SUC es requerida para usuarios con multiples sucursales autorizadas');
+        throw new BadRequestException(
+          'SUC es requerida para usuarios con multiples sucursales autorizadas',
+        );
       }
     }
 
@@ -209,7 +238,9 @@ export class CatCtasService {
           throw new BadRequestException('SUC es requerida para actualizar');
         }
         if (!allowedSucs.includes(nextSuc)) {
-          throw new ForbiddenException(`Sucursal ${nextSuc} no autorizada para el usuario`);
+          throw new ForbiddenException(
+            `Sucursal ${nextSuc} no autorizada para el usuario`,
+          );
         }
         partial.SUC = nextSuc;
       }

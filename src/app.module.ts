@@ -55,6 +55,9 @@ import { CtrlCtasModule } from './modules/ctrl-ctas/ctrl-ctas.module';
 import { RelojChecadorModule } from './modules/reloj-checador/reloj-checador.module';
 import { PvDevolucionesModule } from './modules/pv-devoluciones/pv-devoluciones.module';
 import { PagosServiciosModule } from './modules/pagos-servicios/pagos-servicios.module';
+import { RetirosModule } from './modules/retiros/retiros.module';
+import { FormasPagoCambiosModule } from './modules/formas-pago-cambios/formas-pago-cambios.module';
+import { CajonEstadoModule } from './modules/cajon-estado/cajon-estado.module';
 
 @Module({
   imports: [
@@ -112,6 +115,9 @@ import { PagosServiciosModule } from './modules/pagos-servicios/pagos-servicios.
     RelojChecadorModule,
     PvDevolucionesModule,
     PagosServiciosModule,
+    RetirosModule,
+    FormasPagoCambiosModule,
+    CajonEstadoModule,
   ],
   providers: [
     {

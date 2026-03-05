@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { JrqDepaEntity } from './jrqdepa.entity';
@@ -50,7 +54,9 @@ export class JrqDepaService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar JRQ_DEPA ${id} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar JRQ_DEPA ${id} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

@@ -75,11 +75,20 @@ export class DatContCapService {
   }
 
   async capturar(dto: CreateDatContCapDto, user: JwtPayload) {
-    const { cont, suc, ctrl } = await this.resolveConteo(dto.cont, user, dto.suc, true);
+    const { cont, suc, ctrl } = await this.resolveConteo(
+      dto.cont,
+      user,
+      dto.suc,
+      true,
+    );
     const almacen = this.normalizeAlmacen(dto.almacen);
     const cantidad = this.normalizeCantidad(dto.cantidad, dto.tipoMov);
     const captureUuid = dto.capturaUuid ?? randomUUID();
-    const { art, upc } = await this.resolveArticulo({ suc, art: dto.art, upc: dto.upc });
+    const { art, upc } = await this.resolveArticulo({
+      suc,
+      art: dto.art,
+      upc: dto.upc,
+    });
     await this.validateArticuloEnConteo({ suc, cont, upc });
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -88,7 +97,9 @@ export class DatContCapService {
 
     try {
       const scopedRepo = queryRunner.manager.getRepository(DatContCapEntity);
-      const existing = await scopedRepo.findOne({ where: { CAPTURA_UUID: captureUuid } });
+      const existing = await scopedRepo.findOne({
+        where: { CAPTURA_UUID: captureUuid },
+      });
       if (existing) {
         await queryRunner.rollbackTransaction();
         return this.buildCaptureResponse(existing, true);
@@ -101,7 +112,11 @@ export class DatContCapService {
         UPC: upc ?? null,
         ALMACEN: almacen,
         CANT: cantidad,
-        TIPO_MOV: dto.tipoMov ? dto.tipoMov.toUpperCase() : cantidad >= 0 ? 'ADD' : 'SUB',
+        TIPO_MOV: dto.tipoMov
+          ? dto.tipoMov.toUpperCase()
+          : cantidad >= 0
+            ? 'ADD'
+            : 'SUB',
         IDUSUARIO: Number(user.sub),
         CAPTURA_UUID: captureUuid,
       });
@@ -120,8 +135,13 @@ export class DatContCapService {
       // Unique UUID => idempotente
       if (err instanceof QueryFailedError) {
         const message = (err as any)?.message ?? '';
-        if (message.includes('UQ_DAT_CONT_CAPTURA_UUID') || message.includes('CAPTURA_UUID')) {
-          const existing = await this.repo.findOne({ where: { CAPTURA_UUID: captureUuid } });
+        if (
+          message.includes('UQ_DAT_CONT_CAPTURA_UUID') ||
+          message.includes('CAPTURA_UUID')
+        ) {
+          const existing = await this.repo.findOne({
+            where: { CAPTURA_UUID: captureUuid },
+          });
           if (existing) {
             return this.buildCaptureResponse(existing, true, ctrl);
           }
@@ -138,12 +158,21 @@ export class DatContCapService {
     const contCode = (query.cont ?? '').trim().toUpperCase();
     if (!contCode) throw new BadRequestException('cont es requerido');
 
-    const { suc: sucToUse } = await this.resolveConteo(contCode, user, query.suc, false);
+    const { suc: sucToUse } = await this.resolveConteo(
+      contCode,
+      user,
+      query.suc,
+      false,
+    );
 
     const rawPage = Number(query.page ?? 1);
-    const safePage = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+    const safePage =
+      Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
     const rawLimit = Number(query.limit ?? 50);
-    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 50, 1), 500);
+    const limit = Math.min(
+      Math.max(Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 50, 1),
+      500,
+    );
     const skip = (safePage - 1) * limit;
 
     const almacenFilter = (query.almacen ?? '').trim().toUpperCase();
@@ -170,7 +199,7 @@ export class DatContCapService {
     }
 
     const sumRow = await sumQb.select('SUM(c.CANT)', 'sumCant').getRawOne();
-    const sumCant = this.toNumber((sumRow as any)?.sumCant) ?? 0;
+    const sumCant = this.toNumber(sumRow?.sumCant) ?? 0;
 
     const [rows, total] = await qb
       .orderBy('c.FCNR', 'DESC')
@@ -192,24 +221,52 @@ export class DatContCapService {
   }
 
   async resumen(cont: string, user: JwtPayload, suc?: string) {
-    const { cont: contCode, suc: sucToUse } = await this.resolveConteo(cont, user, suc, false);
+    const { cont: contCode, suc: sucToUse } = await this.resolveConteo(
+      cont,
+      user,
+      suc,
+      false,
+    );
 
     const row = await this.repo
       .createQueryBuilder('c')
-      .select("SUM(CASE WHEN c.ALMACEN = '001' THEN c.CANT ELSE 0 END)", 'cap001')
-      .addSelect("SUM(CASE WHEN c.ALMACEN = '002' THEN c.CANT ELSE 0 END)", 'cap002')
-      .addSelect("SUM(CASE WHEN c.ALMACEN = 'M001' THEN c.CANT ELSE 0 END)", 'capM1')
-      .addSelect("SUM(CASE WHEN c.ALMACEN = 'T001' THEN c.CANT ELSE 0 END)", 'capT1')
-      .where('c.SUC = :suc AND c.CONT = :cont', { suc: sucToUse, cont: contCode })
+      .select(
+        "SUM(CASE WHEN c.ALMACEN = '001' THEN c.CANT ELSE 0 END)",
+        'cap001',
+      )
+      .addSelect(
+        "SUM(CASE WHEN c.ALMACEN = '002' THEN c.CANT ELSE 0 END)",
+        'cap002',
+      )
+      .addSelect(
+        "SUM(CASE WHEN c.ALMACEN = 'M001' THEN c.CANT ELSE 0 END)",
+        'capM1',
+      )
+      .addSelect(
+        "SUM(CASE WHEN c.ALMACEN = 'T001' THEN c.CANT ELSE 0 END)",
+        'capT1',
+      )
+      .where('c.SUC = :suc AND c.CONT = :cont', {
+        suc: sucToUse,
+        cont: contCode,
+      })
       .getRawOne();
 
-    const cap001 = this.toNumber((row as any)?.cap001) ?? 0;
-    const cap002 = this.toNumber((row as any)?.cap002) ?? 0;
-    const capM1 = this.toNumber((row as any)?.capM1) ?? 0;
-    const capT1 = this.toNumber((row as any)?.capT1) ?? 0;
+    const cap001 = this.toNumber(row?.cap001) ?? 0;
+    const cap002 = this.toNumber(row?.cap002) ?? 0;
+    const capM1 = this.toNumber(row?.capM1) ?? 0;
+    const capT1 = this.toNumber(row?.capT1) ?? 0;
     const capTotal = cap001 + cap002 + capM1 + capT1;
 
-    return { cont: contCode, suc: sucToUse, cap001, cap002, capM1, capT1, capTotal };
+    return {
+      cont: contCode,
+      suc: sucToUse,
+      cap001,
+      cap002,
+      capM1,
+      capT1,
+      capTotal,
+    };
   }
 
   private async resolveConteo(
@@ -230,7 +287,9 @@ export class DatContCapService {
     let ctrl: DatContCtrlEntity | null = null;
 
     if (sucToUse) {
-      ctrl = await this.ctrlRepo.findOne({ where: { CONT: contCode, SUC: sucToUse } });
+      ctrl = await this.ctrlRepo.findOne({
+        where: { CONT: contCode, SUC: sucToUse },
+      });
     }
 
     if (!ctrl && allowAll && !explicitSuc) {
@@ -242,27 +301,38 @@ export class DatContCapService {
     }
 
     if (!ctrl) {
-      throw new NotFoundException(`Conteo ${contCode} no existe para la sucursal solicitada`);
+      throw new NotFoundException(
+        `Conteo ${contCode} no existe para la sucursal solicitada`,
+      );
     }
 
     const normalizedSuc = (ctrl.SUC ?? sucToUse ?? '').trim();
-    if (!normalizedSuc) throw new BadRequestException('SUC no disponible para este conteo');
+    if (!normalizedSuc)
+      throw new BadRequestException('SUC no disponible para este conteo');
 
     if (!allowAll && normalizedSuc !== userSuc) {
-      throw new UnauthorizedException('No puedes capturar conteos de otra sucursal');
+      throw new UnauthorizedException(
+        'No puedes capturar conteos de otra sucursal',
+      );
     }
 
     if (requireCaptureState) {
       const estado = (ctrl.ESTA ?? '').trim().toUpperCase();
       if (estado !== 'CAPTURA' && estado !== 'LISTO') {
-        throw new ConflictException(`Conteo ${contCode} no está en estado CAPTURA/LISTO`);
+        throw new ConflictException(
+          `Conteo ${contCode} no está en estado CAPTURA/LISTO`,
+        );
       }
     }
 
     return { cont: contCode, suc: normalizedSuc, ctrl };
   }
 
-  private async resolveArticulo(input: { suc: string; art?: string; upc?: string }) {
+  private async resolveArticulo(input: {
+    suc: string;
+    art?: string;
+    upc?: string;
+  }) {
     const upc = (input.upc ?? '').trim();
     const art = (input.art ?? '').trim().toUpperCase();
 
@@ -271,44 +341,70 @@ export class DatContCapService {
     }
 
     if (upc && art) {
-      const match = await this.artRepo.findOne({ where: { SUC: input.suc, UPC: upc } });
+      const match = await this.artRepo.findOne({
+        where: { SUC: input.suc, UPC: upc },
+      });
       if (!match) {
-        throw new NotFoundException(`UPC ${upc} no existe en la sucursal ${input.suc}`);
+        throw new NotFoundException(
+          `UPC ${upc} no existe en la sucursal ${input.suc}`,
+        );
       }
       if (match && (match.ART ?? '').trim().toUpperCase() !== art) {
-        throw new BadRequestException(`UPC ${upc} no corresponde al ART ${art} en la sucursal ${input.suc}`);
+        throw new BadRequestException(
+          `UPC ${upc} no corresponde al ART ${art} en la sucursal ${input.suc}`,
+        );
       }
       return { art, upc };
     }
 
     if (art && !upc) {
-      const row = await this.artRepo.findOne({ where: { SUC: input.suc, ART: art } });
-      if (!row) throw new NotFoundException(`ART ${art} no existe en la sucursal ${input.suc}`);
+      const row = await this.artRepo.findOne({
+        where: { SUC: input.suc, ART: art },
+      });
+      if (!row)
+        throw new NotFoundException(
+          `ART ${art} no existe en la sucursal ${input.suc}`,
+        );
       return { art, upc: row.UPC ?? null };
     }
 
-    const row = await this.artRepo.findOne({ where: { SUC: input.suc, UPC: upc } });
+    const row = await this.artRepo.findOne({
+      where: { SUC: input.suc, UPC: upc },
+    });
     if (!row) {
-      throw new NotFoundException(`UPC ${upc} no existe en la sucursal ${input.suc}`);
+      throw new NotFoundException(
+        `UPC ${upc} no existe en la sucursal ${input.suc}`,
+      );
     }
     return { art: (row.ART ?? '').trim().toUpperCase(), upc: row.UPC };
   }
 
-  private async validateArticuloEnConteo(input: { suc: string; cont: string; upc?: string | null }) {
+  private async validateArticuloEnConteo(input: {
+    suc: string;
+    cont: string;
+    upc?: string | null;
+  }) {
     const upc = (input.upc ?? '').trim();
     if (!upc) {
-      throw new BadRequestException('Envía UPC para validar el conteo seleccionado.');
+      throw new BadRequestException(
+        'Envía UPC para validar el conteo seleccionado.',
+      );
     }
 
-    const row = await this.detRepo.findOne({ where: { SUC: input.suc, CONT: input.cont, UPC: upc } });
+    const row = await this.detRepo.findOne({
+      where: { SUC: input.suc, CONT: input.cont, UPC: upc },
+    });
     if (!row) {
-      throw new BadRequestException(`El UPC ${upc} no está dentro del conteo ${input.cont} seleccionado.`);
+      throw new BadRequestException(
+        `El UPC ${upc} no está dentro del conteo ${input.cont} seleccionado.`,
+      );
     }
   }
 
   private normalizeCantidad(value: number, tipoMov?: string) {
     const num = Number(value);
-    if (!Number.isFinite(num)) throw new BadRequestException('cantidad inválida');
+    if (!Number.isFinite(num))
+      throw new BadRequestException('cantidad inválida');
 
     const tipo = (tipoMov ?? '').trim().toUpperCase();
     if (tipo === 'SUB') return -Math.abs(num);
@@ -328,8 +424,16 @@ export class DatContCapService {
     return Number(user?.roleId ?? 0) === 1;
   }
 
-  private async runSyncProcedure(queryRunner: QueryRunner, suc: string, cont: string, art: string) {
-    await queryRunner.query('EXEC dbo.sp_cont_sync_captura_art @SUC = @0, @CONT = @1, @ART = @2', [suc, cont, art]);
+  private async runSyncProcedure(
+    queryRunner: QueryRunner,
+    suc: string,
+    cont: string,
+    art: string,
+  ) {
+    await queryRunner.query(
+      'EXEC dbo.sp_cont_sync_captura_art @SUC = @0, @CONT = @1, @ART = @2',
+      [suc, cont, art],
+    );
   }
 
   private async assertSyncedDetalle(
@@ -408,7 +512,11 @@ export class DatContCapService {
     return Math.abs(left - right) <= epsilon;
   }
 
-  private buildCaptureResponse(entity: DatContCapEntity, idempotent: boolean, ctrl?: DatContCtrlEntity) {
+  private buildCaptureResponse(
+    entity: DatContCapEntity,
+    idempotent: boolean,
+    ctrl?: DatContCtrlEntity,
+  ) {
     return {
       id: entity.ID,
       cont: entity.CONT,

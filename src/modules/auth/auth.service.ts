@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -49,7 +53,9 @@ export class AuthService {
       suc: user.SUC ?? null,
     };
 
-    return this.jwt.signAsync(payload, { expiresIn: this.accessExpiresIn() as any });
+    return this.jwt.signAsync(payload, {
+      expiresIn: this.accessExpiresIn() as any,
+    });
   }
 
   private async issueRefreshToken(
@@ -60,7 +66,9 @@ export class AuthService {
     const refreshHash = await bcrypt.hash(refreshToken, 10);
 
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.refreshDays() * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(
+      now.getTime() + this.refreshDays() * 24 * 60 * 60 * 1000,
+    );
 
     await this.tokenRepo.save(
       this.tokenRepo.create({
@@ -78,7 +86,11 @@ export class AuthService {
     return refreshToken;
   }
 
-  async login(username: string, password: string, meta?: { ip?: string; userAgent?: string }) {
+  async login(
+    username: string,
+    password: string,
+    meta?: { ip?: string; userAgent?: string },
+  ) {
     const user = await this.usersService.findByUsername(username);
     if (!user) throw new UnauthorizedException('Credenciales inválidas');
 

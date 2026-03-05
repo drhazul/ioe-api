@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository } from 'typeorm';
 import { RolEntity } from './rol.entity';
@@ -34,7 +38,9 @@ export class RolesService {
   async create(dto: CreateRolDto) {
     const exists = await this.repo.exist({ where: { CODIGO: dto.CODIGO } });
     if (exists) throw new ConflictException(`CODIGO ${dto.CODIGO} ya existe`);
-    return this.repo.save(this.repo.create({ ...dto, ACTIVO: dto.ACTIVO ?? true }));
+    return this.repo.save(
+      this.repo.create({ ...dto, ACTIVO: dto.ACTIVO ?? true }),
+    );
   }
 
   async update(id: number, dto: UpdateRolDto) {

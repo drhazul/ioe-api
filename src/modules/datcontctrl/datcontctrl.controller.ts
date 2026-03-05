@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { DatContCtrlService } from './datcontctrl.service';
@@ -28,7 +37,10 @@ export class DatContCtrlController {
   }
 
   @Patch(':tokenreg')
-  update(@Param('tokenreg') tokenreg: string, @Body() dto: UpdateDatContCtrlDto) {
+  update(
+    @Param('tokenreg') tokenreg: string,
+    @Body() dto: UpdateDatContCtrlDto,
+  ) {
     return this.service.update(tokenreg, dto);
   }
 

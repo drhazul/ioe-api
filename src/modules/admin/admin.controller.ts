@@ -6,8 +6,6 @@ import { AdminService } from './admin.service';
 import { SetFrontGroupsDto } from './dto/set-front-groups.dto';
 import { SetBackendPermsDto } from './dto/set-backend-perms.dto';
 
-
-
 @ApiTags('admin')
 @ApiBearerAuth('jwt-auth')
 @UseGuards(JwtAuthGuard, AdminOnlyGuard)
@@ -36,7 +34,7 @@ export class AdminController {
   setBackend(@Param('id') id: string, @Body() dto: SetBackendPermsDto) {
     return this.service.setBackendPerms(Number(id), dto);
   }
-    // CATALOGS (para UI)
+  // CATALOGS (para UI)
   @Get('catalog/backend')
   getCatalogBackend() {
     return this.service.getCatalogBackend();

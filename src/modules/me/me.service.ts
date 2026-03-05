@@ -71,8 +71,11 @@ export class MeService {
       });
     }
 
-    const grupos = Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
-    for (const g of grupos) g.items.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    const grupos = Array.from(map.values()).sort((a, b) =>
+      a.nombre.localeCompare(b.nombre),
+    );
+    for (const g of grupos)
+      g.items.sort((a, b) => a.nombre.localeCompare(b.nombre));
 
     return {
       roleId,
@@ -183,7 +186,12 @@ export class MeService {
   async getProfile(userId: number) {
     const user = await this.userRepo.findOne({
       where: { IDUSUARIO: userId },
-      relations: { ROL: true, DEPARTAMENTO: true, PUESTO: true, SUCURSAL: true },
+      relations: {
+        ROL: true,
+        DEPARTAMENTO: true,
+        PUESTO: true,
+        SUCURSAL: true,
+      },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
@@ -200,9 +208,13 @@ export class MeService {
         ? { id: user.DEPARTAMENTO.IDDEPTO, nombre: user.DEPARTAMENTO.NOMBRE }
         : null,
       IDPUESTO: user.IDPUESTO,
-      PUESTO: user.PUESTO ? { id: user.PUESTO.IDPUESTO, nombre: user.PUESTO.NOMBRE } : null,
+      PUESTO: user.PUESTO
+        ? { id: user.PUESTO.IDPUESTO, nombre: user.PUESTO.NOMBRE }
+        : null,
       SUC: user.SUC,
-      SUCURSAL: user.SUCURSAL ? { suc: user.SUCURSAL.SUC, desc: user.SUCURSAL.DESC } : null,
+      SUCURSAL: user.SUCURSAL
+        ? { suc: user.SUCURSAL.SUC, desc: user.SUCURSAL.DESC }
+        : null,
     };
   }
 

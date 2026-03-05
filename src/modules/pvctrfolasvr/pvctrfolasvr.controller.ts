@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -26,11 +36,14 @@ export class PvCtrFolAsvrController {
 
   @Get(':idfol')
   findOne(@Param('idfol') idfol: string) {
-    return this.service.findOne(idfol);
+    return this.service.findOneForRead(idfol);
   }
 
   @Post('auto')
-  createAuto(@Body() dto: CreatePvCtrFolAsvrAutoDto, @CurrentUser() user: JwtPayload) {
+  createAuto(
+    @Body() dto: CreatePvCtrFolAsvrAutoDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.createAuto(dto, user);
   }
 

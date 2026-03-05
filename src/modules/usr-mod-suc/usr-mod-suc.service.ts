@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UsrModSucEntity } from './usr-mod-suc.entity';
@@ -12,7 +16,12 @@ export class UsrModSucService {
     private readonly repo: Repository<UsrModSucEntity>,
   ) {}
 
-  async findAll(query?: { modulo?: string; usuario?: string; suc?: string; activo?: string }) {
+  async findAll(query?: {
+    modulo?: string;
+    usuario?: string;
+    suc?: string;
+    activo?: string;
+  }) {
     const where: any = {};
     const modulo = query?.modulo?.trim();
     const usuario = query?.usuario?.trim();
@@ -36,8 +45,13 @@ export class UsrModSucService {
   }
 
   async findOne(modulo: string, usuario: string, suc: string) {
-    const row = await this.repo.findOne({ where: { MODULO: modulo, USUARIO: usuario, SUC: suc } });
-    if (!row) throw new NotFoundException(`USR_MOD_SUC ${modulo}-${usuario}-${suc} no existe`);
+    const row = await this.repo.findOne({
+      where: { MODULO: modulo, USUARIO: usuario, SUC: suc },
+    });
+    if (!row)
+      throw new NotFoundException(
+        `USR_MOD_SUC ${modulo}-${usuario}-${suc} no existe`,
+      );
     return row;
   }
 
@@ -46,7 +60,9 @@ export class UsrModSucService {
       where: { MODULO: dto.MODULO, USUARIO: dto.USUARIO, SUC: dto.SUC },
     });
     if (exists) {
-      throw new ConflictException(`USR_MOD_SUC ${dto.MODULO}-${dto.USUARIO}-${dto.SUC} ya existe`);
+      throw new ConflictException(
+        `USR_MOD_SUC ${dto.MODULO}-${dto.USUARIO}-${dto.SUC} ya existe`,
+      );
     }
 
     const entity = this.repo.create({
@@ -59,7 +75,12 @@ export class UsrModSucService {
     return this.repo.save(entity);
   }
 
-  async update(modulo: string, usuario: string, suc: string, dto: UpdateUsrModSucDto) {
+  async update(
+    modulo: string,
+    usuario: string,
+    suc: string,
+    dto: UpdateUsrModSucDto,
+  ) {
     const row = await this.findOne(modulo, usuario, suc);
     const updated = this.repo.merge(row, {
       ACTIVO: dto.ACTIVO ?? row.ACTIVO,

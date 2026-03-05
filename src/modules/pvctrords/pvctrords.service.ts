@@ -183,7 +183,7 @@ export class PvCtrOrdsService {
         iord: existingOrd,
         tipo,
         opv,
-        fechaEntrega: fechaEntrega!,
+        fechaEntrega: fechaEntrega,
         comad,
         descArt,
       });

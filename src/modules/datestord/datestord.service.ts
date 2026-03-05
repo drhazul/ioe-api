@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { DatEstOrdEntity } from './datestord.entity';
@@ -61,4 +65,3 @@ export class DatEstOrdService {
     return { deleted: true, ESTA: id };
   }
 }
-

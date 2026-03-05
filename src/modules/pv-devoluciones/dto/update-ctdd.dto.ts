@@ -28,4 +28,3 @@ export class UpdateCtddDto {
   @Min(0.0001)
   ctdd: number | null;
 }
-

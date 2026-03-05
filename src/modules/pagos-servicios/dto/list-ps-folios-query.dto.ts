@@ -12,12 +12,21 @@ export class ListPsFoliosQueryDto {
   @Length(1, 10)
   suc?: string;
 
-  @ApiPropertyOptional({ description: 'Estado a consultar: PENDIENTE | PAGADO | ALL' })
+  @ApiPropertyOptional({
+    description: 'Estado a consultar: PENDIENTE | PAGADO | ALL',
+  })
   @Transform(({ value }) => toTrimmedString(value))
   @IsOptional()
   @IsString()
   @Length(1, 20)
   esta?: string;
+
+  @ApiPropertyOptional({ description: 'OPV (usuario logueado)' })
+  @Transform(({ value }) => toTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  opv?: string;
 
   @ApiPropertyOptional({ description: 'Busqueda por folio o cliente' })
   @Transform(({ value }) => toTrimmedString(value))

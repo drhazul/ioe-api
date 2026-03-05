@@ -1,4 +1,3 @@
-
 import {
   BadRequestException,
   ConflictException,
@@ -57,7 +56,11 @@ export class RelojChecadorService {
     private readonly audit: AuditService,
   ) {}
 
-  async getContext(user: JwtPayload, sucQuery: string | undefined, meta: RequestMeta) {
+  async getContext(
+    user: JwtPayload,
+    sucQuery: string | undefined,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     const suc = this.resolveScopedSuc(scope, sucQuery);
 
@@ -73,7 +76,9 @@ export class RelojChecadorService {
 
       const row = this.firstRow(rows);
       if (!row) {
-        throw new NotFoundException('No se pudo obtener el contexto del marcaje');
+        throw new NotFoundException(
+          'No se pudo obtener el contexto del marcaje',
+        );
       }
 
       await this.audit.log({
@@ -101,7 +106,11 @@ export class RelojChecadorService {
     }
   }
 
-  async createTimelog(user: JwtPayload, dto: CreateTimelogDto, meta: RequestMeta) {
+  async createTimelog(
+    user: JwtPayload,
+    dto: CreateTimelogDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     const suc = this.resolveScopedSuc(scope, dto.SUC);
 
@@ -150,7 +159,9 @@ export class RelojChecadorService {
 
       const row = this.firstRow(rows);
       if (!row) {
-        throw new BadRequestException('No se recibio respuesta al crear marcaje');
+        throw new BadRequestException(
+          'No se recibio respuesta al crear marcaje',
+        );
       }
 
       const ok = this.toBool(this.readValue(row, 'OK'));
@@ -189,7 +200,11 @@ export class RelojChecadorService {
     }
   }
 
-  async listTimelogs(user: JwtPayload, query: ListTimelogsDto, meta: RequestMeta) {
+  async listTimelogs(
+    user: JwtPayload,
+    query: ListTimelogsDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
 
     let suc = this.normalizeNullable(query.suc);
@@ -212,8 +227,14 @@ export class RelojChecadorService {
       }
 
       idDepto = scope.idDepto ?? null;
-      if (query.idDepto != null && scope.idDepto != null && query.idDepto !== scope.idDepto) {
-        throw new ForbiddenException('El usuario no puede consultar otro departamento');
+      if (
+        query.idDepto != null &&
+        scope.idDepto != null &&
+        query.idDepto !== scope.idDepto
+      ) {
+        throw new ForbiddenException(
+          'El usuario no puede consultar otro departamento',
+        );
       }
     }
 
@@ -243,7 +264,9 @@ export class RelojChecadorService {
         ],
       );
 
-      const total = this.toInt(this.readValue(this.firstRow(rows), 'TOTAL_COUNT')) ?? rows.length;
+      const total =
+        this.toInt(this.readValue(this.firstRow(rows), 'TOTAL_COUNT')) ??
+        rows.length;
 
       await this.audit.log({
         IDUSUARIO: scope.idUsuario,
@@ -279,7 +302,12 @@ export class RelojChecadorService {
     }
   }
 
-  async updateTimelog(user: JwtPayload, idRaw: string, dto: UpdateTimelogDto, meta: RequestMeta) {
+  async updateTimelog(
+    user: JwtPayload,
+    idRaw: string,
+    dto: UpdateTimelogDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     if (!scope.isAdmin && !scope.isHr) {
       throw new ForbiddenException('Solo Admin/RRHH puede corregir marcajes');
@@ -315,19 +343,26 @@ export class RelojChecadorService {
       );
 
       const row = this.firstRow(rows);
-      if (!row) throw new NotFoundException('Marcaje no encontrado para actualizacion');
+      if (!row)
+        throw new NotFoundException('Marcaje no encontrado para actualizacion');
       return row;
     } catch (error) {
       this.throwMappedError(error);
     }
   }
 
-  async createIncidencia(user: JwtPayload, dto: CreateIncidenciaDto, meta: RequestMeta) {
+  async createIncidencia(
+    user: JwtPayload,
+    dto: CreateIncidenciaDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     const targetUserId = dto.IDUSUARIO ?? scope.idUsuario;
 
     if (scope.isEmployee && targetUserId !== scope.idUsuario) {
-      throw new ForbiddenException('Empleado solo puede crear incidencias propias');
+      throw new ForbiddenException(
+        'Empleado solo puede crear incidencias propias',
+      );
     }
 
     let suc = this.normalizeNullable(dto.SUC);
@@ -347,7 +382,9 @@ export class RelojChecadorService {
       suc = targetUser.suc;
     }
     if (suc == null) {
-      throw new BadRequestException('No se pudo determinar SUC para la incidencia');
+      throw new BadRequestException(
+        'No se pudo determinar SUC para la incidencia',
+      );
     }
 
     try {
@@ -399,7 +436,9 @@ export class RelojChecadorService {
   ) {
     const scope = await this.resolveAccessScope(user);
     if (scope.isEmployee) {
-      throw new ForbiddenException('Empleado no puede cambiar estatus de incidencias');
+      throw new ForbiddenException(
+        'Empleado no puede cambiar estatus de incidencias',
+      );
     }
 
     const id = this.parseId(idRaw, 'IDINC');
@@ -418,7 +457,9 @@ export class RelojChecadorService {
 
       const suc = this.readString(row, 'SUC');
       if (suc == null || suc !== this.requireActorSuc(scope)) {
-        throw new ForbiddenException('Manager solo puede gestionar incidencias de su SUC');
+        throw new ForbiddenException(
+          'Manager solo puede gestionar incidencias de su SUC',
+        );
       }
 
       const targetUserId = this.toInt(this.readValue(row, 'IDUSUARIO'));
@@ -453,14 +494,19 @@ export class RelojChecadorService {
       );
 
       const row = this.firstRow(rows);
-      if (!row) throw new NotFoundException('No se pudo actualizar la incidencia');
+      if (!row)
+        throw new NotFoundException('No se pudo actualizar la incidencia');
       return row;
     } catch (error) {
       this.throwMappedError(error);
     }
   }
 
-  async listIncidencias(user: JwtPayload, query: ListIncidenciasDto, meta: RequestMeta) {
+  async listIncidencias(
+    user: JwtPayload,
+    query: ListIncidenciasDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
 
     let suc = this.normalizeNullable(query.suc);
@@ -517,19 +563,27 @@ export class RelojChecadorService {
         ],
       );
 
-      const total = this.toInt(this.readValue(this.firstRow(rows), 'TOTAL_COUNT')) ?? rows.length;
+      const total =
+        this.toInt(this.readValue(this.firstRow(rows), 'TOTAL_COUNT')) ??
+        rows.length;
       return { items: rows, total, page, limit };
     } catch (error) {
       this.throwMappedError(error);
     }
   }
 
-  async uploadDocumento(user: JwtPayload, dto: UploadDocumentoDto, meta: RequestMeta) {
+  async uploadDocumento(
+    user: JwtPayload,
+    dto: UploadDocumentoDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     const targetUserId = dto.IDUSUARIO ?? scope.idUsuario;
 
     if (scope.isEmployee && targetUserId !== scope.idUsuario) {
-      throw new ForbiddenException('Empleado solo puede subir documentos propios');
+      throw new ForbiddenException(
+        'Empleado solo puede subir documentos propios',
+      );
     }
 
     const contentBuffer = this.decodeBase64(dto.CONTENT_BASE64);
@@ -541,7 +595,9 @@ export class RelojChecadorService {
     } else if (!scope.isAdmin) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
-        throw new ForbiddenException('Manager solo puede subir documentos de su SUC');
+        throw new ForbiddenException(
+          'Manager solo puede subir documentos de su SUC',
+        );
       }
       suc = managerSuc;
       await this.ensureUserWithinScope(scope, targetUserId, suc);
@@ -553,7 +609,9 @@ export class RelojChecadorService {
     }
 
     if (suc == null) {
-      throw new BadRequestException('No se pudo determinar SUC para el documento');
+      throw new BadRequestException(
+        'No se pudo determinar SUC para el documento',
+      );
     }
 
     if (dto.IDINC != null) {
@@ -601,7 +659,11 @@ export class RelojChecadorService {
     }
   }
 
-  async listDocumentos(user: JwtPayload, query: ListDocumentosDto, meta: RequestMeta) {
+  async listDocumentos(
+    user: JwtPayload,
+    query: ListDocumentosDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
 
     let suc = this.normalizeNullable(query.suc);
@@ -614,7 +676,9 @@ export class RelojChecadorService {
     } else if (!scope.isAdmin) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
-        throw new ForbiddenException('Manager solo puede listar documentos de su SUC');
+        throw new ForbiddenException(
+          'Manager solo puede listar documentos de su SUC',
+        );
       }
       suc = managerSuc;
       if (userId != null) {
@@ -656,7 +720,9 @@ export class RelojChecadorService {
         ],
       );
 
-      const total = this.toInt(this.readValue(this.firstRow(rows), 'TOTAL_COUNT')) ?? rows.length;
+      const total =
+        this.toInt(this.readValue(this.firstRow(rows), 'TOTAL_COUNT')) ??
+        rows.length;
       return { items: rows, total, page, limit };
     } catch (error) {
       this.throwMappedError(error);
@@ -686,11 +752,15 @@ export class RelojChecadorService {
 
     if (scope.isEmployee) {
       if (docUserId !== scope.idUsuario) {
-        throw new ForbiddenException('Empleado solo puede descargar documentos propios');
+        throw new ForbiddenException(
+          'Empleado solo puede descargar documentos propios',
+        );
       }
     } else if (!scope.isAdmin) {
       if (docSuc == null || docSuc !== this.requireActorSuc(scope)) {
-        throw new ForbiddenException('Manager solo puede descargar documentos de su SUC');
+        throw new ForbiddenException(
+          'Manager solo puede descargar documentos de su SUC',
+        );
       }
       if (docUserId != null) {
         await this.ensureUserWithinScope(scope, docUserId, docSuc);
@@ -718,7 +788,8 @@ export class RelojChecadorService {
       return {
         idDoc,
         fileName: this.readString(row, 'FILE_NAME') ?? `documento-${idDoc}`,
-        mimeType: this.readString(row, 'MIME_TYPE') ?? 'application/octet-stream',
+        mimeType:
+          this.readString(row, 'MIME_TYPE') ?? 'application/octet-stream',
         content: this.readBuffer(this.readValue(row, 'CONTENT')),
       };
     } catch (error) {
@@ -726,7 +797,11 @@ export class RelojChecadorService {
     }
   }
 
-  async createOverride(user: JwtPayload, dto: CreateOverrideDto, meta: RequestMeta) {
+  async createOverride(
+    user: JwtPayload,
+    dto: CreateOverrideDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     if (scope.isEmployee) {
       throw new ForbiddenException('Empleado no puede crear overrides');
@@ -736,7 +811,9 @@ export class RelojChecadorService {
     if (!scope.isAdmin) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
-        throw new ForbiddenException('Manager solo puede crear overrides en su SUC');
+        throw new ForbiddenException(
+          'Manager solo puede crear overrides en su SUC',
+        );
       }
       suc = managerSuc;
       await this.ensureUserWithinScope(scope, dto.IDUSUARIO, suc);
@@ -785,7 +862,11 @@ export class RelojChecadorService {
     }
   }
 
-  async listOverrides(user: JwtPayload, query: ListOverridesDto, meta: RequestMeta) {
+  async listOverrides(
+    user: JwtPayload,
+    query: ListOverridesDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     if (scope.isEmployee) {
       throw new ForbiddenException('Empleado no puede consultar overrides');
@@ -797,7 +878,9 @@ export class RelojChecadorService {
     if (!scope.isAdmin) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
-        throw new ForbiddenException('Manager solo puede consultar overrides de su SUC');
+        throw new ForbiddenException(
+          'Manager solo puede consultar overrides de su SUC',
+        );
       }
       suc = managerSuc;
       if (idUsuario != null) {
@@ -823,17 +906,34 @@ export class RelojChecadorService {
           @URL = @7,
           @METHOD = @8;
         `,
-        [suc, idUsuario, activeOnly, page, limit, scope.idUsuario, meta.ip, meta.url, meta.method],
+        [
+          suc,
+          idUsuario,
+          activeOnly,
+          page,
+          limit,
+          scope.idUsuario,
+          meta.ip,
+          meta.url,
+          meta.method,
+        ],
       );
 
-      const total = this.toInt(this.readValue(this.firstRow(rows), 'TOTAL_COUNT')) ?? rows.length;
+      const total =
+        this.toInt(this.readValue(this.firstRow(rows), 'TOTAL_COUNT')) ??
+        rows.length;
       return { items: rows, total, page, limit };
     } catch (error) {
       this.throwMappedError(error);
     }
   }
 
-  async revokeOverride(user: JwtPayload, idRaw: string, dto: RevokeOverrideDto, meta: RequestMeta) {
+  async revokeOverride(
+    user: JwtPayload,
+    idRaw: string,
+    dto: RevokeOverrideDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     if (scope.isEmployee) {
       throw new ForbiddenException('Empleado no puede revocar overrides');
@@ -855,7 +955,9 @@ export class RelojChecadorService {
 
       const suc = this.readString(row, 'SUC');
       if (suc == null || suc !== this.requireActorSuc(scope)) {
-        throw new ForbiddenException('Manager solo puede revocar overrides de su SUC');
+        throw new ForbiddenException(
+          'Manager solo puede revocar overrides de su SUC',
+        );
       }
 
       const targetUserId = this.toInt(this.readValue(row, 'IDUSUARIO'));
@@ -875,11 +977,19 @@ export class RelojChecadorService {
           @URL = @4,
           @METHOD = @5;
         `,
-        [idOvr, scope.idUsuario, dto.REASON.trim(), meta.ip, meta.url, meta.method],
+        [
+          idOvr,
+          scope.idUsuario,
+          dto.REASON.trim(),
+          meta.ip,
+          meta.url,
+          meta.method,
+        ],
       );
 
       const row = this.firstRow(rows);
-      if (!row) throw new NotFoundException('Override no encontrado para revocar');
+      if (!row)
+        throw new NotFoundException('Override no encontrado para revocar');
       return row;
     } catch (error) {
       this.throwMappedError(error);
@@ -892,7 +1002,8 @@ export class RelojChecadorService {
       throw new ForbiddenException('Solo Admin puede consultar policies');
     }
 
-    const suc = this.normalizeNullable(query.suc) ?? this.requireActorSuc(scope);
+    const suc =
+      this.normalizeNullable(query.suc) ?? this.requireActorSuc(scope);
 
     try {
       const rows = await this.dataSource.query(
@@ -913,7 +1024,10 @@ export class RelojChecadorService {
         ACTION: 'GET',
         MODULO: 'reloj_checador',
         ENTIDAD: 'ATT_POLICY',
-        ENTIDAD_ID: this.readValue(row, 'IDPOLICY') == null ? null : String(this.readValue(row, 'IDPOLICY')),
+        ENTIDAD_ID:
+          this.readValue(row, 'IDPOLICY') == null
+            ? null
+            : String(this.readValue(row, 'IDPOLICY')),
         SUC: suc,
         METADATA_JSON: JSON.stringify({
           url: meta.url,
@@ -932,7 +1046,11 @@ export class RelojChecadorService {
     }
   }
 
-  async upsertPolicy(user: JwtPayload, dto: UpsertPolicyDto, meta: RequestMeta) {
+  async upsertPolicy(
+    user: JwtPayload,
+    dto: UpsertPolicyDto,
+    meta: RequestMeta,
+  ) {
     const scope = await this.resolveAccessScope(user);
     if (!scope.isAdmin) {
       throw new ForbiddenException('Solo Admin puede editar policies');
@@ -1047,10 +1165,16 @@ export class RelojChecadorService {
     );
 
     const row = this.firstRow(rows);
-    const roleCode = this.normalizeUpper(this.readString(row, 'ROLE_CODE') ?? '');
+    const roleCode = this.normalizeUpper(
+      this.readString(row, 'ROLE_CODE') ?? '',
+    );
     const roleName = this.readString(row, 'ROLE_NAME') ?? '';
-    const nivel = this.toInt(this.readValue(row, 'NIVEL')) ?? (Number(user.nivel ?? 0) || 0);
-    const suc = this.normalizeNullable(this.readString(row, 'SUC') ?? user.suc ?? null);
+    const nivel =
+      this.toInt(this.readValue(row, 'NIVEL')) ??
+      (Number(user.nivel ?? 0) || 0);
+    const suc = this.normalizeNullable(
+      this.readString(row, 'SUC') ?? user.suc ?? null,
+    );
     const idDepto = this.toInt(this.readValue(row, 'IDDEPTO'));
 
     const isAdmin =
@@ -1097,7 +1221,9 @@ export class RelojChecadorService {
     const actorSuc = this.requireActorSuc(scope);
     if (req == null) return actorSuc;
     if (req !== actorSuc) {
-      throw new ForbiddenException('El usuario no puede operar en una SUC distinta');
+      throw new ForbiddenException(
+        'El usuario no puede operar en una SUC distinta',
+      );
     }
     return actorSuc;
   }
@@ -1110,7 +1236,11 @@ export class RelojChecadorService {
     return suc;
   }
 
-  private async ensureUserWithinScope(scope: AccessScope, userId: number, expectedSuc?: string | null) {
+  private async ensureUserWithinScope(
+    scope: AccessScope,
+    userId: number,
+    expectedSuc?: string | null,
+  ) {
     const user = await this.loadUserScope(userId);
     if (expectedSuc != null && user.suc !== expectedSuc) {
       throw new ForbiddenException('Usuario fuera de la SUC permitida');
@@ -1120,8 +1250,14 @@ export class RelojChecadorService {
       if (user.suc !== scopeSuc) {
         throw new ForbiddenException('Usuario fuera de la SUC del manager');
       }
-      if (scope.idDepto != null && user.idDepto != null && user.idDepto !== scope.idDepto) {
-        throw new ForbiddenException('Usuario fuera del departamento permitido');
+      if (
+        scope.idDepto != null &&
+        user.idDepto != null &&
+        user.idDepto !== scope.idDepto
+      ) {
+        throw new ForbiddenException(
+          'Usuario fuera del departamento permitido',
+        );
       }
     }
     return user;
@@ -1169,14 +1305,18 @@ export class RelojChecadorService {
 
     const row = this.firstRow(rows);
     if (!row) {
-      throw new NotFoundException('Incidencia no encontrada para adjuntar documento');
+      throw new NotFoundException(
+        'Incidencia no encontrada para adjuntar documento',
+      );
     }
 
     const rowUserId = this.toInt(this.readValue(row, 'IDUSUARIO'));
     const rowSuc = this.readString(row, 'SUC');
 
     if (rowUserId !== targetUserId || rowSuc !== targetSuc) {
-      throw new ForbiddenException('La incidencia no corresponde al usuario/SUC indicados');
+      throw new ForbiddenException(
+        'La incidencia no corresponde al usuario/SUC indicados',
+      );
     }
 
     if (!scope.isAdmin && rowSuc !== this.requireActorSuc(scope)) {
@@ -1259,7 +1399,9 @@ export class RelojChecadorService {
   }
 
   private normalizeUpper(value: unknown) {
-    return String(value ?? '').trim().toUpperCase();
+    return String(value ?? '')
+      .trim()
+      .toUpperCase();
   }
 
   private normalizeNullable(value: unknown) {

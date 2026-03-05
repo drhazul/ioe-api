@@ -5,7 +5,10 @@ import { AuditLogEntity } from './audit-log.entity';
 
 @Injectable()
 export class AuditService {
-  constructor(@InjectRepository(AuditLogEntity) private readonly repo: Repository<AuditLogEntity>) {}
+  constructor(
+    @InjectRepository(AuditLogEntity)
+    private readonly repo: Repository<AuditLogEntity>,
+  ) {}
 
   async log(entry: Partial<AuditLogEntity>) {
     // Nunca dejar que el log rompa la request

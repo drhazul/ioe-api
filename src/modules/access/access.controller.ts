@@ -45,7 +45,9 @@ export class AccessController {
   // -------- BACKEND MODULOS --------
   @Get('modulos')
   async listModulos(@Query('includeInactives') includeInactives?: string) {
-    const rows = await this.service.listModulos(this.includeInactives(includeInactives));
+    const rows = await this.service.listModulos(
+      this.includeInactives(includeInactives),
+    );
     return this.ok(rows);
   }
 
@@ -73,7 +75,9 @@ export class AccessController {
   // -------- BACKEND GRUPOS --------
   @Get('grupos-modulo')
   async listGruposModulo(@Query('includeInactives') includeInactives?: string) {
-    const rows = await this.service.listGruposModulo(this.includeInactives(includeInactives));
+    const rows = await this.service.listGruposModulo(
+      this.includeInactives(includeInactives),
+    );
     return this.ok(rows);
   }
 
@@ -86,7 +90,10 @@ export class AccessController {
 
   @Put('grupos-modulo/:id')
   @UseGuards(AdminOnlyGuard)
-  async updateGrupoModulo(@Param('id') id: string, @Body() dto: UpdateGrupModuloDto) {
+  async updateGrupoModulo(
+    @Param('id') id: string,
+    @Body() dto: UpdateGrupModuloDto,
+  ) {
     const row = await this.service.updateGrupoModulo(Number(id), dto);
     return this.ok(row, 'updated');
   }
@@ -107,28 +114,42 @@ export class AccessController {
 
   @Post('grupos-modulo/:id/modulos')
   @UseGuards(AdminOnlyGuard)
-  async setGrupoModulos(@Param('id') id: string, @Body() dto: AssignModulesToGroupDto) {
+  async setGrupoModulos(
+    @Param('id') id: string,
+    @Body() dto: AssignModulesToGroupDto,
+  ) {
     const res = await this.service.setGrupoModulos(Number(id), dto);
     return this.ok(res, 'updated');
   }
 
   @Delete('grupos-modulo/:id/modulos/:idModulo')
   @UseGuards(AdminOnlyGuard)
-  async deleteGrupoModuloRel(@Param('id') id: string, @Param('idModulo') idModulo: string) {
-    const res = await this.service.deleteGrupoModuloRel(Number(id), Number(idModulo));
+  async deleteGrupoModuloRel(
+    @Param('id') id: string,
+    @Param('idModulo') idModulo: string,
+  ) {
+    const res = await this.service.deleteGrupoModuloRel(
+      Number(id),
+      Number(idModulo),
+    );
     return this.ok(res, 'deleted');
   }
 
   // -------- ROLES --------
   @Get('roles')
   async listRoles(@Query('includeInactives') includeInactives?: string) {
-    const rows = await this.service.listRoles(this.includeInactives(includeInactives));
+    const rows = await this.service.listRoles(
+      this.includeInactives(includeInactives),
+    );
     return this.ok(rows);
   }
 
   // -------- BACKEND PERMS --------
   @Get('roles/:id/permisos-backend')
-  async getBackendPerms(@Param('id') id: string, @Query('includeInactives') includeInactives?: string) {
+  async getBackendPerms(
+    @Param('id') id: string,
+    @Query('includeInactives') includeInactives?: string,
+  ) {
     const rows = await this.service.getBackendPerms(
       Number(id),
       this.includeInactives(includeInactives),
@@ -138,7 +159,10 @@ export class AccessController {
 
   @Post('roles/:id/permisos-backend')
   @UseGuards(AdminOnlyGuard)
-  async setBackendPerm(@Param('id') id: string, @Body() dto: AssignGroupToRolePermDto) {
+  async setBackendPerm(
+    @Param('id') id: string,
+    @Body() dto: AssignGroupToRolePermDto,
+  ) {
     const row = await this.service.setBackendPerm(Number(id), dto);
     return this.ok(row, 'updated');
   }
@@ -146,7 +170,9 @@ export class AccessController {
   // -------- FRONT MODULOS --------
   @Get('mod-front')
   async listModFront(@Query('includeInactives') includeInactives?: string) {
-    const rows = await this.service.listModFront(this.includeInactives(includeInactives));
+    const rows = await this.service.listModFront(
+      this.includeInactives(includeInactives),
+    );
     return this.ok(rows);
   }
 
@@ -159,7 +185,10 @@ export class AccessController {
 
   @Put('mod-front/:id')
   @UseGuards(AdminOnlyGuard)
-  async updateModFront(@Param('id') id: string, @Body() dto: UpdateModFrontDto) {
+  async updateModFront(
+    @Param('id') id: string,
+    @Body() dto: UpdateModFrontDto,
+  ) {
     const row = await this.service.updateModFront(Number(id), dto);
     return this.ok(row, 'updated');
   }
@@ -174,7 +203,9 @@ export class AccessController {
   // -------- FRONT GRUPOS --------
   @Get('grupos-front')
   async listGruposFront(@Query('includeInactives') includeInactives?: string) {
-    const rows = await this.service.listGruposFront(this.includeInactives(includeInactives));
+    const rows = await this.service.listGruposFront(
+      this.includeInactives(includeInactives),
+    );
     return this.ok(rows);
   }
 
@@ -187,7 +218,10 @@ export class AccessController {
 
   @Put('grupos-front/:id')
   @UseGuards(AdminOnlyGuard)
-  async updateGrupoFront(@Param('id') id: string, @Body() dto: UpdateGrupmodFrontDto) {
+  async updateGrupoFront(
+    @Param('id') id: string,
+    @Body() dto: UpdateGrupmodFrontDto,
+  ) {
     const row = await this.service.updateGrupoFront(Number(id), dto);
     return this.ok(row, 'updated');
   }
@@ -208,7 +242,10 @@ export class AccessController {
 
   @Post('grupos-front/:id/mods')
   @UseGuards(AdminOnlyGuard)
-  async setGrupoFrontMods(@Param('id') id: string, @Body() dto: AssignFrontModulesToGroupDto) {
+  async setGrupoFrontMods(
+    @Param('id') id: string,
+    @Body() dto: AssignFrontModulesToGroupDto,
+  ) {
     const res = await this.service.setGrupoFrontMods(Number(id), dto);
     return this.ok(res, 'updated');
   }
@@ -228,7 +265,10 @@ export class AccessController {
 
   @Post('roles/:id/enrolamientos-front')
   @UseGuards(AdminOnlyGuard)
-  async setFrontEnrollment(@Param('id') id: string, @Body() dto: AssignFrontGroupToRoleDto) {
+  async setFrontEnrollment(
+    @Param('id') id: string,
+    @Body() dto: AssignFrontGroupToRoleDto,
+  ) {
     const row = await this.service.setFrontEnrollment(Number(id), dto);
     return this.ok(row, 'updated');
   }

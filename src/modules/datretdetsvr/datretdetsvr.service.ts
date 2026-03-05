@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { DatRetDetSvrEntity } from './datretdetsvr.entity';
@@ -54,7 +58,9 @@ export class DatRetDetSvrService {
       await this.repo.remove(row);
     } catch (err) {
       if (err instanceof QueryFailedError) {
-        throw new ConflictException(`No se puede eliminar DAT_RET_DET_SVR ${id} porque está referenciado por otros registros.`);
+        throw new ConflictException(
+          `No se puede eliminar DAT_RET_DET_SVR ${id} porque está referenciado por otros registros.`,
+        );
       }
       throw err;
     }

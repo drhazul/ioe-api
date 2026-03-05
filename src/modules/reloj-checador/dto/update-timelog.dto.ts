@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsIn, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsOptional,
+  IsString,
+  Length,
+} from 'class-validator';
 
 export class UpdateTimelogDto {
   @ApiPropertyOptional({ description: 'Nueva fecha/hora del marcaje en ISO' })

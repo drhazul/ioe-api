@@ -15,7 +15,7 @@ export class RolesGuard implements CanActivate {
     if (!required || required.length === 0) return true;
 
     const req = ctx.switchToHttp().getRequest();
-    const user = req.user as any;
+    const user = req.user;
 
     // viene del JWT payload: { roleId: number, ... }
     const roleId = Number(user?.roleId ?? 0);

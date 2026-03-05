@@ -5,6 +5,11 @@ export class DatCatRegEntity {
   @PrimaryColumn({ name: 'C_RegimenFiscal', type: 'int' })
   C_REGIMENFISCAL: number;
 
-  @Column({ name: 'Descripcion', type: 'nvarchar', length: 255, nullable: true })
+  @Column({
+    name: 'Descripcion',
+    type: 'nvarchar',
+    length: 255,
+    nullable: true,
+  })
   DESCRIPCION: string | null;
 }

@@ -18,7 +18,9 @@ async function bootstrap() {
   // Example: CORS_ORIGINS="http://localhost:57591,http://127.0.0.1:57591"
   const defaultOrigins = ['http://localhost:57591', 'http://127.0.0.1:57591'];
   const envOrigins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
+    ? process.env.CORS_ORIGINS.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
     : [];
   const allowedOrigins = envOrigins.length > 0 ? envOrigins : defaultOrigins;
 

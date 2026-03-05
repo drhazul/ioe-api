@@ -1,4 +1,10 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+  ForbiddenException,
+} from '@nestjs/common';
 
 @Injectable()
 export class AdminOnlyGuard implements CanActivate {
@@ -11,11 +17,20 @@ export class AdminOnlyGuard implements CanActivate {
     const roleId = Number(user.roleId);
     const nivel = Number(user.nivel);
 
-    const adminRoleIds = this.parseIds(process.env.ADMIN_ROLE_IDS, process.env.ADMIN_ROLE_ID);
-    const adminNiveles = this.parseIds(process.env.ADMIN_NIVELES, process.env.ADMIN_NIVEL);
+    const adminRoleIds = this.parseIds(
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const adminNiveles = this.parseIds(
+      process.env.ADMIN_NIVELES,
+      process.env.ADMIN_NIVEL,
+    );
 
-    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [0]).includes(roleId);
-    const nivelAllowed = adminNiveles.length > 0 && adminNiveles.includes(nivel);
+    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [0]).includes(
+      roleId,
+    );
+    const nivelAllowed =
+      adminNiveles.length > 0 && adminNiveles.includes(nivel);
 
     if (!roleAllowed && !nivelAllowed) {
       throw new ForbiddenException('Solo ADMIN puede realizar esta acción');

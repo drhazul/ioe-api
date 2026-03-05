@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { DatContCtrlEntity } from './datcontctrl.entity';
@@ -21,13 +25,15 @@ export class DatContCtrlService {
 
   async findOne(tokenreg: string) {
     const row = await this.repo.findOne({ where: { TOKENREG: tokenreg } });
-    if (!row) throw new NotFoundException(`DAT_CONT_CTRL ${tokenreg} no existe`);
+    if (!row)
+      throw new NotFoundException(`DAT_CONT_CTRL ${tokenreg} no existe`);
     return row;
   }
 
   async create(dto: CreateDatContCtrlDto) {
     const exists = await this.repo.exist({ where: { TOKENREG: dto.TOKENREG } });
-    if (exists) throw new ConflictException(`DAT_CONT_CTRL ${dto.TOKENREG} ya existe`);
+    if (exists)
+      throw new ConflictException(`DAT_CONT_CTRL ${dto.TOKENREG} ya existe`);
 
     const entity = this.repo.create({
       TOKENREG: dto.TOKENREG,

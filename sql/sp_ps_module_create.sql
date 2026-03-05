@@ -466,6 +466,8 @@ BEGIN
   DECLARE @hasUpdatedAt BIT = 0;
   DECLARE @sql NVARCHAR(MAX);
   DECLARE @newTicketId NVARCHAR(36);
+  DECLARE @folioFound BIT = 0;
+  DECLARE @folioCliente FLOAT = NULL;
 
   IF @idfolNorm = ''
     THROW 57020, 'IDFOL es requerido', 1;
@@ -476,8 +478,17 @@ BEGIN
   IF @ticketObjId IS NULL
     THROW 57022, 'No existe tabla PV_TICKET_LOG', 1;
 
-  IF NOT EXISTS (SELECT 1 FROM dbo.PV_CTR_FOL_ASVR WHERE IDFOL = @idfolNorm)
+  SELECT TOP 1
+    @folioFound = 1,
+    @folioCliente = TRY_CONVERT(FLOAT, CLIEN)
+  FROM dbo.PV_CTR_FOL_ASVR
+  WHERE IDFOL = @idfolNorm;
+
+  IF @folioFound = 0
     THROW 57023, 'El folio PS no existe', 1;
+
+  IF @idsNorm IN ('AD', 'AP', 'CR') AND ISNULL(@folioCliente, 0) <= 1
+    THROW 57029, 'Seleccione Cliente', 1;
 
   SELECT TOP 1 @descSvr = DESSV
   FROM dbo.PV_DAT_PS
@@ -610,50 +621,54 @@ BEGIN
 
   ;WITH q AS (
     SELECT
-      LTRIM(RTRIM(ISNULL(CAST(c.SUC AS NVARCHAR(10)), ''))) AS SUC,
       TRY_CONVERT(BIGINT, c.CLIENT) AS CLIENT,
-      LTRIM(RTRIM(ISNULL(CAST(c.CTA AS NVARCHAR(50)), ''))) AS CTA,
       LTRIM(RTRIM(ISNULL(CAST(c.IDFOL AS NVARCHAR(255)), ''))) AS IDFOL,
-      LTRIM(RTRIM(ISNULL(CAST(c.NDOC AS NVARCHAR(255)), ''))) AS NDOC,
-      LTRIM(RTRIM(ISNULL(
-        COALESCE(
-          NULLIF(LTRIM(RTRIM(CAST(c.IDFOL AS NVARCHAR(255)))), ''),
-          NULLIF(LTRIM(RTRIM(CAST(c.NDOC AS NVARCHAR(255)))), '')
-        ), ''
-      ))) AS ORD,
-      ISNULL(rel.RELACION, '') AS RELACION,
       ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), c.IMPT), 0)), 4) AS ADEUDO
     FROM dbo.DAT_CTRL_CTAS c
-    OUTER APPLY (
-      SELECT TOP 1
-        UPPER(LTRIM(RTRIM(ISNULL(x.RELACION, '')))) AS RELACION
-      FROM dbo.DAT_CAT_CTAS x
-      WHERE UPPER(LTRIM(RTRIM(ISNULL(x.CTA, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.CTA AS NVARCHAR(50)), ''))))
-        AND (
-          UPPER(LTRIM(RTRIM(ISNULL(x.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.SUC AS NVARCHAR(10)), ''))))
-          OR LTRIM(RTRIM(ISNULL(x.SUC, ''))) = ''
-        )
-      ORDER BY CASE
-        WHEN UPPER(LTRIM(RTRIM(ISNULL(x.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.SUC AS NVARCHAR(10)), ''))))
-          THEN 0 ELSE 1
-      END
-    ) rel
     WHERE TRY_CONVERT(BIGINT, c.CLIENT) = @CLIENT
     GROUP BY
-      c.SUC,
       c.CLIENT,
-      c.CTA,
-      c.IDFOL,
-      c.NDOC,
-      rel.RELACION
+      c.IDFOL
+    HAVING ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), c.IMPT), 0)), 4) <> 0
   )
   SELECT
-    @jsonR = ISNULL((SELECT * FROM q ORDER BY IDFOL DESC, CTA FOR JSON PATH), '[]'),
-    @jsonRes = ISNULL((SELECT * FROM q WHERE ADEUDO < 0 ORDER BY IDFOL DESC, CTA FOR JSON PATH), '[]');
+    @jsonR = ISNULL((SELECT CLIENT, IDFOL, ADEUDO FROM q ORDER BY IDFOL DESC FOR JSON PATH), '[]'),
+    @jsonRes = ISNULL((SELECT CLIENT, IDFOL, ADEUDO FROM q WHERE ADEUDO < 0 ORDER BY IDFOL DESC FOR JSON PATH), '[]');
 
   SELECT
     @jsonR AS ADEUDOS_R_JSON,
     @jsonRes AS ADEUDOS_RES_JSON;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_ps_adeudos_folio_detalle
+  @CLIENT BIGINT,
+  @IDFOL NVARCHAR(255)
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
+  DECLARE @jsonDetalle NVARCHAR(MAX) = '[]';
+
+  IF @idfolNorm = ''
+    THROW 57027, 'IDFOL es requerido para consultar detalle de adeudo', 1;
+
+  IF OBJECT_ID('dbo.DAT_CTRL_CTAS', 'U') IS NULL
+    THROW 57028, 'No existe DAT_CTRL_CTAS para consultar adeudos de cliente', 1;
+
+  SELECT
+    @jsonDetalle = ISNULL((
+      SELECT
+        c.*
+      FROM dbo.DAT_CTRL_CTAS c
+      WHERE TRY_CONVERT(BIGINT, c.CLIENT) = @CLIENT
+        AND UPPER(LTRIM(RTRIM(ISNULL(CAST(c.IDFOL AS NVARCHAR(255)), '')))) = UPPER(@idfolNorm)
+      FOR JSON PATH
+    ), '[]');
+
+  SELECT
+    @jsonDetalle AS DETALLE_JSON;
 END;
 GO
 
@@ -735,21 +750,30 @@ BEGIN
       ) rel
       WHERE TRY_CONVERT(BIGINT, c.CLIENT) = @clienActual
       GROUP BY
-        c.SUC,
-        c.CLIENT,
-        c.CTA,
         c.IDFOL,
         c.NDOC,
         rel.RELACION
+    ),
+    adeudoRefSel AS (
+      SELECT
+        UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) AS RELACION,
+        ROUND(SUM(ISNULL(ADEUDO, 0)), 4) AS ADEUDO,
+        MAX(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@idfolRefNorm) THEN 1 ELSE 0 END) AS MATCH_IDFOL
+      FROM adeudoSel
+      WHERE
+        UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@idfolRefNorm)
+        OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@idfolRefNorm)
+      GROUP BY
+        UPPER(LTRIM(RTRIM(ISNULL(RELACION, ''))))
     )
     SELECT TOP 1
       @relacion = UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))),
       @adeudoRef = ADEUDO
-    FROM adeudoSel
-    WHERE
-      UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@idfolRefNorm)
-      OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@idfolRefNorm)
-    ORDER BY CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@idfolRefNorm) THEN 0 ELSE 1 END;
+    FROM adeudoRefSel
+    ORDER BY
+      CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineUpc THEN 0 ELSE 1 END,
+      MATCH_IDFOL DESC,
+      ADEUDO ASC;
 
     IF @relacion IS NULL OR @relacion = ''
       THROW 57035, 'No se encontro adeudo para la referencia enviada', 1;
@@ -914,6 +938,7 @@ BEGIN
   DECLARE @lineCtd DECIMAL(18, 4);
   DECLARE @clienActual BIGINT;
   DECLARE @valimp DECIMAL(18, 4);
+  DECLARE @isAdeudoService BIT = 0;
   DECLARE @consumidoOtros DECIMAL(18, 4) = 0;
   DECLARE @saldoDisponible DECIMAL(18, 4) = 0;
   DECLARE @lineTotal DECIMAL(18, 4) = 0;
@@ -950,6 +975,9 @@ BEGIN
     IF @lineUpc IS NULL OR @lineUpc = ''
       THROW 57053, 'La linea de ticket no existe', 1;
 
+    IF @lineUpc IN ('AD', 'AP', 'CR')
+      SET @isAdeudoService = 1;
+
     IF @lineOrd IS NULL OR @lineOrd = ''
       THROW 57054, 'Debe asignar referencia (ORD) antes de capturar PVTA', 1;
 
@@ -961,46 +989,75 @@ BEGIN
     IF @clienActual IS NULL OR @clienActual <= 1
       THROW 57055, 'El folio no tiene cliente válido para validar adeudo', 1;
 
-    ;WITH adeudoSel AS (
-      SELECT
-        LTRIM(RTRIM(ISNULL(CAST(c.IDFOL AS NVARCHAR(255)), ''))) AS IDFOL,
-        LTRIM(RTRIM(ISNULL(CAST(c.NDOC AS NVARCHAR(255)), ''))) AS NDOC,
-        ISNULL(rel.RELACION, '') AS RELACION,
-        ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), c.IMPT), 0)), 4) AS ADEUDO
-      FROM dbo.DAT_CTRL_CTAS c
-      OUTER APPLY (
-        SELECT TOP 1
-          UPPER(LTRIM(RTRIM(ISNULL(x.RELACION, '')))) AS RELACION
-        FROM dbo.DAT_CAT_CTAS x
-        WHERE UPPER(LTRIM(RTRIM(ISNULL(x.CTA, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.CTA AS NVARCHAR(50)), ''))))
-          AND (
-            UPPER(LTRIM(RTRIM(ISNULL(x.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.SUC AS NVARCHAR(10)), ''))))
-            OR LTRIM(RTRIM(ISNULL(x.SUC, ''))) = ''
-          )
-        ORDER BY CASE
-          WHEN UPPER(LTRIM(RTRIM(ISNULL(x.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.SUC AS NVARCHAR(10)), ''))))
-            THEN 0 ELSE 1
-        END
-      ) rel
-      WHERE TRY_CONVERT(BIGINT, c.CLIENT) = @clienActual
-      GROUP BY
-        c.SUC,
-        c.CLIENT,
-        c.CTA,
-        c.IDFOL,
-        c.NDOC,
-        rel.RELACION
-    )
-    SELECT TOP 1
-      @valimp = ABS(ADEUDO)
-    FROM adeudoSel
-    WHERE
-      UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineUpc
-      AND (
-        UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd)
-        OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@lineOrd)
+    IF @isAdeudoService = 1
+    BEGIN
+      ;WITH adeudoFolio AS (
+        SELECT
+          LTRIM(RTRIM(ISNULL(CAST(c.IDFOL AS NVARCHAR(255)), ''))) AS IDFOL,
+          LTRIM(RTRIM(ISNULL(CAST(c.NDOC AS NVARCHAR(255)), ''))) AS NDOC,
+          ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), c.IMPT), 0)), 4) AS ADEUDO
+        FROM dbo.DAT_CTRL_CTAS c
+        WHERE TRY_CONVERT(BIGINT, c.CLIENT) = @clienActual
+        GROUP BY
+          c.IDFOL,
+          c.NDOC
       )
-    ORDER BY CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd) THEN 0 ELSE 1 END;
+      SELECT TOP 1
+        @valimp = ABS(ADEUDO)
+      FROM adeudoFolio
+      WHERE
+        (
+          UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd)
+          OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@lineOrd)
+        )
+        AND ADEUDO < 0
+      ORDER BY
+        CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd) THEN 0 ELSE 1 END,
+        ADEUDO ASC;
+    END
+    ELSE
+    BEGIN
+      ;WITH adeudoSel AS (
+        SELECT
+          LTRIM(RTRIM(ISNULL(CAST(c.IDFOL AS NVARCHAR(255)), ''))) AS IDFOL,
+          LTRIM(RTRIM(ISNULL(CAST(c.NDOC AS NVARCHAR(255)), ''))) AS NDOC,
+          ISNULL(rel.RELACION, '') AS RELACION,
+          ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), c.IMPT), 0)), 4) AS ADEUDO
+        FROM dbo.DAT_CTRL_CTAS c
+        OUTER APPLY (
+          SELECT TOP 1
+            UPPER(LTRIM(RTRIM(ISNULL(x.RELACION, '')))) AS RELACION
+          FROM dbo.DAT_CAT_CTAS x
+          WHERE UPPER(LTRIM(RTRIM(ISNULL(x.CTA, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.CTA AS NVARCHAR(50)), ''))))
+            AND (
+              UPPER(LTRIM(RTRIM(ISNULL(x.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.SUC AS NVARCHAR(10)), ''))))
+              OR LTRIM(RTRIM(ISNULL(x.SUC, ''))) = ''
+            )
+          ORDER BY CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(x.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(CAST(c.SUC AS NVARCHAR(10)), ''))))
+              THEN 0 ELSE 1
+          END
+        ) rel
+        WHERE TRY_CONVERT(BIGINT, c.CLIENT) = @clienActual
+        GROUP BY
+          c.IDFOL,
+          c.NDOC,
+          rel.RELACION
+      )
+      SELECT TOP 1
+        @valimp = ABS(ADEUDO)
+      FROM adeudoSel
+      WHERE
+        UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineUpc
+        AND (
+          UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd)
+          OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@lineOrd)
+        )
+        AND ADEUDO < 0
+      ORDER BY
+        CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd) THEN 0 ELSE 1 END,
+        ADEUDO ASC;
+    END;
 
     IF @valimp IS NULL
       THROW 57056, 'No se encontro adeudo para validar el importe capturado', 1;
@@ -1019,11 +1076,17 @@ BEGIN
     FROM dbo.PV_TICKET_LOG t
     WHERE t.IDFOL = @idfolNorm
       AND t.ART <> @artNorm
-      AND UPPER(LTRIM(RTRIM(ISNULL(t.UPC, '')))) = @lineUpc
+      AND (
+        (@isAdeudoService = 1 AND UPPER(LTRIM(RTRIM(ISNULL(t.UPC, '')))) IN ('AD', 'AP', 'CR'))
+        OR (@isAdeudoService = 0 AND UPPER(LTRIM(RTRIM(ISNULL(t.UPC, '')))) = @lineUpc)
+      )
       AND UPPER(LTRIM(RTRIM(ISNULL(t.ORD, '')))) = UPPER(@lineOrd);
 
     SET @saldoDisponible = ROUND(@valimp - @consumidoOtros, 4);
     SET @lineTotal = ROUND(@PVTA * @lineCtd, 4);
+
+    IF @isAdeudoService = 1 AND @lineTotal > @valimp
+      THROW 57057, 'PVTA excede la deuda del folio referenciado', 1;
 
     IF @saldoDisponible <= 0 OR @lineTotal > @saldoDisponible
       THROW 57057, 'PVTA excede el adeudo disponible para la referencia', 1;
@@ -1133,13 +1196,6 @@ BEGIN
   DECLARE @serviceType CHAR(2);
   DECLARE @total DECIMAL(18, 4);
   DECLARE @isCashOut BIT = 0;
-  DECLARE @tableFormTmp INT = OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP');
-  DECLARE @hasIdf BIT = 0;
-  DECLARE @idfIsIdentity BIT = 0;
-  DECLARE @hasAut BIT = 0;
-  DECLARE @hasFcn BIT = 0;
-  DECLARE @sql NVARCHAR(MAX);
-  DECLARE @newFormaId NVARCHAR(36);
 
   IF @idfolNorm = ''
     THROW 57070, 'IDFOL es requerido', 1;
@@ -1190,47 +1246,8 @@ BEGIN
     UPDATE dbo.PV_CTR_FOL_ASVR
     SET
       IMPT = CASE WHEN @isCashOut = 1 THEN (@total * -1) ELSE @total END,
-      FPGO = CASE WHEN @isCashOut = 1 THEN 'FINALIZADO' ELSE FPGO END,
       FCNM = GETDATE()
     WHERE IDFOL = @idfolNorm;
-
-    IF @isCashOut = 1 AND @tableFormTmp IS NOT NULL
-    BEGIN
-      DELETE FROM dbo.PV_CTR_FOL_FORMTMP
-      WHERE IDFOL = @idfolNorm;
-
-      SELECT
-        @hasIdf = MAX(CASE WHEN UPPER(name) = 'IDF' THEN 1 ELSE 0 END),
-        @hasAut = MAX(CASE WHEN UPPER(name) = 'AUT' THEN 1 ELSE 0 END),
-        @hasFcn = MAX(CASE WHEN UPPER(name) = 'FCN' THEN 1 ELSE 0 END)
-      FROM sys.columns
-      WHERE object_id = @tableFormTmp;
-
-      IF @hasIdf = 1
-        SET @idfIsIdentity = CASE WHEN COLUMNPROPERTY(@tableFormTmp, 'IDF', 'IsIdentity') = 1 THEN 1 ELSE 0 END;
-
-      SET @sql = N'INSERT INTO dbo.PV_CTR_FOL_FORMTMP ('
-        + CASE WHEN @hasIdf = 1 AND @idfIsIdentity = 0 THEN N'IDF, ' ELSE N'' END
-        + N'IDFOL, FORM, IMPP'
-        + CASE WHEN @hasAut = 1 THEN N', AUT' ELSE N'' END
-        + CASE WHEN @hasFcn = 1 THEN N', FCN' ELSE N'' END
-        + N') VALUES ('
-        + CASE WHEN @hasIdf = 1 AND @idfIsIdentity = 0 THEN N'@pIDF, ' ELSE N'' END
-        + N'@pIDFOL, @pFORM, @pIMPP'
-        + CASE WHEN @hasAut = 1 THEN N', NULL' ELSE N'' END
-        + CASE WHEN @hasFcn = 1 THEN N', GETDATE()' ELSE N'' END
-        + N');';
-
-      SET @newFormaId = CONVERT(NVARCHAR(36), NEWID());
-
-      EXEC sys.sp_executesql
-        @sql,
-        N'@pIDF NVARCHAR(36), @pIDFOL NVARCHAR(255), @pFORM NVARCHAR(40), @pIMPP DECIMAL(18,4)',
-        @pIDF = @newFormaId,
-        @pIDFOL = @idfolNorm,
-        @pFORM = 'EFECTIVO',
-        @pIMPP = @total;
-    END
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0
       COMMIT TRANSACTION;
@@ -1240,7 +1257,7 @@ BEGIN
       @serviceType AS SERVICE_TYPE,
       @total AS TOTAL,
       CASE WHEN @isCashOut = 1 THEN (@total * -1) ELSE @total END AS IMPT,
-      CASE WHEN @isCashOut = 1 THEN 'FINALIZADO' ELSE NULL END AS FPGO,
+      CAST(NULL AS NVARCHAR(40)) AS FPGO,
       CAST(1 AS BIT) AS GO_TO_PAGO;
   END TRY
   BEGIN CATCH
@@ -1265,6 +1282,8 @@ BEGIN
   DECLARE @suc NVARCHAR(10);
   DECLARE @esta NVARCHAR(40);
   DECLARE @formasJson NVARCHAR(MAX) = '[]';
+  DECLARE @formTableName NVARCHAR(128) = NULL;
+  DECLARE @sql NVARCHAR(MAX);
 
   IF @idfolNorm = ''
     THROW 57080, 'IDFOL es requerido', 1;
@@ -1288,27 +1307,44 @@ BEGIN
 
   IF @total IS NULL SET @total = 0;
 
-  IF OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP', 'U') IS NOT NULL
+  IF OBJECT_ID('dbo.PV_CTR_FOL_FORM', 'U') IS NOT NULL
+    SET @formTableName = N'dbo.PV_CTR_FOL_FORM';
+  ELSE IF OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP', 'U') IS NOT NULL
+    SET @formTableName = N'dbo.PV_CTR_FOL_FORMTMP';
+
+  IF @formTableName IS NOT NULL
   BEGIN
-    SELECT @pagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
-    FROM dbo.PV_CTR_FOL_FORMTMP
-    WHERE IDFOL = @idfolNorm;
+    SET @sql = N'
+      SELECT @pPagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
+      FROM ' + @formTableName + N'
+      WHERE IDFOL = @pIDFOL;';
+    EXEC sys.sp_executesql
+      @sql,
+      N'@pIDFOL NVARCHAR(255), @pPagado DECIMAL(18,4) OUTPUT',
+      @pIDFOL = @idfolNorm,
+      @pPagado = @pagado OUTPUT;
 
     SET @pagado = ISNULL(@pagado, 0);
 
-    SELECT @formasJson = ISNULL((
-      SELECT
-        IDF,
-        IDFOL,
-        FORM,
-        TRY_CONVERT(DECIMAL(18,4), IMPP) AS IMPP,
-        AUT,
-        FCN
-      FROM dbo.PV_CTR_FOL_FORMTMP
-      WHERE IDFOL = @idfolNorm
-      ORDER BY FCN, IDF
-      FOR JSON PATH
-    ), '[]');
+    SET @sql = N'
+      SELECT @pJson = ISNULL((
+        SELECT
+          IDF,
+          IDFOL,
+          FORM,
+          TRY_CONVERT(DECIMAL(18,4), IMPP) AS IMPP,
+          AUT,
+          FCN
+        FROM ' + @formTableName + N'
+        WHERE IDFOL = @pIDFOL
+        ORDER BY FCN, IDF
+        FOR JSON PATH
+      ), ''[]'');';
+    EXEC sys.sp_executesql
+      @sql,
+      N'@pIDFOL NVARCHAR(255), @pJson NVARCHAR(MAX) OUTPUT',
+      @pIDFOL = @idfolNorm,
+      @pJson = @formasJson OUTPUT;
   END
 
   IF @pagado >= @total
@@ -1361,7 +1397,9 @@ BEGIN
   DECLARE @pagado DECIMAL(18, 4);
   DECLARE @restante DECIMAL(18, 4);
   DECLARE @epsilon DECIMAL(18, 6) = 0.0001;
-  DECLARE @tableFormTmp INT = OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP');
+  DECLARE @formTableName NVARCHAR(128) = NULL;
+  DECLARE @formTableObjId INT = NULL;
+  DECLARE @formNeedsAut BIT = 0;
   DECLARE @hasIdf BIT = 0;
   DECLARE @idfIsIdentity BIT = 0;
   DECLARE @hasAut BIT = 0;
@@ -1375,11 +1413,25 @@ BEGIN
   IF @IMPP IS NULL OR @IMPP <= 0
     THROW 57091, 'IMPP debe ser mayor a 0', 1;
 
-  IF @tableFormTmp IS NULL
-    THROW 57092, 'No existe tabla PV_CTR_FOL_FORMTMP', 1;
+  IF @formNorm IN ('TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
+    SET @formNeedsAut = 1;
 
-  IF @formNorm <> 'EFECTIVO' AND (@autNorm IS NULL OR @autNorm = '')
-    THROW 57093, 'La forma distinta de EFECTIVO requiere autorizacion/referencia', 1;
+  IF OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP', 'U') IS NOT NULL
+  BEGIN
+    SET @formTableName = N'dbo.PV_CTR_FOL_FORMTMP';
+    SET @formTableObjId = OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP');
+  END
+  ELSE IF OBJECT_ID('dbo.PV_CTR_FOL_FORM', 'U') IS NOT NULL
+  BEGIN
+    SET @formTableName = N'dbo.PV_CTR_FOL_FORM';
+    SET @formTableObjId = OBJECT_ID('dbo.PV_CTR_FOL_FORM');
+  END
+
+  IF @formTableObjId IS NULL
+    THROW 57092, 'No existe tabla de formas de pago (PV_CTR_FOL_FORMTMP/PV_CTR_FOL_FORM)', 1;
+
+  IF @formNeedsAut = 1 AND (@autNorm IS NULL OR @autNorm = '')
+    THROW 57093, 'La forma seleccionada requiere autorizacion/referencia', 1;
 
   BEGIN TRY
     IF @@TRANCOUNT = 0
@@ -1404,9 +1456,15 @@ BEGIN
 
     SET @total = ISNULL(@total, 0);
 
-    SELECT @pagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
-    FROM dbo.PV_CTR_FOL_FORMTMP
-    WHERE IDFOL = @idfolNorm;
+    SET @sql = N'
+      SELECT @pPagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
+      FROM ' + @formTableName + N'
+      WHERE IDFOL = @pIDFOL;';
+    EXEC sys.sp_executesql
+      @sql,
+      N'@pIDFOL NVARCHAR(255), @pPagado DECIMAL(18,4) OUTPUT',
+      @pIDFOL = @idfolNorm,
+      @pPagado = @pagado OUTPUT;
 
     SET @pagado = ISNULL(@pagado, 0);
     SET @restante = CASE WHEN @total > @pagado THEN ROUND(@total - @pagado, 4) ELSE 0 END;
@@ -1419,12 +1477,12 @@ BEGIN
       @hasAut = MAX(CASE WHEN UPPER(name) = 'AUT' THEN 1 ELSE 0 END),
       @hasFcn = MAX(CASE WHEN UPPER(name) = 'FCN' THEN 1 ELSE 0 END)
     FROM sys.columns
-    WHERE object_id = @tableFormTmp;
+    WHERE object_id = @formTableObjId;
 
     IF @hasIdf = 1
-      SET @idfIsIdentity = CASE WHEN COLUMNPROPERTY(@tableFormTmp, 'IDF', 'IsIdentity') = 1 THEN 1 ELSE 0 END;
+      SET @idfIsIdentity = CASE WHEN COLUMNPROPERTY(@formTableObjId, 'IDF', 'IsIdentity') = 1 THEN 1 ELSE 0 END;
 
-    SET @sql = N'INSERT INTO dbo.PV_CTR_FOL_FORMTMP ('
+    SET @sql = N'INSERT INTO ' + @formTableName + N' ('
       + CASE WHEN @hasIdf = 1 AND @idfIsIdentity = 0 THEN N'IDF, ' ELSE N'' END
       + N'IDFOL, FORM, IMPP'
       + CASE WHEN @hasAut = 1 THEN N', AUT' ELSE N'' END
@@ -1447,9 +1505,15 @@ BEGIN
       @pIMPP = @IMPP,
       @pAUT = @autNorm;
 
-    SELECT @pagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
-    FROM dbo.PV_CTR_FOL_FORMTMP
-    WHERE IDFOL = @idfolNorm;
+    SET @sql = N'
+      SELECT @pPagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
+      FROM ' + @formTableName + N'
+      WHERE IDFOL = @pIDFOL;';
+    EXEC sys.sp_executesql
+      @sql,
+      N'@pIDFOL NVARCHAR(255), @pPagado DECIMAL(18,4) OUTPUT',
+      @pIDFOL = @idfolNorm,
+      @pPagado = @pagado OUTPUT;
 
     SET @pagado = ISNULL(@pagado, 0);
 
@@ -1488,12 +1552,19 @@ BEGIN
   DECLARE @total DECIMAL(18, 4);
   DECLARE @pagado DECIMAL(18, 4);
   DECLARE @epsilon DECIMAL(18, 6) = 0.0001;
+  DECLARE @formTableName NVARCHAR(128) = NULL;
+  DECLARE @sql NVARCHAR(MAX);
 
   IF @idfolNorm = '' OR @idfNorm = ''
     THROW 57100, 'IDFOL e IDF son requeridos', 1;
 
-  IF OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP', 'U') IS NULL
-    THROW 57101, 'No existe tabla PV_CTR_FOL_FORMTMP', 1;
+  IF OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP', 'U') IS NOT NULL
+    SET @formTableName = N'dbo.PV_CTR_FOL_FORMTMP';
+  ELSE IF OBJECT_ID('dbo.PV_CTR_FOL_FORM', 'U') IS NOT NULL
+    SET @formTableName = N'dbo.PV_CTR_FOL_FORM';
+
+  IF @formTableName IS NULL
+    THROW 57101, 'No existe tabla de formas de pago (PV_CTR_FOL_FORMTMP/PV_CTR_FOL_FORM)', 1;
 
   BEGIN TRY
     IF @@TRANCOUNT = 0
@@ -1502,9 +1573,15 @@ BEGIN
       BEGIN TRANSACTION;
     END;
 
-    DELETE FROM dbo.PV_CTR_FOL_FORMTMP
-    WHERE IDFOL = @idfolNorm
-      AND UPPER(LTRIM(RTRIM(CAST(IDF AS NVARCHAR(255))))) = UPPER(@idfNorm);
+    SET @sql = N'
+      DELETE FROM ' + @formTableName + N'
+      WHERE IDFOL = @pIDFOL
+        AND UPPER(LTRIM(RTRIM(CAST(IDF AS NVARCHAR(255))))) = UPPER(@pIDF);';
+    EXEC sys.sp_executesql
+      @sql,
+      N'@pIDFOL NVARCHAR(255), @pIDF NVARCHAR(255)',
+      @pIDFOL = @idfolNorm,
+      @pIDF = @idfNorm;
 
     IF @@ROWCOUNT = 0
       THROW 57102, 'La forma de pago no existe para el folio', 1;
@@ -1515,9 +1592,15 @@ BEGIN
 
     SET @total = ISNULL(@total, 0);
 
-    SELECT @pagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
-    FROM dbo.PV_CTR_FOL_FORMTMP
-    WHERE IDFOL = @idfolNorm;
+    SET @sql = N'
+      SELECT @pPagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
+      FROM ' + @formTableName + N'
+      WHERE IDFOL = @pIDFOL;';
+    EXEC sys.sp_executesql
+      @sql,
+      N'@pIDFOL NVARCHAR(255), @pPagado DECIMAL(18,4) OUTPUT',
+      @pIDFOL = @idfolNorm,
+      @pPagado = @pagado OUTPUT;
 
     SET @pagado = ISNULL(@pagado, 0);
 
@@ -1534,6 +1617,562 @@ BEGIN
     EXEC dbo.sp_ps_form_summary @IDFOL = @idfolNorm;
   END TRY
   BEGIN CATCH
+    IF @startedTran = 1 AND @@TRANCOUNT > 0
+      ROLLBACK TRANSACTION;
+    THROW;
+  END CATCH
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_ps_pago_finalize
+  @IDFOL NVARCHAR(255),
+  @FORMAS_JSON NVARCHAR(MAX),
+  @USER NVARCHAR(255) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  DECLARE @startedTran BIT = 0;
+  DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
+  DECLARE @formasJsonNorm NVARCHAR(MAX) = LTRIM(RTRIM(ISNULL(@FORMAS_JSON, '')));
+  DECLARE @userNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@USER, ''))), '');
+  DECLARE @sucDb NVARCHAR(20);
+  DECLARE @opvDb NVARCHAR(255);
+  DECLARE @clien FLOAT;
+  DECLARE @estado NVARCHAR(40);
+  DECLARE @serviceType CHAR(2);
+  DECLARE @isCashOut BIT = 0;
+  DECLARE @total DECIMAL(18, 4);
+  DECLARE @sumPagos DECIMAL(18, 4);
+  DECLARE @cambio DECIMAL(18, 4) = 0;
+  DECLARE @cambioPendiente DECIMAL(18, 4) = 0;
+  DECLARE @epsilon DECIMAL(18, 6) = 0.0001;
+  DECLARE @efectivoCambioAsignado BIT = 0;
+  DECLARE @folFormTable NVARCHAR(128) = NULL;
+  DECLARE @folFormObjId INT = NULL;
+  DECLARE @hasIDF BIT = 0;
+  DECLARE @idfIsIdentity BIT = 0;
+  DECLARE @hasFCN BIT = 0;
+  DECLARE @hasIMPA BIT = 0;
+  DECLARE @hasIMPC BIT = 0;
+  DECLARE @hasIMPD BIT = 0;
+  DECLARE @hasAUT BIT = 0;
+  DECLARE @hasESTA BIT = 0;
+  DECLARE @hasESTAF BIT = 0;
+  DECLARE @sql NVARCHAR(MAX);
+  DECLARE @execIdf NVARCHAR(255);
+  DECLARE @formaForm NVARCHAR(40);
+  DECLARE @formaImpp DECIMAL(18, 4);
+  DECLARE @formaAut NVARCHAR(255);
+  DECLARE @impc DECIMAL(18, 4);
+  DECLARE @ctrlObjId INT = NULL;
+  DECLARE @ctrlHasCTA BIT = 0;
+  DECLARE @ctrlHasCLIENT BIT = 0;
+  DECLARE @ctrlHasCMOV BIT = 0;
+  DECLARE @ctrlHasCLSD BIT = 0;
+  DECLARE @ctrlHasIMPT BIT = 0;
+  DECLARE @ctrlHasNDOC BIT = 0;
+  DECLARE @ctrlHasIDFOL BIT = 0;
+  DECLARE @ctrlHasSUC BIT = 0;
+  DECLARE @ctrlHasOPV BIT = 0;
+  DECLARE @ctrlHasIDOPV BIT = 0;
+  DECLARE @ctrlHasTIPO BIT = 0;
+  DECLARE @ctrlHasRTXT BIT = 0;
+  DECLARE @ctrlHasFCND BIT = 0;
+  DECLARE @ctrlHasFCN BIT = 0;
+  DECLARE @ctrlHasFCNR BIT = 0;
+  DECLARE @ctrlHasFECHA BIT = 0;
+  DECLARE @ctrlClassCol NVARCHAR(10) = NULL;
+  DECLARE @datCmovObjId INT = OBJECT_ID('dbo.DAT_CMOV');
+  DECLARE @datCmovHasRelacion BIT = 0;
+  DECLARE @datCmovHasCmov BIT = 0;
+  DECLARE @datCmovHasTipo BIT = 0;
+  DECLARE @lineTipps NVARCHAR(10);
+  DECLARE @lineOrd NVARCHAR(255);
+  DECLARE @lineTotal DECIMAL(18, 4);
+  DECLARE @movClass INT;
+  DECLARE @cta NVARCHAR(255);
+  DECLARE @lineImpt DECIMAL(18, 4);
+  DECLARE @lineIdFol NVARCHAR(255);
+  DECLARE @rtxt NVARCHAR(255);
+  DECLARE @ndoc NVARCHAR(255);
+  DECLARE @opvAudit NVARCHAR(255);
+  DECLARE @movErr NVARCHAR(255);
+
+  DECLARE @FORMAS TABLE (
+    ROW_ID INT IDENTITY(1,1) PRIMARY KEY,
+    FORM NVARCHAR(40) NOT NULL,
+    IMPP DECIMAL(18,4) NOT NULL,
+    AUT NVARCHAR(255) NULL
+  );
+
+  DECLARE @LINES TABLE (
+    ROW_ID INT IDENTITY(1,1) PRIMARY KEY,
+    UPC NVARCHAR(10) NOT NULL,
+    ORD NVARCHAR(255) NULL,
+    LINE_TOTAL DECIMAL(18,4) NOT NULL
+  );
+
+  IF @idfolNorm = ''
+    THROW 57120, 'IDFOL es requerido', 1;
+
+  IF @formasJsonNorm = ''
+    THROW 57121, 'FORMAS_JSON es requerido', 1;
+
+  INSERT INTO @FORMAS (FORM, IMPP, AUT)
+  SELECT
+    UPPER(LTRIM(RTRIM(ISNULL(j.FORM, '')))) AS FORM,
+    TRY_CONVERT(DECIMAL(18,4), j.IMPP) AS IMPP,
+    NULLIF(LTRIM(RTRIM(ISNULL(j.AUT, ''))), '') AS AUT
+  FROM OPENJSON(@formasJsonNorm)
+  WITH (
+    FORM NVARCHAR(40) '$.form',
+    IMPP NVARCHAR(64) '$.impp',
+    AUT NVARCHAR(255) '$.aut'
+  ) j;
+
+  IF NOT EXISTS (SELECT 1 FROM @FORMAS)
+    THROW 57122, 'Debe enviar al menos una forma de pago', 1;
+
+  IF EXISTS (
+    SELECT 1
+    FROM @FORMAS
+    WHERE FORM = ''
+      OR IMPP IS NULL
+      OR IMPP <= 0
+  )
+    THROW 57123, 'Las formas enviadas no son válidas', 1;
+
+  IF EXISTS (
+    SELECT 1
+    FROM @FORMAS
+    WHERE FORM IN ('TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
+      AND (AUT IS NULL OR AUT = '')
+  )
+    THROW 57124, 'Las formas no efectivo requieren autorización/referencia', 1;
+
+  BEGIN TRY
+    IF @@TRANCOUNT = 0
+    BEGIN
+      SET @startedTran = 1;
+      BEGIN TRANSACTION;
+    END;
+
+    SELECT TOP 1
+      @sucDb = LTRIM(RTRIM(ISNULL(SUC, ''))),
+      @opvDb = LTRIM(RTRIM(ISNULL(OPV, ''))),
+      @clien = TRY_CONVERT(FLOAT, CLIEN),
+      @estado = UPPER(LTRIM(RTRIM(ISNULL(ESTA, ''))))
+    FROM dbo.PV_CTR_FOL_ASVR WITH (UPDLOCK, HOLDLOCK)
+    WHERE IDFOL = @idfolNorm;
+
+    IF @sucDb IS NULL
+      THROW 57125, 'El folio PS no existe', 1;
+
+    IF @estado = 'PAGADO'
+      THROW 57126, 'El folio ya se encuentra en estado PAGADO', 1;
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.PV_TICKET_LOG WHERE IDFOL = @idfolNorm)
+      THROW 57127, 'El ticket no contiene renglones', 1;
+
+    IF EXISTS (
+      SELECT 1
+      FROM dbo.PV_TICKET_LOG
+      WHERE IDFOL = @idfolNorm
+        AND (LTRIM(RTRIM(ISNULL(ORD, ''))) = '' OR TRY_CONVERT(DECIMAL(18,4), PVTA) IS NULL)
+    )
+      THROW 57128, 'Todas las líneas del ticket deben tener referencia y PVTA capturado', 1;
+
+    SELECT TOP 1 @serviceType = UPPER(LTRIM(RTRIM(ISNULL(UPC, ''))))
+    FROM dbo.PV_TICKET_LOG
+    WHERE IDFOL = @idfolNorm;
+
+    IF @serviceType IN ('DG', 'DC')
+      SET @isCashOut = 1;
+
+    SELECT @total = ROUND(SUM(
+      ISNULL(TRY_CONVERT(DECIMAL(18,4), PVTA), 0) *
+      ISNULL(NULLIF(TRY_CONVERT(DECIMAL(18,4), CTD), 0), 1)
+    ), 4)
+    FROM dbo.PV_TICKET_LOG
+    WHERE IDFOL = @idfolNorm;
+
+    IF @total IS NULL OR @total <= 0
+      THROW 57129, 'El total del ticket no es válido', 1;
+
+    SELECT @sumPagos = ROUND(SUM(IMPP), 4)
+    FROM @FORMAS;
+
+    IF @sumPagos IS NULL OR @sumPagos <= 0
+      THROW 57130, 'El total de formas de pago no es válido', 1;
+
+    IF @sumPagos + @epsilon < @total
+      THROW 57131, 'El importe de formas no cubre el total del ticket', 1;
+
+    IF @sumPagos > @total + @epsilon
+       AND NOT EXISTS (SELECT 1 FROM @FORMAS WHERE FORM = 'EFECTIVO')
+      THROW 57132, 'Solo EFECTIVO puede exceder el total para generar cambio', 1;
+
+    IF OBJECT_ID('dbo.PV_CTR_FOL_FORM', 'U') IS NOT NULL
+      SET @folFormTable = N'dbo.PV_CTR_FOL_FORM';
+    ELSE IF OBJECT_ID('dbo.PV_CTR_FOL_FORM_SVR', 'U') IS NOT NULL
+      SET @folFormTable = N'dbo.PV_CTR_FOL_FORM_SVR';
+    ELSE
+      THROW 57133, 'No existe tabla de formas de pago (PV_CTR_FOL_FORM/PV_CTR_FOL_FORM_SVR)', 1;
+
+    SET @folFormObjId = OBJECT_ID(@folFormTable);
+
+    SELECT
+      @hasIDF = MAX(CASE WHEN UPPER(name) = 'IDF' THEN 1 ELSE 0 END),
+      @hasFCN = MAX(CASE WHEN UPPER(name) = 'FCN' THEN 1 ELSE 0 END),
+      @hasIMPA = MAX(CASE WHEN UPPER(name) = 'IMPA' THEN 1 ELSE 0 END),
+      @hasIMPC = MAX(CASE WHEN UPPER(name) = 'IMPC' THEN 1 ELSE 0 END),
+      @hasIMPD = MAX(CASE WHEN UPPER(name) = 'IMPD' THEN 1 ELSE 0 END),
+      @hasAUT = MAX(CASE WHEN UPPER(name) = 'AUT' THEN 1 ELSE 0 END),
+      @hasESTA = MAX(CASE WHEN UPPER(name) = 'ESTA' THEN 1 ELSE 0 END),
+      @hasESTAF = MAX(CASE WHEN UPPER(name) = 'ESTAF' THEN 1 ELSE 0 END)
+    FROM sys.columns
+    WHERE object_id = @folFormObjId;
+
+    IF @hasIDF = 1
+      SET @idfIsIdentity = CASE WHEN COLUMNPROPERTY(@folFormObjId, 'IDF', 'IsIdentity') = 1 THEN 1 ELSE 0 END;
+
+    SET @sql = N'DELETE FROM ' + @folFormTable + N' WHERE IDFOL = @pIDFOL;';
+    EXEC sys.sp_executesql
+      @sql,
+      N'@pIDFOL NVARCHAR(255)',
+      @pIDFOL = @idfolNorm;
+
+    SET @cambio = CASE WHEN @sumPagos > @total THEN ROUND(@sumPagos - @total, 4) ELSE 0 END;
+    SET @cambioPendiente = @cambio;
+
+    DECLARE forma_cursor CURSOR LOCAL FAST_FORWARD FOR
+      SELECT FORM, IMPP, AUT
+      FROM @FORMAS
+      ORDER BY ROW_ID;
+
+    OPEN forma_cursor;
+    FETCH NEXT FROM forma_cursor INTO @formaForm, @formaImpp, @formaAut;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+      SET @impc = 0;
+      IF @cambioPendiente > 0 AND @efectivoCambioAsignado = 0 AND @formaForm = 'EFECTIVO'
+      BEGIN
+        SET @impc = @cambioPendiente;
+        SET @cambioPendiente = 0;
+        SET @efectivoCambioAsignado = 1;
+      END;
+
+      SET @execIdf = CONVERT(NVARCHAR(255), NEWID());
+
+      SET @sql = N'INSERT INTO ' + @folFormTable + N' (' +
+        CASE WHEN @hasIDF = 1 AND @idfIsIdentity = 0 THEN N'IDF, ' ELSE N'' END +
+        N'IDFOL' +
+        CASE WHEN @hasFCN = 1 THEN N', FCN' ELSE N'' END +
+        N', FORM' +
+        CASE WHEN @hasIMPA = 1 THEN N', IMPA' ELSE N'' END +
+        N', IMPP' +
+        CASE WHEN @hasIMPC = 1 THEN N', IMPC' ELSE N'' END +
+        CASE WHEN @hasIMPD = 1 THEN N', IMPD' ELSE N'' END +
+        CASE WHEN @hasAUT = 1 THEN N', AUT' ELSE N'' END +
+        CASE WHEN @hasESTA = 1 THEN N', ESTA' ELSE N'' END +
+        CASE WHEN @hasESTAF = 1 THEN N', ESTAF' ELSE N'' END +
+        N') VALUES (' +
+        CASE WHEN @hasIDF = 1 AND @idfIsIdentity = 0 THEN N'@pIDF, ' ELSE N'' END +
+        N'@pIDFOL' +
+        CASE WHEN @hasFCN = 1 THEN N', GETDATE()' ELSE N'' END +
+        N', @pFORM' +
+        CASE WHEN @hasIMPA = 1 THEN N', NULL' ELSE N'' END +
+        N', @pIMPP' +
+        CASE WHEN @hasIMPC = 1 THEN N', @pIMPC' ELSE N'' END +
+        CASE WHEN @hasIMPD = 1 THEN N', @pIMPD' ELSE N'' END +
+        CASE WHEN @hasAUT = 1 THEN N', @pAUT' ELSE N'' END +
+        CASE WHEN @hasESTA = 1 THEN N', NULL' ELSE N'' END +
+        CASE WHEN @hasESTAF = 1 THEN N', NULL' ELSE N'' END +
+        N');';
+
+      EXEC sys.sp_executesql
+        @sql,
+        N'@pIDF NVARCHAR(255), @pIDFOL NVARCHAR(255), @pFORM NVARCHAR(40), @pIMPP DECIMAL(18,4), @pIMPC DECIMAL(18,4), @pIMPD DECIMAL(18,4), @pAUT NVARCHAR(255)',
+        @pIDF = @execIdf,
+        @pIDFOL = @idfolNorm,
+        @pFORM = @formaForm,
+        @pIMPP = @formaImpp,
+        @pIMPC = @impc,
+        @pIMPD = @total,
+        @pAUT = @formaAut;
+
+      FETCH NEXT FROM forma_cursor INTO @formaForm, @formaImpp, @formaAut;
+    END;
+    CLOSE forma_cursor;
+    DEALLOCATE forma_cursor;
+
+    SET @ctrlObjId = OBJECT_ID('dbo.DAT_CTRL_CTAS');
+    IF @ctrlObjId IS NOT NULL
+    BEGIN
+      SELECT
+        @ctrlHasCTA = MAX(CASE WHEN UPPER(name) = 'CTA' THEN 1 ELSE 0 END),
+        @ctrlHasCLIENT = MAX(CASE WHEN UPPER(name) = 'CLIENT' THEN 1 ELSE 0 END),
+        @ctrlHasCMOV = MAX(CASE WHEN UPPER(name) = 'CMOV' THEN 1 ELSE 0 END),
+        @ctrlHasCLSD = MAX(CASE WHEN UPPER(name) = 'CLSD' THEN 1 ELSE 0 END),
+        @ctrlHasIMPT = MAX(CASE WHEN UPPER(name) = 'IMPT' THEN 1 ELSE 0 END),
+        @ctrlHasNDOC = MAX(CASE WHEN UPPER(name) = 'NDOC' THEN 1 ELSE 0 END),
+        @ctrlHasIDFOL = MAX(CASE WHEN UPPER(name) = 'IDFOL' THEN 1 ELSE 0 END),
+        @ctrlHasSUC = MAX(CASE WHEN UPPER(name) = 'SUC' THEN 1 ELSE 0 END),
+        @ctrlHasOPV = MAX(CASE WHEN UPPER(name) = 'OPV' THEN 1 ELSE 0 END),
+        @ctrlHasIDOPV = MAX(CASE WHEN UPPER(name) = 'IDOPV' THEN 1 ELSE 0 END),
+        @ctrlHasTIPO = MAX(CASE WHEN UPPER(name) = 'TIPO' THEN 1 ELSE 0 END),
+        @ctrlHasRTXT = MAX(CASE WHEN UPPER(name) = 'RTXT' THEN 1 ELSE 0 END),
+        @ctrlHasFCND = MAX(CASE WHEN UPPER(name) = 'FCND' THEN 1 ELSE 0 END),
+        @ctrlHasFCN = MAX(CASE WHEN UPPER(name) = 'FCN' THEN 1 ELSE 0 END),
+        @ctrlHasFCNR = MAX(CASE WHEN UPPER(name) = 'FCNR' THEN 1 ELSE 0 END),
+        @ctrlHasFECHA = MAX(CASE WHEN UPPER(name) = 'FECHA' THEN 1 ELSE 0 END)
+      FROM sys.columns
+      WHERE object_id = @ctrlObjId;
+
+      SET @ctrlClassCol = CASE
+        WHEN @ctrlHasCMOV = 1 THEN 'CMOV'
+        WHEN @ctrlHasCLSD = 1 THEN 'CLSD'
+        ELSE NULL
+      END;
+
+      IF @datCmovObjId IS NOT NULL
+      BEGIN
+        SELECT
+          @datCmovHasRelacion = MAX(CASE WHEN UPPER(name) = 'RELACION' THEN 1 ELSE 0 END),
+          @datCmovHasCmov = MAX(CASE WHEN UPPER(name) = 'CMOV' THEN 1 ELSE 0 END),
+          @datCmovHasTipo = MAX(CASE WHEN UPPER(name) = 'TIPO' THEN 1 ELSE 0 END)
+        FROM sys.columns
+        WHERE object_id = @datCmovObjId;
+      END
+
+      IF @ctrlHasCTA = 1 AND @ctrlHasCLIENT = 1 AND @ctrlHasIMPT = 1 AND @ctrlHasIDFOL = 1 AND @ctrlClassCol IS NOT NULL
+      BEGIN
+        INSERT INTO @LINES (UPC, ORD, LINE_TOTAL)
+        SELECT
+          UPPER(LTRIM(RTRIM(ISNULL(UPC, '')))) AS UPC,
+          LTRIM(RTRIM(ISNULL(ORD, ''))) AS ORD,
+          ROUND(
+            ISNULL(TRY_CONVERT(DECIMAL(18,4), PVTA), 0)
+            * ISNULL(NULLIF(TRY_CONVERT(DECIMAL(18,4), CTD), 0), 1),
+            4
+          ) AS LINE_TOTAL
+        FROM dbo.PV_TICKET_LOG
+        WHERE IDFOL = @idfolNorm;
+
+        DECLARE line_cursor CURSOR LOCAL FAST_FORWARD FOR
+          SELECT UPC, ORD, LINE_TOTAL
+          FROM @LINES
+          ORDER BY ROW_ID;
+
+        OPEN line_cursor;
+        FETCH NEXT FROM line_cursor INTO @lineTipps, @lineOrd, @lineTotal;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+          SET @movClass = NULL;
+          SET @cta = NULL;
+          SET @lineImpt = ABS(ISNULL(@lineTotal, 0));
+          SET @lineIdFol = @idfolNorm;
+          SET @rtxt = 'Abono a cliente ticket ' + @idfolNorm;
+
+          IF @datCmovObjId IS NOT NULL
+             AND @datCmovHasRelacion = 1
+             AND @datCmovHasCmov = 1
+          BEGIN
+            IF @datCmovHasTipo = 1
+            BEGIN
+              SELECT TOP 1 @movClass = TRY_CONVERT(INT, CMOV)
+              FROM dbo.DAT_CMOV
+              WHERE UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineTipps
+                AND UPPER(LTRIM(RTRIM(ISNULL(TIPO, '')))) = 'ABONO'
+              ORDER BY CMOV;
+            END
+            ELSE
+            BEGIN
+              SELECT TOP 1 @movClass = TRY_CONVERT(INT, CMOV)
+              FROM dbo.DAT_CMOV
+              WHERE UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineTipps
+              ORDER BY CMOV;
+            END
+          END
+          ELSE
+          BEGIN
+            IF @lineTipps = 'DG'
+            BEGIN
+              IF OBJECT_ID('dbo.DAT_CMOV_C', 'U') IS NOT NULL
+                 AND COL_LENGTH('dbo.DAT_CMOV_C', 'RELACION') IS NOT NULL
+                 AND COL_LENGTH('dbo.DAT_CMOV_C', 'CMOV') IS NOT NULL
+              BEGIN
+                SELECT TOP 1 @movClass = TRY_CONVERT(INT, CMOV)
+                FROM dbo.DAT_CMOV_C
+                WHERE UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineTipps;
+              END
+            END
+            ELSE
+            BEGIN
+              IF OBJECT_ID('dbo.DAT_CMOV_A', 'U') IS NOT NULL
+                 AND COL_LENGTH('dbo.DAT_CMOV_A', 'RELACION') IS NOT NULL
+                 AND COL_LENGTH('dbo.DAT_CMOV_A', 'CMOV') IS NOT NULL
+              BEGIN
+                SELECT TOP 1 @movClass = TRY_CONVERT(INT, CMOV)
+                FROM dbo.DAT_CMOV_A
+                WHERE UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineTipps;
+              END
+            END
+          END;
+
+          IF @lineTipps = 'DG'
+          BEGIN
+            SET @lineImpt = -ABS(ISNULL(@lineTotal, 0));
+            SET @lineIdFol = @idfolNorm;
+            SET @rtxt = LTRIM(RTRIM(ISNULL(@lineOrd, ''))) + ' ticket ' + @idfolNorm;
+          END
+          ELSE IF @lineTipps = 'DC'
+          BEGIN
+            SET @lineImpt = ABS(ISNULL(@lineTotal, 0));
+            SET @lineIdFol = @idfolNorm;
+            SET @rtxt = LTRIM(RTRIM(ISNULL(@lineOrd, ''))) + ' ticket ' + @idfolNorm;
+          END
+          ELSE
+          BEGIN
+            SET @lineImpt = ABS(ISNULL(@lineTotal, 0));
+            SET @lineIdFol = CASE
+              WHEN LTRIM(RTRIM(ISNULL(@lineOrd, ''))) = '' THEN @idfolNorm
+              ELSE @lineOrd
+            END;
+            SET @rtxt = 'Abono a cliente ticket ' + @idfolNorm;
+          END;
+
+          IF @movClass IS NULL
+          BEGIN
+            SET @movErr = N'No se encontró CLSD (CMOV) para RELACION '
+              + ISNULL(@lineTipps, N'')
+              + N' con TIPO=ABONO.';
+            THROW 57134, @movErr, 1;
+          END;
+
+          IF OBJECT_ID('dbo.DAT_CAT_CTAS', 'U') IS NOT NULL
+             AND COL_LENGTH('dbo.DAT_CAT_CTAS', 'CTA') IS NOT NULL
+             AND COL_LENGTH('dbo.DAT_CAT_CTAS', 'RELACION') IS NOT NULL
+          BEGIN
+            SELECT TOP 1
+              @cta = LTRIM(RTRIM(ISNULL(CTA, '')))
+            FROM dbo.DAT_CAT_CTAS
+            WHERE UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineTipps
+              AND (
+                COL_LENGTH('dbo.DAT_CAT_CTAS', 'SUC') IS NULL
+                OR UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = UPPER(ISNULL(@sucDb, ''))
+                OR LTRIM(RTRIM(ISNULL(SUC, ''))) = ''
+              )
+            ORDER BY CASE
+              WHEN COL_LENGTH('dbo.DAT_CAT_CTAS', 'SUC') IS NULL THEN 0
+              WHEN UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = UPPER(ISNULL(@sucDb, '')) THEN 0
+              ELSE 1
+            END;
+          END;
+
+          IF @cta IS NOT NULL AND LTRIM(RTRIM(@cta)) <> ''
+          BEGIN
+            SET @ndoc = CONCAT(
+              'PS',
+              CONVERT(VARCHAR(8), GETDATE(), 112),
+              REPLACE(CONVERT(VARCHAR(8), GETDATE(), 108), ':', ''),
+              RIGHT(REPLACE(CONVERT(VARCHAR(36), NEWID()), '-', ''), 6)
+            );
+            SET @opvAudit = COALESCE(@userNorm, @opvDb);
+
+            SET @sql = N'
+              INSERT INTO dbo.DAT_CTRL_CTAS (
+                CTA,
+                CLIENT,
+                ' + @ctrlClassCol + N',
+                IMPT' +
+                CASE WHEN @ctrlHasNDOC = 1 THEN N', NDOC' ELSE N'' END +
+                N', IDFOL' +
+                CASE WHEN @ctrlHasSUC = 1 THEN N', SUC' ELSE N'' END +
+                CASE WHEN @ctrlHasOPV = 1 THEN N', OPV' ELSE N'' END +
+                CASE WHEN @ctrlHasIDOPV = 1 THEN N', IDOPV' ELSE N'' END +
+                CASE WHEN @ctrlHasTIPO = 1 THEN N', TIPO' ELSE N'' END +
+                CASE WHEN @ctrlHasRTXT = 1 THEN N', RTXT' ELSE N'' END +
+                CASE WHEN @ctrlHasFCND = 1 THEN N', FCND' ELSE N'' END +
+                CASE WHEN @ctrlHasFCN = 1 THEN N', FCN' ELSE N'' END +
+                CASE WHEN @ctrlHasFCNR = 1 THEN N', FCNR' ELSE N'' END +
+                CASE WHEN @ctrlHasFECHA = 1 THEN N', FECHA' ELSE N'' END + N'
+              )
+              VALUES (
+                @pCTA,
+                @pCLIENT,
+                @pCLSD,
+                @pIMPT' +
+                CASE WHEN @ctrlHasNDOC = 1 THEN N', @pNDOC' ELSE N'' END +
+                N', @pIDFOL' +
+                CASE WHEN @ctrlHasSUC = 1 THEN N', @pSUC' ELSE N'' END +
+                CASE WHEN @ctrlHasOPV = 1 THEN N', @pOPV' ELSE N'' END +
+                CASE WHEN @ctrlHasIDOPV = 1 THEN N', @pOPV' ELSE N'' END +
+                CASE WHEN @ctrlHasTIPO = 1 THEN N', @pTIPO' ELSE N'' END +
+                CASE WHEN @ctrlHasRTXT = 1 THEN N', @pRTXT' ELSE N'' END +
+                CASE WHEN @ctrlHasFCND = 1 THEN N', GETDATE()' ELSE N'' END +
+                CASE WHEN @ctrlHasFCN = 1 THEN N', GETDATE()' ELSE N'' END +
+                CASE WHEN @ctrlHasFCNR = 1 THEN N', GETDATE()' ELSE N'' END +
+                CASE WHEN @ctrlHasFECHA = 1 THEN N', GETDATE()' ELSE N'' END + N'
+              );';
+
+            EXEC sys.sp_executesql
+              @sql,
+              N'@pCTA NVARCHAR(255), @pCLIENT FLOAT, @pCLSD INT, @pIMPT DECIMAL(18,4), @pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pSUC NVARCHAR(20), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(10), @pRTXT NVARCHAR(255)',
+              @pCTA = @cta,
+              @pCLIENT = @clien,
+              @pCLSD = @movClass,
+              @pIMPT = @lineImpt,
+              @pNDOC = @ndoc,
+              @pIDFOL = @lineIdFol,
+              @pSUC = @sucDb,
+              @pOPV = @opvAudit,
+              @pTIPO = @lineTipps,
+              @pRTXT = @rtxt;
+          END;
+
+          FETCH NEXT FROM line_cursor INTO @lineTipps, @lineOrd, @lineTotal;
+        END;
+        CLOSE line_cursor;
+        DEALLOCATE line_cursor;
+      END;
+    END;
+
+    UPDATE dbo.PV_CTR_FOL_ASVR
+    SET
+      ESTA = 'PAGADO',
+      IMPT = CASE WHEN @isCashOut = 1 THEN (@total * -1) ELSE @total END,
+      IMPP = @sumPagos,
+      FPGO = 'FINALIZADO',
+      FCNM = GETDATE(),
+      OPVM = COALESCE(@userNorm, OPVM)
+    WHERE IDFOL = @idfolNorm;
+
+    IF @startedTran = 1 AND @@TRANCOUNT > 0
+      COMMIT TRANSACTION;
+
+    SELECT
+      @idfolNorm AS IDFOL,
+      'PAGADO' AS ESTA,
+      @total AS TOTAL,
+      @sumPagos AS PAGADO,
+      @cambio AS CAMBIO;
+  END TRY
+  BEGIN CATCH
+    IF CURSOR_STATUS('local', 'forma_cursor') >= -1
+    BEGIN
+      CLOSE forma_cursor;
+      DEALLOCATE forma_cursor;
+    END
+
+    IF CURSOR_STATUS('local', 'line_cursor') >= -1
+    BEGIN
+      CLOSE line_cursor;
+      DEALLOCATE line_cursor;
+    END
+
     IF @startedTran = 1 AND @@TRANCOUNT > 0
       ROLLBACK TRANSACTION;
     THROW;

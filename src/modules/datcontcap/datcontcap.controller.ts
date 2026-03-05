@@ -26,18 +26,27 @@ export class DatContCapController {
   }
 
   @Post()
-  crearCaptura(@Body() dto: CreateDatContCapDto, @CurrentUser() user: JwtPayload) {
+  crearCaptura(
+    @Body() dto: CreateDatContCapDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.capturar(dto, user);
   }
 
   @Get('summary')
-  summary(@Query() query: SummaryDatContCapDto, @CurrentUser() user: JwtPayload) {
+  summary(
+    @Query() query: SummaryDatContCapDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.resumen(query.cont, user, query.suc);
   }
 
   // Alias mantenido para compatibilidad
   @Get('resumen')
-  resumen(@Query() query: SummaryDatContCapDto, @CurrentUser() user: JwtPayload) {
+  resumen(
+    @Query() query: SummaryDatContCapDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.resumen(query.cont, user, query.suc);
   }
 }

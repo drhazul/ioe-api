@@ -8,7 +8,14 @@ import { DatArtEntity } from '../datart/datart.entity';
 import { DatDetSvrEntity } from '../datdetsvr/datdetsvr.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([DatContCapEntity, DatContCtrlEntity, DatArtEntity, DatDetSvrEntity])],
+  imports: [
+    TypeOrmModule.forFeature([
+      DatContCapEntity,
+      DatContCtrlEntity,
+      DatArtEntity,
+      DatDetSvrEntity,
+    ]),
+  ],
   controllers: [DatContCapController],
   providers: [DatContCapService],
 })

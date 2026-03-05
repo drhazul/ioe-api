@@ -74,7 +74,11 @@ export class DatArtController {
   }
 
   @Get(':suc/:art/:upc')
-  findOne(@Param('suc') suc: string, @Param('art') art: string, @Param('upc') upc: string) {
+  findOne(
+    @Param('suc') suc: string,
+    @Param('art') art: string,
+    @Param('upc') upc: string,
+  ) {
     return this.service.findOne(suc, art, upc);
   }
 
@@ -94,7 +98,11 @@ export class DatArtController {
   }
 
   @Delete(':suc/:art/:upc')
-  remove(@Param('suc') suc: string, @Param('art') art: string, @Param('upc') upc: string) {
+  remove(
+    @Param('suc') suc: string,
+    @Param('art') art: string,
+    @Param('upc') upc: string,
+  ) {
     return this.service.remove(suc, art, upc);
   }
 

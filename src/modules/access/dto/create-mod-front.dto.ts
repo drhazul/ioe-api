@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsDateString, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsBoolean,
+  IsDateString,
+  IsOptional,
+  IsString,
+  Length,
+} from 'class-validator';
 
 export class CreateModFrontDto {
   @ApiProperty({ example: 'SYS_DAT_MAE' })

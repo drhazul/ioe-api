@@ -1,6 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsArray, IsDateString, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsArray,
+  IsDateString,
+  IsOptional,
+  IsString,
+  Length,
+} from 'class-validator';
 
 const stringListOrUndefined = ({ value }: { value: unknown }) => {
   if (value === undefined || value === null) return undefined;
@@ -11,7 +17,9 @@ const stringListOrUndefined = ({ value }: { value: unknown }) => {
   };
 
   if (Array.isArray(value)) {
-    const list = value.map((item) => normalize(item)).filter((item): item is string => item !== null);
+    const list = value
+      .map((item) => normalize(item))
+      .filter((item): item is string => item !== null);
     return list.length ? list : undefined;
   }
 
@@ -59,7 +67,10 @@ export class CtrlCtasConsultaDto {
   @Transform(stringListOrUndefined)
   ctas?: string[];
 
-  @ApiPropertyOptional({ type: [String], description: 'Clientes (CLIENT) como string' })
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Clientes (CLIENT) como string',
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -67,7 +78,10 @@ export class CtrlCtasConsultaDto {
   @Transform(stringListOrUndefined)
   clients?: string[];
 
-  @ApiPropertyOptional({ type: [String], description: 'Clases de documento (CLSD)' })
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Clases de documento (CLSD)',
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -75,7 +89,10 @@ export class CtrlCtasConsultaDto {
   @Transform(stringListOrUndefined)
   clsds?: string[];
 
-  @ApiPropertyOptional({ type: [String], description: 'Folios/Tickets (IDFOL)' })
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Folios/Tickets (IDFOL)',
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

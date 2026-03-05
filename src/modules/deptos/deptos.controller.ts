@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { DeptosService } from './deptos.service';
 import { CreateDepartamentoDto } from './dto/create-departamento.dto';
@@ -6,7 +15,6 @@ import { UpdateDepartamentoDto } from './dto/update-departamento.dto';
 import { UseGuards } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-
 
 @ApiTags('deptos')
 @ApiBearerAuth('jwt-auth')
