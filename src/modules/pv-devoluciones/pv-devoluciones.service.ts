@@ -10,7 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
-import { DataSource, QueryFailedError } from 'typeorm';
+import { DataSource, QueryFailedError, QueryRunner } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { CreateDevolucionDto } from './dto/create-devolucion.dto';
@@ -110,8 +110,7 @@ export class PvDevolucionesService {
   private static readonly ORIG_AUT_VALIDOS = new Set(['VF', 'CA', 'APF']);
 
   private static readonly CTA_CTRL_CTAS = '101001002';
-  private static readonly CMOV_DEV_CREDITO = 611;
-  private static readonly CMOV_DEV_DEUDOR = 612;
+  private static readonly CMOV_DEV_ABONO_ANULACION = 601;
   private static readonly NDOC_BASE = 6100000;
   private static readonly NDOC_LOCK_RESOURCE = 'PV_DEV_NDOC';
   private static readonly FACTURADO_STATUS = 'FACTURADO';
@@ -208,7 +207,6 @@ export class PvDevolucionesService {
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
-    await queryRunner.startTransaction();
 
     try {
       await this.ensureStagingTable(queryRunner);
@@ -229,6 +227,10 @@ export class PvDevolucionesService {
         opv: opvActor,
         ter: original.ter,
       });
+
+      // sp_pvctrfolasvr_create maneja su propia transacción interna; evitamos
+      // envolver su EXEC en la transacción TypeORM para no desbalancear @@TRANCOUNT.
+      await queryRunner.startTransaction();
 
       await this.prepareDevolucionHeader(queryRunner, {
         idfolDev,
@@ -276,7 +278,7 @@ export class PvDevolucionesService {
 
       return this.detail(idfolDev, user);
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      await this.rollbackTransactionSafe(queryRunner);
       throw this.mapError(error, 'No se pudo crear la devolución');
     } finally {
       await queryRunner.release();
@@ -355,7 +357,7 @@ export class PvDevolucionesService {
       await queryRunner.commitTransaction();
       return this.detail(idfolDev, user);
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      await this.rollbackTransactionSafe(queryRunner);
       throw this.mapError(error, 'No se pudo aplicar Devolver TODO');
     } finally {
       await queryRunner.release();
@@ -450,7 +452,7 @@ export class PvDevolucionesService {
       await queryRunner.commitTransaction();
       return this.detail(idfolDev, user);
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      await this.rollbackTransactionSafe(queryRunner);
       throw this.mapError(error, 'No se pudo actualizar CTDD');
     } finally {
       await queryRunner.release();
@@ -486,7 +488,11 @@ export class PvDevolucionesService {
       }
 
       await this.validateSelectedLines(queryRunner, context, selected);
-      await this.regenerateTicketDevolucion(queryRunner, context.idfolDev);
+      await this.regenerateTicketDevolucion(
+        queryRunner,
+        context.idfolDev,
+        new Date(),
+      );
       const items = await this.loadTicketDevolucionLines(
         queryRunner,
         context.idfolDev,
@@ -520,7 +526,7 @@ export class PvDevolucionesService {
         },
       };
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      await this.rollbackTransactionSafe(queryRunner);
       throw this.mapError(error, 'No se pudo preparar detalle de devolución');
     } finally {
       await queryRunner.release();
@@ -673,6 +679,7 @@ export class PvDevolucionesService {
       const nart = this.round4(
         selected.reduce((acc, item) => acc + (item.ctdd ?? 0), 0),
       );
+      const finalizedAt = new Date();
 
       await this.insertFactIdfolDev(queryRunner, {
         idfolDev: context.idfolDev,
@@ -681,21 +688,29 @@ export class PvDevolucionesService {
         opv: opvActor,
         nart,
         imptd: -sumPagos,
+        finalizedAt,
       });
 
-      await this.applyActArt(queryRunner, context.idfolDev);
-      await this.regenerateTicketDevolucion(queryRunner, context.idfolDev);
+      await this.applyActArt(queryRunner, context.idfolDev, finalizedAt);
+      await this.regenerateTicketDevolucion(
+        queryRunner,
+        context.idfolDev,
+        finalizedAt,
+      );
       await this.rewriteFormasPagoDevolucion(queryRunner, {
         idfolDev: context.idfolDev,
         formas,
         total: totals.total,
+        finalizedAt,
       });
       await this.registerCtasMovimientos(queryRunner, {
         idfolDev: context.idfolDev,
+        idfolOrig: context.idfolOrig,
         clien: context.clien,
         suc: context.suc,
         opv: opvActor,
         formas,
+        finalizedAt,
       });
       await this.updateOrdsAnuladas(
         queryRunner,
@@ -708,6 +723,7 @@ export class PvDevolucionesService {
         total: totals.total,
         rqfac,
         opv: opvActor,
+        finalizedAt,
       });
 
       await queryRunner.commitTransaction();
@@ -742,7 +758,7 @@ export class PvDevolucionesService {
         totals,
       };
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      await this.rollbackTransactionSafe(queryRunner);
       throw this.mapError(error, 'No se pudo finalizar la devolución');
     } finally {
       await queryRunner.release();
@@ -1154,26 +1170,174 @@ export class PvDevolucionesService {
       ter: string | null;
     },
   ) {
+    try {
+      const rows = await executor.query(
+        `
+        DECLARE @IDFOL_OUT NVARCHAR(255);
+        DECLARE @TRA_OUT INT;
+        EXEC dbo.sp_pvctrfolasvr_create
+          @SUC = @0,
+          @OPV = @1,
+          @TER = @2,
+          @IDFOL_OUT = @IDFOL_OUT OUTPUT,
+          @TRA_OUT = @TRA_OUT OUTPUT;
+        SELECT @IDFOL_OUT AS IDFOL, @TRA_OUT AS TRA;
+        `,
+        [input.suc, input.opv, input.ter],
+      );
+      const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+      const idfol = this.normalizeText(row?.IDFOL);
+      if (!idfol) {
+        throw new ConflictException('No se pudo generar IDFOL de devolución');
+      }
+      return idfol;
+    } catch (error) {
+      if (!this.isDuplicateCtrFolError(error)) {
+        throw error;
+      }
+
+      const fallbackIdfol = await this.generateFolioFallback(executor, input);
+      if (!fallbackIdfol) {
+        throw new ConflictException('No se pudo generar IDFOL de devolución');
+      }
+      return fallbackIdfol;
+    }
+  }
+
+  private async generateFolioFallback(
+    executor: SqlExecutor,
+    input: {
+      suc: string;
+      opv: string;
+      ter: string | null;
+    },
+  ) {
     const rows = await executor.query(
       `
-      DECLARE @IDFOL_OUT NVARCHAR(255);
-      DECLARE @TRA_OUT INT;
-      EXEC dbo.sp_pvctrfolasvr_create
-        @SUC = @0,
-        @OPV = @1,
-        @TER = @2,
-        @IDFOL_OUT = @IDFOL_OUT OUTPUT,
-        @TRA_OUT = @TRA_OUT OUTPUT;
-      SELECT @IDFOL_OUT AS IDFOL, @TRA_OUT AS TRA;
+      DECLARE @startedTran BIT = 0;
+      DECLARE @sucNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@0, '')));
+      DECLARE @opvNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@1, '')));
+      DECLARE @terNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@2, ''))), '');
+      DECLARE @now DATETIME = GETDATE();
+      DECLARE @todayPart CHAR(8);
+      DECLARE @nextTra INT;
+      DECLARE @idfol NVARCHAR(255);
+      DECLARE @lockResult INT;
+      DECLARE @lockResource NVARCHAR(128);
+
+      SET @todayPart =
+        RIGHT('00' + CAST(DAY(@now) AS VARCHAR(2)), 2) +
+        RIGHT('00' + CAST(MONTH(@now) AS VARCHAR(2)), 2) +
+        CAST(YEAR(@now) AS CHAR(4));
+
+      BEGIN TRY
+        IF @@TRANCOUNT = 0
+        BEGIN
+          SET @startedTran = 1;
+          BEGIN TRANSACTION;
+        END;
+
+        SET @lockResource = 'PV_DEV_FOLIO_CREATE_' + UPPER(@sucNorm);
+        EXEC @lockResult = sp_getapplock
+          @Resource = @lockResource,
+          @LockMode = 'Exclusive',
+          @LockOwner = 'Transaction',
+          @LockTimeout = 15000;
+
+        IF @lockResult < 0
+          THROW 57031, 'No se pudo obtener lock para crear folio de devolución', 1;
+
+        SELECT @nextTra = ISNULL(MAX(TRY_CONVERT(INT, TRA)), 1000) + 1
+        FROM dbo.PV_CTR_FOL_ASVR WITH (UPDLOCK, HOLDLOCK)
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = UPPER(@sucNorm);
+
+        IF @nextTra IS NULL OR @nextTra < 1001 SET @nextTra = 1001;
+
+        SET @idfol = CONCAT(
+          @sucNorm,
+          @todayPart,
+          RIGHT('0000' + CAST(@nextTra AS VARCHAR(10)), 4)
+        );
+
+        WHILE EXISTS (SELECT 1 FROM dbo.PV_CTR_FOL_ASVR WHERE IDFOL = @idfol)
+        BEGIN
+          SET @nextTra = @nextTra + 1;
+          SET @idfol = CONCAT(
+            @sucNorm,
+            @todayPart,
+            RIGHT('0000' + CAST(@nextTra AS VARCHAR(10)), 4)
+          );
+        END;
+
+        INSERT INTO dbo.PV_CTR_FOL_ASVR (
+          IDFOL,
+          CLIEN,
+          FCN,
+          SUC,
+          TER,
+          TRA,
+          OPV,
+          ESTA,
+          IMPT,
+          FPGO,
+          IMPP,
+          AUT,
+          REQF,
+          FCNM,
+          OPVM
+        )
+        VALUES (
+          @idfol,
+          1,
+          @now,
+          @sucNorm,
+          @terNorm,
+          CAST(@nextTra AS NVARCHAR(20)),
+          @opvNorm,
+          'PENDIENTE',
+          0,
+          NULL,
+          0,
+          'CP',
+          0,
+          @now,
+          @opvNorm
+        );
+
+        IF @startedTran = 1 AND @@TRANCOUNT > 0
+          COMMIT TRANSACTION;
+
+        SELECT @idfol AS IDFOL, CAST(@nextTra AS NVARCHAR(20)) AS TRA;
+      END TRY
+      BEGIN CATCH
+        IF @startedTran = 1 AND @@TRANCOUNT > 0
+          ROLLBACK TRANSACTION;
+        THROW;
+      END CATCH
       `,
       [input.suc, input.opv, input.ter],
     );
+
     const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
-    const idfol = this.normalizeText(row?.IDFOL);
-    if (!idfol) {
-      throw new ConflictException('No se pudo generar IDFOL de devolución');
+    return this.normalizeText(row?.IDFOL);
+  }
+
+  private isDuplicateCtrFolError(error: unknown) {
+    const sqlMessage = this.readErrorMessage(error).toUpperCase();
+    return (
+      sqlMessage.includes('VIOLATION OF PRIMARY KEY CONSTRAINT') &&
+      sqlMessage.includes('PK_CTR_FOL')
+    );
+  }
+
+  private readErrorMessage(error: unknown) {
+    if (error instanceof QueryFailedError) {
+      return this.extractSqlMessage(error);
     }
-    return idfol;
+    if (error instanceof Error) {
+      return this.normalizeText(error.message);
+    }
+    return this.normalizeText(String(error ?? ''));
   }
 
   private async prepareDevolucionHeader(
@@ -1687,6 +1851,7 @@ export class PvDevolucionesService {
       opv: string;
       nart: number;
       imptd: number;
+      finalizedAt: Date;
     },
   ) {
     const tableName = 'dbo.FACT_IDFOLDEV';
@@ -1716,7 +1881,8 @@ export class PvDevolucionesService {
     };
     const pushNow = (column: string) => {
       cols.push(column);
-      values.push('GETDATE()');
+      values.push(`@${params.length}`);
+      params.push(input.finalizedAt);
     };
 
     if (colsSet.has('IDFOL_OR')) pushValue('IDFOL_OR', input.idfolOrig);
@@ -1741,27 +1907,32 @@ export class PvDevolucionesService {
     );
   }
 
-  private async applyActArt(executor: SqlExecutor, idfolDev: string) {
+  private async applyActArt(
+    executor: SqlExecutor,
+    idfolDev: string,
+    finalizedAt: Date,
+  ) {
     await executor.query(
       `
       UPDATE orig
       SET
         orig.CTDDF = ISNULL(orig.CTDDF, 0) + dev.CTDD,
         orig.CTDD = NULL,
-        orig.UPDATED_AT = GETDATE()
+        orig.UPDATED_AT = @1
       FROM dbo.PV_TICKET_LOG orig
       INNER JOIN dbo.PV_DEV_DET_TMP dev
         ON CAST(orig.ID AS NVARCHAR(255)) = dev.IDLINE_ORIG
       WHERE dev.IDFOLDEV = @0
         AND ISNULL(dev.CTDD, 0) > 0
       `,
-      [idfolDev],
+      [idfolDev, finalizedAt],
     );
   }
 
   private async regenerateTicketDevolucion(
     executor: SqlExecutor,
     idfolDev: string,
+    finalizedAt: Date,
   ) {
     await executor.query(
       `
@@ -1801,12 +1972,12 @@ export class PvDevolucionesService {
         det.IDLINE_ORIG,
         NULL,
         NULL,
-        GETDATE()
+        @1
       FROM dbo.PV_DEV_DET_TMP det
       WHERE det.IDFOLDEV = @0
         AND ISNULL(det.CTDD, 0) > 0
       `,
-      [idfolDev],
+      [idfolDev, finalizedAt],
     );
   }
 
@@ -1816,6 +1987,7 @@ export class PvDevolucionesService {
       idfolDev: string;
       formas: FormaNormalizada[];
       total: number;
+      finalizedAt: Date;
     },
   ) {
     const tableName = await this.resolveFolioFormTable(executor);
@@ -1830,19 +2002,31 @@ export class PvDevolucionesService {
     );
 
     for (const forma of input.formas) {
+      const isCreditoDeudor =
+        forma.form === 'CREDITO' || forma.form === 'DEUDOR';
+      const isEfectivo = forma.form === 'EFECTIVO';
+      const imppValue = -this.round2(Math.abs(forma.impp));
+      const impdValue = isCreditoDeudor ? 0 : imppValue;
+      const impcValue = isCreditoDeudor
+        ? 0
+        : isEfectivo
+          ? impdValue
+          : -this.round2(Math.abs(input.total));
+
       const cols = ['IDF', 'IDFOL', 'FCN', 'FORM', 'IMPP'];
-      const values = ['@0', '@1', 'GETDATE()', '@2', '@3'];
+      const values = ['@0', '@1', '@2', '@3', '@4'];
       const params: unknown[] = [
         randomUUID(),
         input.idfolDev,
+        input.finalizedAt,
         forma.form,
-        -this.round2(Math.abs(forma.impp)),
+        imppValue,
       ];
 
       if (colsSet.has('IMPC')) {
         cols.push('IMPC');
         values.push(`@${params.length}`);
-        params.push(-this.round2(Math.abs(input.total)));
+        params.push(impcValue);
       }
 
       if (colsSet.has('IMPA')) {
@@ -1854,16 +2038,14 @@ export class PvDevolucionesService {
       if (colsSet.has('IMPD')) {
         cols.push('IMPD');
         values.push(`@${params.length}`);
-        params.push(-this.round2(Math.abs(forma.impp)));
+        params.push(impdValue);
       }
 
       if (colsSet.has('AUT')) {
         cols.push('AUT');
         values.push(`@${params.length}`);
         params.push(
-          forma.form === 'CREDITO' || forma.form === 'DEUDOR'
-            ? input.idfolDev
-            : forma.aut,
+          isCreditoDeudor ? input.idfolDev : forma.aut,
         );
       }
 
@@ -1885,10 +2067,12 @@ export class PvDevolucionesService {
     executor: SqlExecutor,
     input: {
       idfolDev: string;
+      idfolOrig: string;
       clien: number | null;
       suc: string;
       opv: string;
       formas: FormaNormalizada[];
+      finalizedAt: Date;
     },
   ) {
     const clientId = Number(input.clien ?? NaN);
@@ -1903,36 +2087,51 @@ export class PvDevolucionesService {
       );
     }
 
+    const needNdoc = await this.shouldGenerateNdoc(executor);
+
     for (const forma of creditForms) {
-      const classCode =
-        forma.form === 'CREDITO'
-          ? PvDevolucionesService.CMOV_DEV_CREDITO
-          : PvDevolucionesService.CMOV_DEV_DEUDOR;
+      const classCode = PvDevolucionesService.CMOV_DEV_ABONO_ANULACION;
       const imptPos = this.round2(Math.abs(forma.impp));
       if (imptPos <= 0) continue;
 
-      const ndoc = await this.generateNextNdoc(executor);
+      const ndoc = needNdoc ? await this.generateNextNdoc(executor) : '';
       await this.insertDatCtrDocIfAvailable(executor, {
         ndoc,
-        idfol: input.idfolDev,
+        idfol: input.idfolOrig,
+        ticketRef: input.idfolOrig,
         clientId,
         classCode,
         impt: imptPos,
         suc: input.suc,
         opv: input.opv,
         form: forma.form,
+        finalizedAt: input.finalizedAt,
       });
       await this.insertDatCtrlCtasMovimiento(executor, {
         ndoc,
-        idfol: input.idfolDev,
+        idfol: input.idfolOrig,
+        ticketRef: input.idfolOrig,
         clientId,
         classCode,
         impt: imptPos,
         suc: input.suc,
         opv: input.opv,
         form: forma.form,
+        finalizedAt: input.finalizedAt,
       });
     }
+  }
+
+  private async shouldGenerateNdoc(executor: SqlExecutor) {
+    const ctrlCols = await this.loadTableColumns(executor, 'dbo.DAT_CTRL_CTAS');
+    if (ctrlCols.has('NDOC')) return true;
+
+    if (await this.tableExists(executor, 'dbo.DAT_CTR_DOC')) {
+      const docCols = await this.loadTableColumns(executor, 'dbo.DAT_CTR_DOC');
+      if (docCols.has('NDOC')) return true;
+    }
+
+    return false;
   }
 
   private async updateOrdsAnuladas(
@@ -1967,6 +2166,7 @@ export class PvDevolucionesService {
       total: number;
       rqfac: boolean;
       opv: string;
+      finalizedAt: Date;
     },
   ) {
     const cols = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
@@ -1974,15 +2174,16 @@ export class PvDevolucionesService {
       'ESTA = @1',
       'AUT = @2',
       'IMPT = @3',
-      'FCNM = GETDATE()',
+      'FCNM = @4',
     ];
     const params: unknown[] = [
       input.idfolDev,
       'PAGADO',
       input.autFinal,
       -this.round2(Math.abs(input.total)),
+      input.finalizedAt,
     ];
-    let idx = 4;
+    let idx = 5;
 
     const rqfacCol = this.pickFirstExistingColumn(cols, ['REQF', 'RQFAC']);
     if (rqfacCol) {
@@ -2164,33 +2365,39 @@ export class PvDevolucionesService {
     }
 
     let maxNum = PvDevolucionesService.NDOC_BASE;
-    const maxCtrlRows = await executor.query(
-      `
-      SELECT MAX(
-        TRY_CAST(SUBSTRING(LTRIM(RTRIM(NDOC)), 2, 50) AS bigint)
-      ) AS MAX_NUM
-      FROM dbo.DAT_CTRL_CTAS WITH (UPDLOCK, HOLDLOCK)
-      WHERE LTRIM(RTRIM(ISNULL(NDOC, ''))) LIKE 'N%'
-      `,
-    );
-    const maxCtrl = this.toNumber((maxCtrlRows?.[0] ?? {})['MAX_NUM']);
-    if (maxCtrl != null) {
-      maxNum = Math.max(maxNum, Math.trunc(maxCtrl));
-    }
-
-    if (await this.tableExists(executor, 'dbo.DAT_CTR_DOC')) {
-      const maxDocRows = await executor.query(
+    const ctrlCols = await this.loadTableColumns(executor, 'dbo.DAT_CTRL_CTAS');
+    if (ctrlCols.has('NDOC')) {
+      const maxCtrlRows = await executor.query(
         `
         SELECT MAX(
           TRY_CAST(SUBSTRING(LTRIM(RTRIM(NDOC)), 2, 50) AS bigint)
         ) AS MAX_NUM
-        FROM dbo.DAT_CTR_DOC WITH (UPDLOCK, HOLDLOCK)
+        FROM dbo.DAT_CTRL_CTAS WITH (UPDLOCK, HOLDLOCK)
         WHERE LTRIM(RTRIM(ISNULL(NDOC, ''))) LIKE 'N%'
         `,
       );
-      const maxDoc = this.toNumber((maxDocRows?.[0] ?? {})['MAX_NUM']);
-      if (maxDoc != null) {
-        maxNum = Math.max(maxNum, Math.trunc(maxDoc));
+      const maxCtrl = this.toNumber((maxCtrlRows?.[0] ?? {})['MAX_NUM']);
+      if (maxCtrl != null) {
+        maxNum = Math.max(maxNum, Math.trunc(maxCtrl));
+      }
+    }
+
+    if (await this.tableExists(executor, 'dbo.DAT_CTR_DOC')) {
+      const docCols = await this.loadTableColumns(executor, 'dbo.DAT_CTR_DOC');
+      if (docCols.has('NDOC')) {
+        const maxDocRows = await executor.query(
+          `
+          SELECT MAX(
+            TRY_CAST(SUBSTRING(LTRIM(RTRIM(NDOC)), 2, 50) AS bigint)
+          ) AS MAX_NUM
+          FROM dbo.DAT_CTR_DOC WITH (UPDLOCK, HOLDLOCK)
+          WHERE LTRIM(RTRIM(ISNULL(NDOC, ''))) LIKE 'N%'
+          `,
+        );
+        const maxDoc = this.toNumber((maxDocRows?.[0] ?? {})['MAX_NUM']);
+        if (maxDoc != null) {
+          maxNum = Math.max(maxNum, Math.trunc(maxDoc));
+        }
       }
     }
 
@@ -2203,12 +2410,14 @@ export class PvDevolucionesService {
     input: {
       ndoc: string;
       idfol: string;
+      ticketRef: string;
       clientId: number;
       classCode: number;
       impt: number;
       suc: string;
       opv: string;
       form: string;
+      finalizedAt: Date;
     },
   ) {
     const tableName = 'dbo.DAT_CTR_DOC';
@@ -2228,7 +2437,8 @@ export class PvDevolucionesService {
     };
     const pushNow = (column: string) => {
       cols.push(column);
-      values.push('GETDATE()');
+      values.push(`@${params.length}`);
+      params.push(input.finalizedAt);
     };
 
     const classColumn = colsSet.has('CMOV')
@@ -2236,7 +2446,7 @@ export class PvDevolucionesService {
       : colsSet.has('CLSD')
         ? 'CLSD'
         : null;
-    const rtxt = `Abono ${input.form.toLowerCase()} devolución ${input.idfol}`;
+    const rtxt = `Abono por anulacion cliente ticket ${input.ticketRef}`;
 
     if (colsSet.has('IDFOL')) pushValue('IDFOL', input.idfol);
     if (colsSet.has('CLIENT')) pushValue('CLIENT', input.clientId);
@@ -2272,12 +2482,14 @@ export class PvDevolucionesService {
     input: {
       ndoc: string;
       idfol: string;
+      ticketRef: string;
       clientId: number;
       classCode: number;
       impt: number;
       suc: string;
       opv: string;
       form: string;
+      finalizedAt: Date;
     },
   ) {
     const tableName = 'dbo.DAT_CTRL_CTAS';
@@ -2288,7 +2500,7 @@ export class PvDevolucionesService {
         ? 'CLSD'
         : null;
 
-    const required = ['CTA', 'CLIENT', 'IMPT', 'NDOC', 'IDFOL'];
+    const required = ['CTA', 'CLIENT', 'IMPT', 'IDFOL'];
     const missing = required.filter((col) => !colsSet.has(col));
     if (missing.length > 0 || classColumn == null) {
       if (classColumn == null) missing.push('CMOV/CLSD');
@@ -2297,14 +2509,13 @@ export class PvDevolucionesService {
       );
     }
 
-    const cols: string[] = ['CTA', 'CLIENT', classColumn, 'IMPT', 'NDOC'];
-    const values: string[] = ['@0', '@1', '@2', '@3', '@4'];
+    const cols: string[] = ['CTA', 'CLIENT', classColumn, 'IMPT'];
+    const values: string[] = ['@0', '@1', '@2', '@3'];
     const params: unknown[] = [
       PvDevolucionesService.CTA_CTRL_CTAS,
       input.clientId,
       input.classCode,
       this.round2(input.impt),
-      input.ndoc,
     ];
 
     const pushValue = (column: string, value: unknown) => {
@@ -2314,10 +2525,12 @@ export class PvDevolucionesService {
     };
     const pushNow = (column: string) => {
       cols.push(column);
-      values.push('GETDATE()');
+      values.push(`@${params.length}`);
+      params.push(input.finalizedAt);
     };
-    const rtxt = `Abono ${input.form.toLowerCase()} devolución ${input.idfol}`;
+    const rtxt = `Abono por anulacion cliente ticket ${input.ticketRef}`;
 
+    if (colsSet.has('NDOC')) pushValue('NDOC', input.ndoc);
     if (colsSet.has('IDFOL')) pushValue('IDFOL', input.idfol);
     if (colsSet.has('SUC')) pushValue('SUC', input.suc);
     if (colsSet.has('OPV')) pushValue('OPV', input.opv);
@@ -2386,6 +2599,23 @@ export class PvDevolucionesService {
       if (rawKey.toUpperCase() === target) return value;
     }
     return undefined;
+  }
+
+  private async rollbackTransactionSafe(queryRunner: QueryRunner) {
+    if (!queryRunner.isTransactionActive) return;
+    try {
+      await queryRunner.rollbackTransaction();
+    } catch (error) {
+      if (this.isTransactionAbortError(error)) return;
+      throw error;
+    }
+  }
+
+  private isTransactionAbortError(error: unknown) {
+    const err = error as { code?: unknown; message?: unknown } | null;
+    const code = this.normalizeUpper(String(err?.code ?? ''));
+    const message = this.normalizeText(String(err?.message ?? '')).toLowerCase();
+    return code === 'EABORT' || message.includes('transaction has been aborted');
   }
 
   private mapError(error: unknown, fallback: string): Error {

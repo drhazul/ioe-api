@@ -96,6 +96,7 @@ Opcionales:
 - Nota de integracion UI: el filtro `!= 0` inicia activo por defecto en la pantalla de resumen (comportamiento solo frontend).
 - Punto de venta:
 - `/factclientshp`, `/pvctrfolasvr`, `/pvctrfolform`, `/pvctrords`, `/pvctrordsdet`, `/pvticketlog`, `/refdetalle`
+- Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.
 - `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','PAGADO','EDITANDO')` y busqueda por folio/cliente.
 - compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
 - `GET /pvctrfolasvr` (2026-03): la respuesta del listado incluye `RazonSocialReceptor` (join con `FACT_CLIENT_SHP`) para soporte de grilla en frontend.
@@ -160,6 +161,7 @@ Opcionales:
 - trazabilidad UI (app, 2026-03): se agrega línea de recorte entre `RESUMEN DE ORDS` y `ORDS`; `GRACIAS POR SU CONFIANZA` se imprime después de `RESUMEN DE ORDS` y antes del recorte hacia `ORDS`.
 - trazabilidad UI (app, 2026-03): el ticket PS se homologó al formato de cotizaciones con bloques `DETALLE`, `TOTALES`, `FORMAS`, `TRANSACCION`, `RESUMEN DE ORDS`, `ORDS` (barcode `CODE39` + tabla `JOB/ESF/CIL/EJE`) y vouchers por forma no `EFECTIVO`.
 - `sp_ps_pago_finalize`: toma lote JSON de formas, inserta `PV_CTR_FOL_FORM` (`IMPP/IMPC/IMPD/AUT`), registra movimientos por línea en `DAT_CTRL_CTAS` y actualiza `PV_CTR_FOL_ASVR.ESTA='PAGADO'`.
+- política de fecha de finalización PS (2026-03): el cierre usa una fecha de proceso actual para `PV_CTR_FOL_FORM.FCN`, `PV_CTR_FOL_ASVR.FCNM` y fechas de movimientos en `DAT_CTRL_CTAS`.
 - `sp_ps_pago_finalize`: `DAT_CTRL_CTAS.CLSD` se resuelve con `DAT_CMOV.CMOV` filtrando `RELACION=<UPC servicio>` y `TIPO='ABONO'` (si no existe mapeo, devuelve error y revierte transacción).
 - el script PS crea/siembra `PV_TIPO_ESTA` (incluye `RELACION` para AD/AP/CR/DC/DG) para evitar error `Invalid object name 'dbo.PV_TIPO_ESTA'.`
 - `sp_ps_adeudos_cliente` usa `@CLIENT BIGINT` y compara `TRY_CONVERT(BIGINT, CLIENT)` para IDs grandes de cliente.
@@ -304,6 +306,7 @@ Opcionales:
 - Tablas y campos que actualiza:
 - `PV_CTR_FOL_ASVR`: `ESTA='PAGADO'` al finalizar cierre (`TRANSMITIR` se aplica despues en `PATCH` desde frontend al salir), `IMPT=TOTAL`, `AUT='CA'|'VF'` (y `REQF`/campo equivalente si existe).
 - `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`): insercion transaccional de formas definitivas (`IDF`, `IDFOL`, `FORM`, `IMPP`, `AUT`, ...). En `CREDITO/DEUDOR` guarda `AUT=IDFOL`. En cualquier forma, `IMPD` persiste el total final de la cotizacion (costo total de articulos segun reglas de cierre).
+- política de fecha de finalización cotización (2026-03): `sp_pv_cotizacion_cerrar` aplica fecha de proceso actual al insertar formas (`FCN`), al actualizar cabecera (`FCNM`) y al generar movimientos contables por `CREDITO/DEUDOR` (`DAT_CTR_DOC`/`DAT_CTRL_CTAS`).
 - `PV_CTR_ORDS`: actualizacion de `ESTATUS=2` para las ordenes del `IDFOL` al cerrar.
 - Tablas para calculo/validacion:
 - `PV_TICKET_LOG` (`SUM(CTD * PVTA)`), `DAT_SUC` (`IVA_INTEGRADO`), `FACT_CLIENT_SHP` y `DAT_CTRL_CTAS` (credito).
@@ -344,18 +347,24 @@ Opcionales:
 - `GET /pv/devoluciones/:idfolDev/print-preview`
 - Reglas de negocio:
 - creación con autorización de supervisor `SUPERPV` por contraseña (`401` inválida, `403` no supervisor).
+- creación devolución (2026-03): `sp_pvctrfolasvr_create` se ejecuta fuera de transacción TypeORM y la transacción local inicia después del `EXEC` para evitar desbalance `@@TRANCOUNT` (`Previous count = 1, current count = 0`).
+- creación devolución (2026-03): si `sp_pvctrfolasvr_create` falla por duplicado `PK_CTR_FOL`, API ejecuta fallback con `sp_getapplock` y secuencia incremental (`WHILE EXISTS`) para insertar un folio único.
 - folio origen permitido solo para `AUT in ('VF','CA','APF')`.
 - bloqueo por facturación usando `FAC_SVR_SHAP`: si `ESTATUS='FACTURADO'`, responde `409`.
 - bloqueo ORD configurable: `ESTSEGU >= PV_DEV_ORD_BLOCK_THRESHOLD` (default `5`).
 - en detalle solo se edita `CTDD`; para líneas con ORD no bloqueante se exige devolución completa (`CTDD == CTD`).
 - `devolver-todo` aplica `CTDD=DIFD` y omite (null) líneas bloqueadas por ORD.
 - `detalle/preparar` valida selección e inserta en `PV_TICKET_LOG` del folio devolución solo artículos con `CTDD>0`.
+- trazabilidad UI (app, 2026-03): en `/punto-venta/devoluciones/:idfolDev/detalle`, `Ir a pago` se movió al `AppBar` con icono de caja (`Icons.point_of_sale`) y dejó de mostrarse en los botones del body.
+- trazabilidad UI (app, 2026-03): en la tarjeta de contexto de detalle devolución se ocultaron `AUT dev`, `AUT origen` y `Estado` (sin cambios de API).
 - preview reutiliza reglas de IVA del cierre (`DAT_SUC.IVA_INTEGRADO`, `REQF`, tipotran del origen) y sugiere formas.
 - trazabilidad UI (app): en pago de devolución `RQFAC` se muestra como dato derivado del origen (solo lectura en frontend, sin override manual).
+- trazabilidad UI (app, 2026-03): en `/punto-venta/devoluciones/:idfolDev/pago`, la tarjeta de contexto oculta `AUT dev`, `AUT origen`, `Tipo` y `Líneas seleccionadas` (sin cambios de API).
 - trazabilidad UI (app): en pago de devolución no se permite agregar, editar ni eliminar formas en la pantalla.
 - trazabilidad UI (app): cuando la devolución queda en `PAGADO`, app muestra candado de salida y al presionarlo manda `PATCH /pvctrfolasvr/:idfol` con `ESTA='TRANSMITIR'`.
 - `GET /pv/devoluciones` devuelve solo folios en `ESTA IN ('DEV PEND','PAGADO')` para filtros por `OPV` y por `OPVM`.
 - trazabilidad UI (app): desde panel, devoluciones en `PAGADO` abren directo la vista de pago.
+- trazabilidad UI (app, 2026-03): desde panel, devoluciones no `PAGADO` con selección previa (`linesSelected > 0` o alguna línea con `CTDD > 0` detectada en `GET /pv/devoluciones/:idfolDev/detalle`) abren directo la vista `/detalle`; sin selección previa, abren la vista de selección de artículos.
 - trazabilidad API/UI (app): la impresión de devolución se dispara con botón explícito y selector 58mm/80mm, consumiendo `GET /pv/devoluciones/:idfolDev/print-preview`.
 - trazabilidad UI (app, 2026-03): en ticket de devolución, si hay formas no `EFECTIVO`, la impresión agrega voucher `SOPORTE RECEPCION PAGO` por cada forma no efectivo.
 - trazabilidad UI (app, 2026-03): el voucher de devolución incluye espacio en blanco para firma y renglón `Firma cliente` después de `FCN`.
@@ -366,7 +375,10 @@ Opcionales:
 - actualiza líneas originales (`PV_TICKET_LOG.CTDDF += CTDD`).
 - genera ticket devolución en `PV_TICKET_LOG` del folio devolución.
 - guarda formas de pago en `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`) con importes negativos.
-- en `CREDITO/DEUDOR`, registra abonos en `DAT_CTR_DOC` (si existe) y `DAT_CTRL_CTAS` con clases `611/612`.
+- reglas formas devolución (2026-03): en `CREDITO/DEUDOR`, `PV_CTR_FOL_FORM` guarda `IMPC=0` e `IMPD=0`; en `EFECTIVO`, `IMPC=IMPD`.
+- en `CREDITO/DEUDOR`, registra abono en `DAT_CTR_DOC` (si existe) y `DAT_CTRL_CTAS` con `CTA='101001002'`, clase `601`, `RTXT='Abono por anulacion cliente ticket <folio origen>'` e `IDFOL=<folio origen>`; `NDOC` se usa cuando existe en el esquema.
+- compatibilidad NDOC devolución (2026-03): al calcular consecutivo `NDOC`, API consulta `NDOC` solo cuando existe en `DAT_CTRL_CTAS`/`DAT_CTR_DOC`; en `DAT_CTRL_CTAS` el insert usa `NDOC` opcional según columnas disponibles para evitar `Invalid column name 'NDOC'`.
+- política de fecha de finalización devolución (2026-03): API reutiliza una fecha actual única del cierre para `FACT_IDFOLDEV` (`FCN/FCNR`), `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, `PV_TICKET_LOG.UPDATED_AT` y movimientos contables asociados.
 - marca ORDs afectadas como anuladas (`PV_CTR_ORDS.ESTATUS=4`).
 - folio devolución termina en `ESTA='PAGADO'` y `AUT='DF'/'APDF'`; el envío a `TRANSMITIR` se realiza después mediante `PATCH /pvctrfolasvr/:idfol`.
 - SQL soporte:

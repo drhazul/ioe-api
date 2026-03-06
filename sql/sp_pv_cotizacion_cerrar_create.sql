@@ -16,6 +16,7 @@ BEGIN
   DECLARE @tipotranNorm NVARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPOTRAN, ''))));
   DECLARE @opvNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@IDOPV, ''))), '');
   DECLARE @epsilon DECIMAL(18, 6) = 0.0001;
+  DECLARE @fechaProceso DATETIME = GETDATE();
 
   DECLARE @sucDb NVARCHAR(255);
   DECLARE @clien FLOAT;
@@ -446,7 +447,7 @@ BEGIN
         VALUES (
           @pIDF,
           @pIDFOL,
-          GETDATE(),
+          @pNOW,
           @pFORM,
           @pIMPP,
           @pIMPC' +
@@ -457,9 +458,10 @@ BEGIN
 
       EXEC sys.sp_executesql
         @sql,
-        N'@pIDF NVARCHAR(255), @pIDFOL NVARCHAR(255), @pFORM NVARCHAR(40), @pIMPP MONEY, @pIMPC MONEY, @pIMPD MONEY, @pAUT NVARCHAR(255)',
+        N'@pIDF NVARCHAR(255), @pIDFOL NVARCHAR(255), @pNOW DATETIME, @pFORM NVARCHAR(40), @pIMPP MONEY, @pIMPC MONEY, @pIMPD MONEY, @pAUT NVARCHAR(255)',
         @pIDF = @execIdf,
         @pIDFOL = @idfolNorm,
+        @pNOW = @fechaProceso,
         @pFORM = @formaForm,
         @pIMPP = @formaImpp,
         @pIMPC = @impc,
@@ -570,15 +572,15 @@ BEGIN
                 CASE WHEN @docHasIDOPV = 1 THEN N', @pOPV' ELSE N'' END +
                 CASE WHEN @docHasTIPO = 1 THEN N', @pTIPO' ELSE N'' END +
                 CASE WHEN @docHasRTXT = 1 THEN N', @pRTXT' ELSE N'' END +
-                CASE WHEN @docHasFCND = 1 THEN N', GETDATE()' ELSE N'' END +
-                CASE WHEN @docHasFCN = 1 THEN N', GETDATE()' ELSE N'' END +
-                CASE WHEN @docHasFCNR = 1 THEN N', GETDATE()' ELSE N'' END +
-                CASE WHEN @docHasFECHA = 1 THEN N', GETDATE()' ELSE N'' END + N'
+                CASE WHEN @docHasFCND = 1 THEN N', @pNOW' ELSE N'' END +
+                CASE WHEN @docHasFCN = 1 THEN N', @pNOW' ELSE N'' END +
+                CASE WHEN @docHasFCNR = 1 THEN N', @pNOW' ELSE N'' END +
+                CASE WHEN @docHasFECHA = 1 THEN N', @pNOW' ELSE N'' END + N'
               );';
 
             EXEC sys.sp_executesql
               @sql,
-              N'@pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pCLIENT FLOAT, @pCTA NVARCHAR(255), @pCLSD INT, @pIMPT_POS MONEY, @pSUC NVARCHAR(255), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(40), @pRTXT NVARCHAR(255)',
+              N'@pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pCLIENT FLOAT, @pCTA NVARCHAR(255), @pCLSD INT, @pIMPT_POS MONEY, @pSUC NVARCHAR(255), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(40), @pRTXT NVARCHAR(255), @pNOW DATETIME',
               @pNDOC = @ndoc,
               @pIDFOL = @idfolNorm,
               @pCLIENT = @clien,
@@ -588,7 +590,8 @@ BEGIN
               @pSUC = @sucDb,
               @pOPV = @opvNorm,
               @pTIPO = @formaForm,
-              @pRTXT = @cargoRtxt;
+              @pRTXT = @cargoRtxt,
+              @pNOW = @fechaProceso;
           END
         END
 
@@ -656,15 +659,15 @@ BEGIN
             CASE WHEN @ctrlHasIDOPV = 1 THEN N', @pOPV' ELSE N'' END +
             CASE WHEN @ctrlHasTIPO = 1 THEN N', @pTIPO' ELSE N'' END +
             CASE WHEN @ctrlHasRTXT = 1 THEN N', @pRTXT' ELSE N'' END +
-            CASE WHEN @ctrlHasFCND = 1 THEN N', GETDATE()' ELSE N'' END +
-            CASE WHEN @ctrlHasFCN = 1 THEN N', GETDATE()' ELSE N'' END +
-            CASE WHEN @ctrlHasFCNR = 1 THEN N', GETDATE()' ELSE N'' END +
-            CASE WHEN @ctrlHasFECHA = 1 THEN N', GETDATE()' ELSE N'' END + N'
+            CASE WHEN @ctrlHasFCND = 1 THEN N', @pNOW' ELSE N'' END +
+            CASE WHEN @ctrlHasFCN = 1 THEN N', @pNOW' ELSE N'' END +
+            CASE WHEN @ctrlHasFCNR = 1 THEN N', @pNOW' ELSE N'' END +
+            CASE WHEN @ctrlHasFECHA = 1 THEN N', @pNOW' ELSE N'' END + N'
           );';
 
         EXEC sys.sp_executesql
           @sql,
-          N'@pCTA NVARCHAR(255), @pCLIENT FLOAT, @pCLSD INT, @pIMPT_NEG MONEY, @pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pSUC NVARCHAR(255), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(40), @pRTXT NVARCHAR(255)',
+          N'@pCTA NVARCHAR(255), @pCLIENT FLOAT, @pCLSD INT, @pIMPT_NEG MONEY, @pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pSUC NVARCHAR(255), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(40), @pRTXT NVARCHAR(255), @pNOW DATETIME',
           @pCTA = '101001002',
           @pCLIENT = @clien,
           @pCLSD = 602,
@@ -674,7 +677,8 @@ BEGIN
           @pSUC = @sucDb,
           @pOPV = @opvNorm,
           @pTIPO = @formaForm,
-          @pRTXT = @cargoRtxt;
+          @pRTXT = @cargoRtxt,
+          @pNOW = @fechaProceso;
       END
 
       FETCH NEXT FROM forma_cursor INTO @formaForm, @formaImpp, @formaAut;
@@ -705,19 +709,20 @@ BEGIN
         CASE WHEN @headHasREQF = 1 THEN N', REQF = @pRQFAC' ELSE N'' END +
         CASE WHEN @headHasRQFAC = 1 THEN N', RQFAC = @pRQFAC' ELSE N'' END +
         CASE WHEN @headHasAUT = 1 THEN N', AUT = @pTIPOTRAN' ELSE N'' END +
-        CASE WHEN @headHasFCNM = 1 THEN N', FCNM = GETDATE()' ELSE N'' END +
+        CASE WHEN @headHasFCNM = 1 THEN N', FCNM = @pNOW' ELSE N'' END +
         CASE WHEN @headHasOPVM = 1 THEN N', OPVM = @pOPV' ELSE N'' END + N'
       WHERE IDFOL = @pIDFOL';
     SET @execRqfac = CASE WHEN @tipotranNorm = 'CA' THEN 0 ELSE CASE WHEN @RQFAC = 1 THEN 1 ELSE 0 END END;
 
     EXEC sys.sp_executesql
       @sql,
-      N'@pTOTAL MONEY, @pRQFAC INT, @pTIPOTRAN NVARCHAR(10), @pOPV NVARCHAR(255), @pIDFOL NVARCHAR(255)',
+      N'@pTOTAL MONEY, @pRQFAC INT, @pTIPOTRAN NVARCHAR(10), @pOPV NVARCHAR(255), @pIDFOL NVARCHAR(255), @pNOW DATETIME',
       @pTOTAL = @totalFinal,
       @pRQFAC = @execRqfac,
       @pTIPOTRAN = @tipotranNorm,
       @pOPV = @opvNorm,
-      @pIDFOL = @idfolNorm;
+      @pIDFOL = @idfolNorm,
+      @pNOW = @fechaProceso;
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0
       COMMIT TRANSACTION;

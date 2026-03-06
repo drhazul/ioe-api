@@ -1637,6 +1637,7 @@ BEGIN
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
   DECLARE @formasJsonNorm NVARCHAR(MAX) = LTRIM(RTRIM(ISNULL(@FORMAS_JSON, '')));
   DECLARE @userNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@USER, ''))), '');
+  DECLARE @fechaProceso DATETIME = GETDATE();
   DECLARE @sucDb NVARCHAR(20);
   DECLARE @opvDb NVARCHAR(255);
   DECLARE @clien FLOAT;
@@ -1881,7 +1882,7 @@ BEGIN
         N') VALUES (' +
         CASE WHEN @hasIDF = 1 AND @idfIsIdentity = 0 THEN N'@pIDF, ' ELSE N'' END +
         N'@pIDFOL' +
-        CASE WHEN @hasFCN = 1 THEN N', GETDATE()' ELSE N'' END +
+        CASE WHEN @hasFCN = 1 THEN N', @pNOW' ELSE N'' END +
         N', @pFORM' +
         CASE WHEN @hasIMPA = 1 THEN N', NULL' ELSE N'' END +
         N', @pIMPP' +
@@ -1894,9 +1895,10 @@ BEGIN
 
       EXEC sys.sp_executesql
         @sql,
-        N'@pIDF NVARCHAR(255), @pIDFOL NVARCHAR(255), @pFORM NVARCHAR(40), @pIMPP DECIMAL(18,4), @pIMPC DECIMAL(18,4), @pIMPD DECIMAL(18,4), @pAUT NVARCHAR(255)',
+        N'@pIDF NVARCHAR(255), @pIDFOL NVARCHAR(255), @pNOW DATETIME, @pFORM NVARCHAR(40), @pIMPP DECIMAL(18,4), @pIMPC DECIMAL(18,4), @pIMPD DECIMAL(18,4), @pAUT NVARCHAR(255)',
         @pIDF = @execIdf,
         @pIDFOL = @idfolNorm,
+        @pNOW = @fechaProceso,
         @pFORM = @formaForm,
         @pIMPP = @formaImpp,
         @pIMPC = @impc,
@@ -2076,8 +2078,8 @@ BEGIN
           BEGIN
             SET @ndoc = CONCAT(
               'PS',
-              CONVERT(VARCHAR(8), GETDATE(), 112),
-              REPLACE(CONVERT(VARCHAR(8), GETDATE(), 108), ':', ''),
+              CONVERT(VARCHAR(8), @fechaProceso, 112),
+              REPLACE(CONVERT(VARCHAR(8), @fechaProceso, 108), ':', ''),
               RIGHT(REPLACE(CONVERT(VARCHAR(36), NEWID()), '-', ''), 6)
             );
             SET @opvAudit = COALESCE(@userNorm, @opvDb);
@@ -2112,15 +2114,15 @@ BEGIN
                 CASE WHEN @ctrlHasIDOPV = 1 THEN N', @pOPV' ELSE N'' END +
                 CASE WHEN @ctrlHasTIPO = 1 THEN N', @pTIPO' ELSE N'' END +
                 CASE WHEN @ctrlHasRTXT = 1 THEN N', @pRTXT' ELSE N'' END +
-                CASE WHEN @ctrlHasFCND = 1 THEN N', GETDATE()' ELSE N'' END +
-                CASE WHEN @ctrlHasFCN = 1 THEN N', GETDATE()' ELSE N'' END +
-                CASE WHEN @ctrlHasFCNR = 1 THEN N', GETDATE()' ELSE N'' END +
-                CASE WHEN @ctrlHasFECHA = 1 THEN N', GETDATE()' ELSE N'' END + N'
+                CASE WHEN @ctrlHasFCND = 1 THEN N', @pNOW' ELSE N'' END +
+                CASE WHEN @ctrlHasFCN = 1 THEN N', @pNOW' ELSE N'' END +
+                CASE WHEN @ctrlHasFCNR = 1 THEN N', @pNOW' ELSE N'' END +
+                CASE WHEN @ctrlHasFECHA = 1 THEN N', @pNOW' ELSE N'' END + N'
               );';
 
             EXEC sys.sp_executesql
               @sql,
-              N'@pCTA NVARCHAR(255), @pCLIENT FLOAT, @pCLSD INT, @pIMPT DECIMAL(18,4), @pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pSUC NVARCHAR(20), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(10), @pRTXT NVARCHAR(255)',
+              N'@pCTA NVARCHAR(255), @pCLIENT FLOAT, @pCLSD INT, @pIMPT DECIMAL(18,4), @pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pSUC NVARCHAR(20), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(10), @pRTXT NVARCHAR(255), @pNOW DATETIME',
               @pCTA = @cta,
               @pCLIENT = @clien,
               @pCLSD = @movClass,
@@ -2130,7 +2132,8 @@ BEGIN
               @pSUC = @sucDb,
               @pOPV = @opvAudit,
               @pTIPO = @lineTipps,
-              @pRTXT = @rtxt;
+              @pRTXT = @rtxt,
+              @pNOW = @fechaProceso;
           END;
 
           FETCH NEXT FROM line_cursor INTO @lineTipps, @lineOrd, @lineTotal;
@@ -2146,7 +2149,7 @@ BEGIN
       IMPT = CASE WHEN @isCashOut = 1 THEN (@total * -1) ELSE @total END,
       IMPP = @sumPagos,
       FPGO = 'FINALIZADO',
-      FCNM = GETDATE(),
+      FCNM = @fechaProceso,
       OPVM = COALESCE(@userNorm, OPVM)
     WHERE IDFOL = @idfolNorm;
 
