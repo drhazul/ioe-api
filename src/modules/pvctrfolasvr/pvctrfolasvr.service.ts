@@ -13,6 +13,11 @@ import { UpdatePvCtrFolAsvrDto } from './dto/update-pvctrfolasvr.dto';
 import { CreatePvCtrFolAsvrAutoDto } from './dto/create-pvctrfolasvr-auto.dto';
 import { ListPvCtrFolAsvrQueryDto } from './dto/list-pvctrfolasvr-query.dto';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import {
+  inferOrigenAut,
+  normalizeAut,
+  normalizeEstadoOperativo,
+} from './pv-folio-homologation.util';
 
 @Injectable()
 export class PvCtrFolAsvrService {
@@ -71,7 +76,7 @@ export class PvCtrFolAsvrService {
     }
 
     const params: unknown[] = [];
-    const where: string[] = ["a.ESTA IN ('PENDIENTE','PAGADO','EDITANDO')"];
+    const where: string[] = ["a.ESTA IN ('PENDIENTE','PAGADO','TRANSMITIR')"];
 
     if (suc.length > 0) {
       where.push(`a.SUC = @${params.length}`);
@@ -104,7 +109,9 @@ export class PvCtrFolAsvrService {
       params,
     );
 
-    return rows ?? [];
+    const items = (rows ?? []) as Record<string, unknown>[];
+    await Promise.all(items.map((row) => this.regularizeHistoricalFolioRow(row)));
+    return items;
   }
 
   async findOneForRead(idfol: string) {
@@ -121,6 +128,7 @@ export class PvCtrFolAsvrService {
     );
     const row = rows?.[0];
     if (!row) throw new NotFoundException(`PV_CTR_FOL_ASVR ${idfol} no existe`);
+    await this.regularizeHistoricalFolioRow(row as Record<string, unknown>);
     return row;
   }
 
@@ -134,6 +142,15 @@ export class PvCtrFolAsvrService {
     const exists = await this.repo.exist({ where: { IDFOL: dto.IDFOL } });
     if (exists) throw new ConflictException(`IDFOL ${dto.IDFOL} ya existe`);
 
+    const aut = normalizeAut(dto.AUT ?? 'CP');
+    const esta = normalizeEstadoOperativo(dto.ESTA ?? 'PENDIENTE');
+    const idfolInicial = String(dto.IDFOLINICIAL ?? dto.IDFOL ?? '').trim() || dto.IDFOL;
+    const origenAut = inferOrigenAut({
+      aut,
+      origenAut: dto.ORIGEN_AUT,
+      fallback: 'CA',
+    });
+
     const entity = this.repo.create({
       IDFOL: dto.IDFOL,
       CLIEN: dto.CLIEN ?? null,
@@ -143,16 +160,18 @@ export class PvCtrFolAsvrService {
       TER: dto.TER ?? null,
       TRA: dto.TRA ?? null,
       OPV: dto.OPV ?? null,
-      ESTA: dto.ESTA ?? null,
+      ESTA: esta,
       IMPT: dto.IMPT ?? null,
       FPGO: dto.FPGO ?? null,
       IMPP: dto.IMPP ?? null,
-      AUT: dto.AUT ?? null,
+      AUT: aut,
       REQF: dto.REQF ?? null,
       FCNM: dto.FCNM ? new Date(dto.FCNM) : null,
       OPVM: dto.OPVM ?? null,
       MOD: dto.MOD ?? null,
       IDFOLORIG: dto.IDFOLORIG ?? null,
+      IDFOLINICIAL: idfolInicial,
+      ORIGEN_AUT: origenAut,
     });
 
     return this.repo.save(entity);
@@ -209,6 +228,8 @@ export class PvCtrFolAsvrService {
     );
     if (!rows?.length)
       throw new NotFoundException(`PV_CTR_FOL_ASVR ${idfol} no existe`);
+
+    await this.regularizeHistoricalFolioRow(rows[0] as Record<string, unknown>);
     return rows[0];
   }
 
@@ -223,20 +244,36 @@ export class PvCtrFolAsvrService {
     if (dto.TER !== undefined) partial.TER = dto.TER ?? null;
     if (dto.TRA !== undefined) partial.TRA = dto.TRA ?? null;
     if (dto.OPV !== undefined) partial.OPV = dto.OPV ?? null;
-    if (dto.ESTA !== undefined) partial.ESTA = dto.ESTA ?? null;
+    if (dto.ESTA !== undefined)
+      partial.ESTA = normalizeEstadoOperativo(dto.ESTA ?? 'PENDIENTE');
     if (dto.IMPT !== undefined) partial.IMPT = dto.IMPT ?? null;
     if (dto.FPGO !== undefined) partial.FPGO = dto.FPGO ?? null;
     if (dto.IMPP !== undefined) partial.IMPP = dto.IMPP ?? null;
-    if (dto.AUT !== undefined) partial.AUT = dto.AUT ?? null;
+    if (dto.AUT !== undefined) partial.AUT = normalizeAut(dto.AUT);
     if (dto.REQF !== undefined) partial.REQF = dto.REQF ?? null;
     if (dto.FCNM !== undefined)
       partial.FCNM = dto.FCNM ? new Date(dto.FCNM) : null;
     if (dto.OPVM !== undefined) partial.OPVM = dto.OPVM ?? null;
     if (dto.MOD !== undefined) partial.MOD = dto.MOD ?? null;
     if (dto.IDFOLORIG !== undefined) partial.IDFOLORIG = dto.IDFOLORIG ?? null;
+    if (dto.IDFOLINICIAL !== undefined)
+      partial.IDFOLINICIAL = String(dto.IDFOLINICIAL ?? '').trim() || row.IDFOL;
+    if (dto.ORIGEN_AUT !== undefined)
+      partial.ORIGEN_AUT = inferOrigenAut({
+        aut: dto.AUT ?? row.AUT,
+        origenAut: dto.ORIGEN_AUT,
+        fallback: inferOrigenAut({ aut: row.AUT, origenAut: row.ORIGEN_AUT }),
+      });
 
-    const updated = this.repo.merge(row, partial);
-    return this.repo.save(updated);
+    const merged = this.repo.merge(row, partial);
+    merged.IDFOLINICIAL = String(merged.IDFOLINICIAL ?? '').trim() || merged.IDFOL;
+    merged.ORIGEN_AUT = inferOrigenAut({
+      aut: merged.AUT,
+      origenAut: merged.ORIGEN_AUT,
+      fallback: 'CA',
+    });
+
+    return this.repo.save(merged);
   }
 
   async remove(idfol: string) {
@@ -264,5 +301,46 @@ export class PvCtrFolAsvrService {
 
   private normalizeUpper(value: string) {
     return this.normalizeText(value).toUpperCase();
+  }
+
+  private async regularizeHistoricalFolioRow(row: Record<string, unknown>) {
+    const idfol = this.normalizeText(String(row?.IDFOL ?? ''));
+    if (!idfol) return;
+
+    const currentInicial = this.normalizeText(String(row?.IDFOLINICIAL ?? ''));
+    const currentAut = normalizeAut(row?.AUT ?? '');
+    const currentEsta = this.normalizeUpper(String(row?.ESTA ?? ''));
+    const currentOrigen = this.normalizeUpper(String(row?.ORIGEN_AUT ?? ''));
+
+    const nextInicial = currentInicial || idfol;
+    const nextEsta = normalizeEstadoOperativo(currentEsta || 'PENDIENTE');
+    const nextOrigen = inferOrigenAut({
+      aut: currentAut,
+      origenAut: currentOrigen,
+      fallback: 'CA',
+    });
+
+    const needsUpdate =
+      currentInicial !== nextInicial ||
+      currentEsta !== nextEsta ||
+      currentOrigen !== nextOrigen;
+
+    if (!needsUpdate) return;
+
+    await this.dataSource.query(
+      `
+      UPDATE dbo.PV_CTR_FOL_ASVR
+      SET
+        IDFOLINICIAL = @1,
+        ORIGEN_AUT = @2,
+        ESTA = @3
+      WHERE IDFOL = @0
+      `,
+      [idfol, nextInicial, nextOrigen, nextEsta],
+    );
+
+    row.IDFOLINICIAL = nextInicial;
+    row.ORIGEN_AUT = nextOrigen;
+    row.ESTA = nextEsta;
   }
 }

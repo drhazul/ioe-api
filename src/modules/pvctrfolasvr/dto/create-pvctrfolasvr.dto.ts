@@ -108,4 +108,16 @@ export class CreatePvCtrFolAsvrDto {
   @IsString()
   @Length(0, 50)
   IDFOLORIG?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  IDFOLINICIAL?: string;
+
+  @ApiPropertyOptional({ enum: ['CA', 'VF'] })
+  @IsOptional()
+  @IsString()
+  @Length(0, 2)
+  ORIGEN_AUT?: string;
 }

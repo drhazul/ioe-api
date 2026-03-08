@@ -104,9 +104,9 @@ export class PvDevolucionesService {
     'DEUDOR',
   ]);
 
-  private static readonly DEV_AUT_INICIALES = new Set(['DP', 'APDP']);
-  private static readonly DEV_AUT_FINALES = new Set(['DF', 'APDF']);
-  private static readonly DEV_AUT_ALL = new Set(['DP', 'APDP', 'DF', 'APDF']);
+  private static readonly DEV_AUT_INICIALES = new Set(['DCA', 'DVF']);
+  private static readonly DEV_AUT_FINALES = new Set(['DCA', 'DVF']);
+  private static readonly DEV_AUT_ALL = new Set(['DCA', 'DVF']);
   private static readonly ORIG_AUT_VALIDOS = new Set(['VF', 'CA', 'APF']);
 
   private static readonly CTA_CTRL_CTAS = '101001002';
@@ -170,8 +170,8 @@ export class PvDevolucionesService {
       LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
       WHERE a.SUC = @0
         AND (
-              (a.OPV  = @1 AND a.ESTA IN ('DEV PEND','PAGADO') AND a.AUT IN ('DP','APDP','DF','APDF'))
-           OR (a.OPVM = @1 AND a.ESTA IN ('DEV PEND','PAGADO') AND a.AUT IN ('DP','APDP','DF','APDF'))
+              (a.OPV  = @1 AND a.ESTA IN ('PENDIENTE','PAGADO','TRANSMITIR') AND a.AUT IN ('DCA','DVF'))
+           OR (a.OPVM = @1 AND a.ESTA IN ('PENDIENTE','PAGADO','TRANSMITIR') AND a.AUT IN ('DCA','DVF'))
         )
         AND (
           @2 = ''
@@ -937,25 +937,20 @@ export class PvDevolucionesService {
   }
 
   private assertDevolucionEditable(context: DevolucionContext) {
-    if (!PvDevolucionesService.DEV_AUT_INICIALES.has(context.autDev)) {
-      throw new ConflictException(
-        `La devolución ${context.idfolDev} ya fue finalizada`,
-      );
-    }
     const estado = this.normalizeUpper(context.estaDev ?? '');
-    if (estado.includes('TRANSMITIR')) {
+    if (estado === 'PAGADO' || estado === 'TRANSMITIR') {
       throw new ConflictException(
-        `La devolución ${context.idfolDev} ya está en TRANSMITIR`,
+        `La devolución ${context.idfolDev} ya no es editable por estado ${estado}`,
       );
     }
   }
 
   private resolveAutDevolucionInicial(origAut: string) {
-    return this.normalizeUpper(origAut) === 'APF' ? 'APDP' : 'DP';
+    return this.normalizeUpper(origAut) === 'CA' ? 'DCA' : 'DVF';
   }
 
   private resolveAutDevolucionFinal(devAut: string) {
-    return this.normalizeUpper(devAut) === 'APDP' ? 'APDF' : 'DF';
+    return this.normalizeUpper(devAut) === 'DCA' ? 'DCA' : 'DVF';
   }
 
   private async ensureStagingTable(executor: SqlExecutor) {
@@ -1356,7 +1351,7 @@ export class PvDevolucionesService {
       SET
         IDFOLORIG = @1,
         CLIEN = @2,
-        ESTA = 'DEV PEND',
+        ESTA = 'PENDIENTE',
         AUT = @3,
         IMPT = 0,
         REQF = @4,

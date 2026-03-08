@@ -18,6 +18,11 @@ import { SetPsTicketReferenceGastoDto } from './dto/set-ps-ticket-reference-gast
 import { UpdatePsFolioClienteDto } from './dto/update-ps-folio-cliente.dto';
 import { UpdatePsTicketPvtaDto } from './dto/update-ps-ticket-pvta.dto';
 import { FinalizePsPagoDto } from './dto/finalize-ps-pago.dto';
+import {
+  inferOrigenAut,
+  normalizeAut,
+  normalizeEstadoOperativo,
+} from '../pvctrfolasvr/pv-folio-homologation.util';
 
 type FolioRow = {
   IDFOL: string;
@@ -25,6 +30,9 @@ type FolioRow = {
   ESTA: string | null;
   OPV: string | null;
   CLIEN: number | null;
+  AUT: string | null;
+  ORIGEN_AUT: string | null;
+  IDFOLINICIAL: string | null;
 };
 
 @Injectable()
@@ -150,6 +158,13 @@ export class PagosServiciosService {
         [suc, ter, opv, this.auditActor(user)],
       );
       const created = this.firstRow(rows);
+      const idfol = this.normalize(created?.IDFOL ?? '');
+      if (idfol) {
+        await this.regularizePsFolioById(idfol, {
+          autHint: 'PS',
+          origenHint: 'CA',
+        });
+      }
 
       await this.auditMutation({
         action: 'PS_FOLIO_CREATE',
@@ -181,10 +196,14 @@ export class PagosServiciosService {
       );
       const row = this.firstRow(rows);
 
-      const header = this.parseJsonObject(row?.HEADER_JSON) ?? {
+      const header = {
         IDFOL: folio.IDFOL,
         SUC: folio.SUC,
         ESTA: folio.ESTA,
+        AUT: folio.AUT,
+        ORIGEN_AUT: folio.ORIGEN_AUT,
+        IDFOLINICIAL: folio.IDFOLINICIAL,
+        ...(this.parseJsonObject(row?.HEADER_JSON) ?? {}),
       };
 
       return {
@@ -258,6 +277,12 @@ export class PagosServiciosService {
         [folio.IDFOL, ids, this.auditActor(user)],
       );
       const result = this.firstRow(rows);
+      if (ids === 'DC' || ids === 'DG') {
+        await this.regularizePsFolioById(folio.IDFOL, {
+          autHint: ids,
+          origenHint: 'CA',
+        });
+      }
 
       await this.auditMutation({
         action: 'PS_TICKET_ADD_SERVICE',
@@ -367,12 +392,16 @@ export class PagosServiciosService {
   ) {
     try {
       const folio = await this.loadFolio(idFolRaw, user);
+      const refIdfol = this.normalize(dto.idFolRef);
+      const refOrigen = await this.resolveReferenceOriginByFolio(refIdfol);
+      await this.assertNoMixedOrigen(folio, refOrigen);
+
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_ps_ticket_set_reference_folio @IDFOL_ACTUAL=@0, @TICKET_LINE_ID=@1, @IDFOL_REF=@2, @USER=@3',
         [
           folio.IDFOL,
           this.normalize(dto.art),
-          this.normalize(dto.idFolRef),
+          refIdfol,
           this.auditActor(user),
         ],
       );
@@ -410,6 +439,8 @@ export class PagosServiciosService {
   ) {
     try {
       const folio = await this.loadFolio(idFolRaw, user);
+      await this.assertNoMixedOrigen(folio, 'CA');
+
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_ps_ticket_set_reference_gasto @IDFOL_ACTUAL=@0, @TICKET_LINE_ID=@1, @REFGASTO=@2, @USER=@3',
         [
@@ -718,6 +749,9 @@ export class PagosServiciosService {
         SUC,
         ESTA,
         OPV,
+        AUT,
+        ORIGEN_AUT,
+        IDFOLINICIAL,
         TRY_CONVERT(FLOAT, CLIEN) AS CLIEN
       FROM dbo.PV_CTR_FOL_ASVR
       WHERE IDFOL = @0
@@ -730,6 +764,7 @@ export class PagosServiciosService {
       throw new NotFoundException(`Folio PS ${idFol} no existe`);
     }
 
+    await this.regularizePsFolioRow(row);
     this.assertFolioAccess(row, user);
     return row;
   }
@@ -753,6 +788,122 @@ export class PagosServiciosService {
       throw new ForbiddenException(
         'No autorizado para operar folios PS de otra sucursal',
       );
+    }
+  }
+
+  private async regularizePsFolioById(
+    idFol: string,
+    hints?: { autHint?: string; origenHint?: 'CA' | 'VF' },
+  ) {
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        IDFOL,
+        SUC,
+        ESTA,
+        OPV,
+        AUT,
+        ORIGEN_AUT,
+        IDFOLINICIAL,
+        TRY_CONVERT(FLOAT, CLIEN) AS CLIEN
+      FROM dbo.PV_CTR_FOL_ASVR
+      WHERE IDFOL = @0
+      `,
+      [idFol],
+    );
+
+    const row = this.firstRow(rows) as FolioRow | null;
+    if (!row) return;
+
+    if (hints?.autHint) row.AUT = hints.autHint;
+    if (hints?.origenHint) row.ORIGEN_AUT = hints.origenHint;
+
+    await this.regularizePsFolioRow(row);
+  }
+
+  private async regularizePsFolioRow(row: FolioRow) {
+    const aut = normalizeAut(row.AUT ?? 'PS');
+    const esta = normalizeEstadoOperativo(row.ESTA ?? 'PENDIENTE');
+    const idfolInicial = this.normalize(row.IDFOLINICIAL ?? '') || row.IDFOL;
+    const origenAut = inferOrigenAut({
+      aut,
+      origenAut: row.ORIGEN_AUT,
+      fallback: 'CA',
+    });
+
+    const needsUpdate =
+      this.normalize(row.AUT) !== aut ||
+      this.normalizeUpper(row.ESTA ?? '') !== esta ||
+      this.normalize(row.IDFOLINICIAL ?? '') !== idfolInicial ||
+      this.normalizeUpper(row.ORIGEN_AUT ?? '') !== origenAut;
+
+    if (!needsUpdate) return;
+
+    await this.dataSource.query(
+      `
+      UPDATE dbo.PV_CTR_FOL_ASVR
+      SET AUT = @1,
+          ESTA = @2,
+          IDFOLINICIAL = @3,
+          ORIGEN_AUT = @4
+      WHERE IDFOL = @0
+      `,
+      [row.IDFOL, aut, esta, idfolInicial, origenAut],
+    );
+
+    row.AUT = aut;
+    row.ESTA = esta;
+    row.IDFOLINICIAL = idfolInicial;
+    row.ORIGEN_AUT = origenAut;
+  }
+
+  private async resolveReferenceOriginByFolio(refIdfol: string): Promise<'CA' | 'VF'> {
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 AUT, ORIGEN_AUT
+      FROM dbo.PV_CTR_FOL_ASVR
+      WHERE IDFOL = @0
+      `,
+      [refIdfol],
+    );
+    const row = this.firstRow(rows);
+    if (!row) {
+      throw new NotFoundException(`Referencia ${refIdfol} no existe`);
+    }
+
+    return inferOrigenAut({
+      aut: row.AUT,
+      origenAut: row.ORIGEN_AUT,
+      fallback: 'CA',
+    });
+  }
+
+  private async assertNoMixedOrigen(folio: FolioRow, targetOrigin: 'CA' | 'VF') {
+    const explicitOrigin = this.normalizeUpper(folio.ORIGEN_AUT ?? '');
+    const aut = normalizeAut(folio.AUT ?? '');
+    const hasExplicit = explicitOrigin === 'CA' || explicitOrigin === 'VF';
+
+    if (hasExplicit && explicitOrigin !== targetOrigin) {
+      throw new ConflictException(
+        `No se permite mezclar referencias de origen ${explicitOrigin} con ${targetOrigin} en la misma transacción de pago de servicio.`,
+      );
+    }
+
+    if (!hasExplicit && aut !== 'PS') {
+      const inferred = inferOrigenAut({ aut, origenAut: explicitOrigin, fallback: 'CA' });
+      if (inferred !== targetOrigin) {
+        throw new ConflictException(
+          `No se permite mezclar referencias de origen ${inferred} con ${targetOrigin} en la misma transacción de pago de servicio.`,
+        );
+      }
+    }
+
+    if (explicitOrigin !== targetOrigin) {
+      await this.dataSource.query(
+        'UPDATE dbo.PV_CTR_FOL_ASVR SET ORIGEN_AUT = @1 WHERE IDFOL = @0',
+        [folio.IDFOL, targetOrigin],
+      );
+      folio.ORIGEN_AUT = targetOrigin;
     }
   }
 
