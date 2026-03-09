@@ -97,10 +97,10 @@ Opcionales:
 - Punto de venta:
 - `/factclientshp`, `/pvctrfolasvr`, `/pvctrfolform`, `/pvctrords`, `/pvctrordsdet`, `/pvticketlog`, `/refdetalle`
 - Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.
-- `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','PAGADO','EDITANDO')` y busqueda por folio/cliente.
+- `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
 - `GET /pvctrfolasvr` (2026-03): la respuesta del listado incluye `RazonSocialReceptor` (join con `FACT_CLIENT_SHP`) para soporte de grilla en frontend.
-- `GET /pvctrfolasvr/:idfol` (2026-03): devuelve vista de lectura con `RazonSocialReceptor` para mantener consistencia de detalle/panel.
+- `GET /pvctrfolasvr/:idfol` (2026-03): devuelve vista de lectura con `RazonSocialReceptor` y resuelve por `IDFOL` actual o `IDFOLINICIAL` para compatibilidad cuando el folio visible cambia de `CP` a `CA/VF`.
 - `/pv/devoluciones/*` (flujo de devoluciones de cotizaciones/ventas/apartados)
 - `/ps/*` (modulo Pago de Servicios: panel, ticket, referencias, pago/finalizacion y terminar)
 - `/retiros/*` (flujo de retiros parciales de caja)
@@ -152,12 +152,13 @@ Opcionales:
 - trazabilidad UI (app, 2026-03): el modal PS de formas excluye `CREDITO` y `DEUDOR`; para formas no `EFECTIVO`, el valor `aut` se asigna reutilizando `ref_detalle_page.dart` de cotizaciones y queda en campo de solo lectura.
 - trazabilidad UI (app, 2026-03): una forma distinta de `EFECTIVO` no puede superar el restante por pagar (`total - pagado`) antes de finalizar.
 - trazabilidad UI (app, 2026-03): en detalle PS, `Procesar servicio` se movió al AppBar.
-- trazabilidad UI (app, 2026-03): en detalle PS, servicios `AD/AP/CR` requieren cliente seleccionado (`CLIEN != 1`) y, si `ESTA='PAGADO2'`, el body queda bloqueado salvo `Procesar servicio`.
+- trazabilidad UI (app, 2026-03): en detalle PS, servicios AD/AP/CR requieren cliente seleccionado (CLIEN != 1) y, si ESTA IN ('PAGADO','TRANSMITIR'), el body queda bloqueado y solo queda disponible la navegación de salida.
 - trazabilidad API (2026-03): `sp_ps_ticket_add_service` y capa Nest validan `AD/AP/CR` con cliente (`CLIEN > 1`) y devuelven `Seleccione Cliente` si no se cumple.
 - trazabilidad API/UI (2026-03): `GET /ps/clientes/:client/adeudos/:idFol/detalle` devuelve todos los registros `DAT_CTRL_CTAS` del folio para mostrarlos en popup tabular desde detalle PS.
 - trazabilidad UI (app, 2026-03): en pago PS, AppBar usa flecha mientras `ESTA != PAGADO`; en `PAGADO` cambia a candado para salida a `TRANSMITIR`. En panel PS, filas `PAGADO` navegan directo a `/ps/:idFol/pago`.
 - trazabilidad UI (app, 2026-03): en impresión de ticket PS, si existen formas no `EFECTIVO`, la app agrega al final voucher `SOPORTE RECEPCION PAGO` por cada forma no efectivo usando datos de `FORMAS_JSON`, totales y contexto del folio.
 - trazabilidad UI (app, 2026-03): el voucher PS incluye espacio en blanco para firma y renglón `Firma cliente` después de `FCN`.
+- trazabilidad UI (app, 2026-03): en PS, el voucher se imprime en un segundo PDF; al cerrar la vista previa del ticket principal, la app solicita confirmación y luego abre la vista previa del voucher.
 - trazabilidad UI (app, 2026-03): se agrega línea de recorte entre `RESUMEN DE ORDS` y `ORDS`; `GRACIAS POR SU CONFIANZA` se imprime después de `RESUMEN DE ORDS` y antes del recorte hacia `ORDS`.
 - trazabilidad UI (app, 2026-03): el ticket PS se homologó al formato de cotizaciones con bloques `DETALLE`, `TOTALES`, `FORMAS`, `TRANSACCION`, `RESUMEN DE ORDS`, `ORDS` (barcode `CODE39` + tabla `JOB/ESF/CIL/EJE`) y vouchers por forma no `EFECTIVO`.
 - `sp_ps_pago_finalize`: toma lote JSON de formas, inserta `PV_CTR_FOL_FORM` (`IMPP/IMPC/IMPD/AUT`), registra movimientos por línea en `DAT_CTRL_CTAS` y actualiza `PV_CTR_FOL_ASVR.ESTA='PAGADO'`.
@@ -274,7 +275,7 @@ Opcionales:
 - Integracion frontend (`ioe_app`):
 - flujo de pago reorganizado en `lib/features/modulos/punto_venta/cotizaciones/pago/*`.
 - se retiro la visualizacion del bloque "Contexto del folio" en la pantalla de pago (sin cambios en API).
-- trazabilidad UI: en cierre `CA`, el selector de formas en app solo permite `EFECTIVO`.
+- trazabilidad UI: en cierre `CA`, el selector de formas en app permite `EFECTIVO` o `CREDITO`.
 - trazabilidad UI: el campo `aut` (Autorizacion / referencia) y boton `Generar/Asignar referencia` se muestran en app para `TARJETA`, `CHEQUE`, `TRANSFERENCIA` y `DEPOSITO 3RO`.
 - trazabilidad UI: la referencia se crea/asigna en `REF_DETALLE` y se retorna `IDREF` al formulario de pago.
 - trazabilidad UI tecnica: app corrigio id temporal de formas para Flutter Web usando `nextInt(0x100000000)`; no cambia API.
@@ -285,6 +286,7 @@ Opcionales:
 - trazabilidad API/UI: al finalizar cierre, app permanece en pantalla de pago y habilita boton `Imprimir ticket`; al presionarlo consulta `GET /pv/cotizaciones/:idfol/cierre/print-preview` para abrir vista previa PDF.
 - trazabilidad UI (app, 2026-03): en ticket de cotización, si hay formas no `EFECTIVO`, la impresión agrega voucher `SOPORTE RECEPCION PAGO` por cada forma no efectivo.
 - trazabilidad UI (app, 2026-03): el voucher de cotización incluye espacio en blanco para firma y renglón `Firma cliente` después de `FCN`.
+- trazabilidad UI (app, 2026-03): en cotizaciones, la app imprime vouchers en un segundo PDF; al cerrar la vista previa del ticket principal solicita confirmación y luego abre la vista previa del voucher (sin cambios de endpoints/payload).
 - trazabilidad UI (app, 2026-03): se agrega línea de recorte entre `RESUMEN DE ORDS` y `ORDS`; `GRACIAS POR SU CONFIANZA` se imprime después de `RESUMEN DE ORDS` y antes del recorte hacia `ORDS`.
 - trazabilidad UI: app realiza prevalidacion de referencias no usadas (`GET /pv/refdetalle`) antes de cerrar; backend sigue validando de forma autoritativa.
 - trazabilidad UI: si esa prevalidacion detecta referencias sin usar, app redirige a `.../cotizaciones/:idfol/ref-detalle` con la referencia detectada para gestionarla antes de reintentar cierre.
@@ -293,11 +295,14 @@ Opcionales:
 - trazabilidad API/UI: al finalizar cierre, backend persiste `PV_CTR_FOL_ASVR.ESTA='PAGADO'` y app mantiene la pantalla de pago para impresion/confirmacion de salida.
 - trazabilidad UI: en estado `PAGADO`, app cambia el boton regresar a icono candado y al presionarlo ejecuta `PATCH /pvctrfolasvr/:idfol` para mover el folio a `ESTA='TRANSMITIR'` y volver al panel.
 - trazabilidad UI: desde panel, filas en `ESTA='PAGADO'` abren directo la vista de pago para completar salida/transmision.
-- trazabilidad UI: el panel incluye estados `PENDIENTE`, `PAGADO` y `EDITANDO` con filtro por `ESTA` (sin depender de `AUT`).
+- trazabilidad UI: el panel incluye estados `PENDIENTE`, `EDITANDO` y `PAGADO` con filtro por `ESTA` (sin depender de `AUT`); `TRANSMITIR` sigue existiendo en la salida operativa, pero ya no aparece en el listado.
+- trazabilidad UI: en `DetalleCotPage` se ocultan en AppBar los campos `IDFOLINICIAL`, `AUT`, `ESTA` y `ORIGEN_AUT`; la API mantiene los mismos datos y contrato.
 - Body de cierre:
 - `{ suc, tipotran: 'CA'|'VF', rqfac, idopv, formas:[{ form, impp, aut? }] }`
 - Procesamiento transaccional:
 - `POST /pv/cotizaciones/:idfol/cierre` ejecuta el SP `dbo.sp_pv_cotizacion_cerrar`.
+- `dbo.sp_pv_next_visible_folio` reserva consecutivos en `DAT_FOLIOS_CONSEC` y normaliza la nomenclatura visible `SUC-YYYYMMDD-CP|CA|VF-####`.
+- `dbo.sp_pvctrfolasvr_create` genera el folio inicial `CP` con esa nomenclatura y fija `IDFOLINICIAL = IDFOL`.
 - Script fuente obligatorio: `sql/sp_pv_cotizacion_cerrar_create.sql`.
 - Script de esquema de formas de pago: `sql/DAT_FORM_schema_alter.sql` (`IDFORM` identity PK + `ESTADO` activo/inactivo).
 - Si el SP no existe en la BD, el endpoint responde `409` indicando instalar ese script.
@@ -305,6 +310,7 @@ Opcionales:
 - Los errores SQL de validacion del SP se retornan como `400/409` con mensaje legible (no `500` generico).
 - Tablas y campos que actualiza:
 - `PV_CTR_FOL_ASVR`: `ESTA='PAGADO'` al finalizar cierre (`TRANSMITIR` se aplica despues en `PATCH` desde frontend al salir), `IMPT=TOTAL`, `AUT='CA'|'VF'` (y `REQF`/campo equivalente si existe).
+- en `CP -> CA/VF`, `sp_pv_cotizacion_cerrar` genera nuevo `IDFOL` visible, conserva `IDFOLINICIAL` y religa `PV_TICKET_LOG`, `PV_CTR_ORDS` y `REF_DETALLE` al folio final dentro de la misma transacción.
 - `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`): insercion transaccional de formas definitivas (`IDF`, `IDFOL`, `FORM`, `IMPP`, `AUT`, ...). En `CREDITO/DEUDOR` guarda `AUT=IDFOL`. En cualquier forma, `IMPD` persiste el total final de la cotizacion (costo total de articulos segun reglas de cierre).
 - política de fecha de finalización cotización (2026-03): `sp_pv_cotizacion_cerrar` aplica fecha de proceso actual al insertar formas (`FCN`), al actualizar cabecera (`FCNM`) y al generar movimientos contables por `CREDITO/DEUDOR` (`DAT_CTR_DOC`/`DAT_CTRL_CTAS`).
 - `PV_CTR_ORDS`: actualizacion de `ESTATUS=2` para las ordenes del `IDFOL` al cerrar.
@@ -313,7 +319,7 @@ Opcionales:
 - `REF_DETALLE` para validar referencias (`IDREF`, `IDFOL`, `TIPO`, `ESTATUS`, `RfcEmisor`, `IMPT`).
 - `DAT_CTRL_CTAS` en `CREDITO/DEUDOR`: inserta cargo con `CMOV=602`, `CTA='101001002'`, `CLIENT`, `IDFOL`, `NDOC`, `IMPT` negativo.
 - Compatibilidad de esquema en `DAT_CTRL_CTAS`: si no existe `CMOV` usa `CLSD`; ademas llena `FCND` y `RTXT` cuando esas columnas existen.
-- Validacion de credito: disponible = `FACT_CLIENT_SHP.L_CRED - SUM(ABS(DAT_CTRL_CTAS.IMPT))` (misma `CTA` y `CLIENT`).
+- Validacion de credito: disponible = `FACT_CLIENT_SHP.L_CRED - MAX(-SUM(DAT_CTRL_CTAS.IMPT), 0)` (misma `CTA` y `CLIENT`; cargos negativos consumen crédito y abonos positivos lo liberan).
 - `NDOC` se genera concurrente en transaccion (sin `DCount`) con base `N6000001+`.
 - compatibilidad SQL: para obtener maximo `NDOC` en cierre se valida existencia de columna con `COL_LENGTH` + SQL dinamico, evitando errores `Invalid column name 'NDOC'` en variantes de esquema.
 - El cierre exige `REF_DETALLE.ESTATUS='PROCESADO'` en formas no efectivo con referencia y rechaza referencias sobrantes sin usar.
@@ -362,12 +368,13 @@ Opcionales:
 - trazabilidad UI (app, 2026-03): en `/punto-venta/devoluciones/:idfolDev/pago`, la tarjeta de contexto oculta `AUT dev`, `AUT origen`, `Tipo` y `Líneas seleccionadas` (sin cambios de API).
 - trazabilidad UI (app): en pago de devolución no se permite agregar, editar ni eliminar formas en la pantalla.
 - trazabilidad UI (app): cuando la devolución queda en `PAGADO`, app muestra candado de salida y al presionarlo manda `PATCH /pvctrfolasvr/:idfol` con `ESTA='TRANSMITIR'`.
-- `GET /pv/devoluciones` devuelve solo folios en `ESTA IN ('DEV PEND','PAGADO')` para filtros por `OPV` y por `OPVM`.
+- `GET /pv/devoluciones` devuelve solo folios en `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` para filtros por `OPV` y por `OPVM`; `TRANSMITIR` se conserva para la salida operativa, no para el panel.
 - trazabilidad UI (app): desde panel, devoluciones en `PAGADO` abren directo la vista de pago.
 - trazabilidad UI (app, 2026-03): desde panel, devoluciones no `PAGADO` con selección previa (`linesSelected > 0` o alguna línea con `CTDD > 0` detectada en `GET /pv/devoluciones/:idfolDev/detalle`) abren directo la vista `/detalle`; sin selección previa, abren la vista de selección de artículos.
 - trazabilidad API/UI (app): la impresión de devolución se dispara con botón explícito y selector 58mm/80mm, consumiendo `GET /pv/devoluciones/:idfolDev/print-preview`.
 - trazabilidad UI (app, 2026-03): en ticket de devolución, si hay formas no `EFECTIVO`, la impresión agrega voucher `SOPORTE RECEPCION PAGO` por cada forma no efectivo.
 - trazabilidad UI (app, 2026-03): el voucher de devolución incluye espacio en blanco para firma y renglón `Firma cliente` después de `FCN`.
+- trazabilidad UI (app, 2026-03): en devoluciones, el voucher se imprime en un segundo PDF; al cerrar la vista previa del ticket principal, la app solicita confirmación y luego abre la vista previa del voucher.
 - trazabilidad UI (app, 2026-03): se agrega línea de recorte entre `RESUMEN DE ORDS` y `ORDS`; `GRACIAS POR SU CONFIANZA` se imprime después de `RESUMEN DE ORDS` y antes del recorte hacia `ORDS`.
 - trazabilidad UI (app, 2026-03): el ticket de devolución se homologó al formato de cotizaciones con bloques `DETALLE`, `TOTALES`, `FORMAS`, `TRANSACCION`, `RESUMEN DE ORDS`, `ORDS` (barcode `CODE39` + tabla `JOB/ESF/CIL/EJE`) y vouchers por forma no `EFECTIVO`.
 - finalización transaccional:

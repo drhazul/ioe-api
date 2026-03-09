@@ -123,7 +123,7 @@ export class PvCtrOrdsService {
     const idfol = dto.idfol.trim();
     const art = dto.art.trim();
     const descArt = (dto.descArt ?? '').trim().slice(0, 255);
-    const estado = dto.estado.trim().toUpperCase();
+    const estado = this.normalizeEstadoOperativo(dto.estado);
     const tipo = dto.tipo.trim();
     const suc = dto.suc.trim().toUpperCase();
     const opv = dto.opv.trim();
@@ -144,10 +144,10 @@ export class PvCtrOrdsService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (estado !== 'EDITANDO') {
+    if (estado !== 'PENDIENTE') {
       this.throwBusinessError(
         'INVALID_STATUS',
-        'El documento no está en estado EDITANDO.',
+        'El documento no está en estado PENDIENTE.',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -416,6 +416,12 @@ export class PvCtrOrdsService {
     if (!Number.isFinite(value)) return false;
     const epsilon = 0.0001;
     return Math.abs(value - 1) < epsilon || Math.abs(value - 0.5) < epsilon;
+  }
+
+  private normalizeEstadoOperativo(value: string): string {
+    const estado = value.trim().toUpperCase();
+    if (estado === 'EDITANDO') return 'PENDIENTE';
+    return estado;
   }
 
   private normalizeOrdValue(raw?: string): string | null {

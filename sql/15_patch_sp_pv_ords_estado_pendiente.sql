@@ -1,3 +1,14 @@
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+/*
+  Homologacion 2026-03-08
+  - El flujo ORD desde cotizacion opera con ESTA=PENDIENTE.
+  - Se mantiene compatibilidad de entrada para estados legacy que equivalen a PENDIENTE.
+*/
+
 CREATE OR ALTER PROCEDURE dbo.sp_pv_ctr_ords_create_from_quote_line
   @IDFOL NVARCHAR(255),
   @ART NVARCHAR(255),
@@ -197,4 +208,5 @@ BEGIN
   END CATCH
 END
 GO
+
 

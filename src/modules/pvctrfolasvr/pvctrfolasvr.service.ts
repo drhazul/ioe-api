@@ -36,12 +36,6 @@ export class PvCtrFolAsvrService {
     const requestedOpv = this.normalizeText(query?.opv ?? '');
     const search = this.normalizeText(query?.search ?? '');
 
-    const hasRequestedFilters =
-      requestedSuc.length > 0 || requestedOpv.length > 0 || search.length > 0;
-    if (!hasRequestedFilters) {
-      return this.repo.find({ order: { IDFOL: 'ASC' } });
-    }
-
     const suc = requestedSuc || (isAdmin ? '' : actorSuc);
     const opv = requestedOpv || (isAdmin ? '' : actorOpv);
 
@@ -76,7 +70,7 @@ export class PvCtrFolAsvrService {
     }
 
     const params: unknown[] = [];
-    const where: string[] = ["a.ESTA IN ('PENDIENTE','PAGADO','TRANSMITIR')"];
+    const where: string[] = ["a.ESTA IN ('PENDIENTE','EDITANDO','PAGADO')"];
 
     if (suc.length > 0) {
       where.push(`a.SUC = @${params.length}`);
@@ -91,7 +85,7 @@ export class PvCtrFolAsvrService {
     if (search.length > 0) {
       const like = `%${search}%`;
       where.push(
-        `(a.IDFOL LIKE @${params.length} OR ISNULL(c.RazonSocialReceptor, '') LIKE @${params.length} OR CAST(ISNULL(a.CLIEN, 0) AS NVARCHAR(50)) LIKE @${params.length})`,
+        `(a.IDFOL LIKE @${params.length} OR ISNULL(a.IDFOLINICIAL, '') LIKE @${params.length} OR ISNULL(c.RazonSocialReceptor, '') LIKE @${params.length} OR CAST(ISNULL(a.CLIEN, 0) AS NVARCHAR(50)) LIKE @${params.length})`,
       );
       params.push(like);
     }
@@ -122,7 +116,9 @@ export class PvCtrFolAsvrService {
         c.RazonSocialReceptor AS RazonSocialReceptor
       FROM dbo.PV_CTR_FOL_ASVR a
       LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
-      WHERE a.IDFOL = @0;
+      WHERE a.IDFOL = @0
+         OR a.IDFOLINICIAL = @0
+      ORDER BY CASE WHEN a.IDFOL = @0 THEN 0 ELSE 1 END, a.FCN DESC, a.FCNM DESC;
       `,
       [idfol],
     );
@@ -133,7 +129,8 @@ export class PvCtrFolAsvrService {
   }
 
   async findOne(idfol: string) {
-    const row = await this.repo.findOne({ where: { IDFOL: idfol } });
+    const resolvedIdfol = await this.resolveCurrentIdfol(idfol);
+    const row = await this.repo.findOne({ where: { IDFOL: resolvedIdfol } });
     if (!row) throw new NotFoundException(`PV_CTR_FOL_ASVR ${idfol} no existe`);
     return row;
   }
@@ -301,6 +298,24 @@ export class PvCtrFolAsvrService {
 
   private normalizeUpper(value: string) {
     return this.normalizeText(value).toUpperCase();
+  }
+
+  private async resolveCurrentIdfol(idfol: string) {
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 IDFOL
+      FROM dbo.PV_CTR_FOL_ASVR
+      WHERE IDFOL = @0
+         OR IDFOLINICIAL = @0
+      ORDER BY CASE WHEN IDFOL = @0 THEN 0 ELSE 1 END, FCN DESC, FCNM DESC;
+      `,
+      [idfol],
+    );
+    const resolved = this.normalizeText(String(rows?.[0]?.IDFOL ?? ''));
+    if (!resolved) {
+      throw new NotFoundException(`PV_CTR_FOL_ASVR ${idfol} no existe`);
+    }
+    return resolved;
   }
 
   private async regularizeHistoricalFolioRow(row: Record<string, unknown>) {

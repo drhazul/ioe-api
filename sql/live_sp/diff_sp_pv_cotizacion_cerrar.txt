@@ -1,0 +1,117 @@
+[=>]   DECLARE @fechaProcesoDate DATE = CONVERT(DATE, GETDATE());
+[=>]   DECLARE @idfolActual NVARCHAR(255);
+[=>]   DECLARE @idfolInicial NVARCHAR(255);
+[=>]   DECLARE @idfolVisibleNuevo NVARCHAR(255);
+[=>]   DECLARE @folioConsecNuevo INT;
+[=>]   DECLARE @traVisibleNuevo NVARCHAR(255);
+[=>]   DECLARE @targetOrigenAut VARCHAR(2);
+[=>]   DECLARE @headHasTRA BIT = 0;
+[=>]   DECLARE @headHasIDFOLINICIAL BIT = 0;
+[=>]   DECLARE @headHasORIGENAUT BIT = 0;
+[=>]       @idfolActual = LTRIM(RTRIM(ISNULL(IDFOL, ''))),
+[=>]       @idfolInicial = ISNULL(NULLIF(LTRIM(RTRIM(IDFOLINICIAL)), ''), LTRIM(RTRIM(ISNULL(IDFOL, '')))),
+[=>]     WHERE IDFOL = @idfolNorm
+[=>]        OR IDFOLINICIAL = @idfolNorm
+[=>]     ORDER BY CASE WHEN IDFOL = @idfolNorm THEN 0 ELSE 1 END, FCN DESC, FCNM DESC;
+[=>]     IF ISNULL(@idfolActual, '') = ''
+[=>]     IF ISNULL(@idfolInicial, '') = ''
+[=>]       SET @idfolInicial = @idfolActual;
+[=>]     SET @targetOrigenAut = CASE WHEN @tipotranNorm = 'VF' THEN 'VF' ELSE 'CA' END;
+[=>]     WHERE IDFOL = @idfolActual;
+[=>]             AND UPPER(LTRIM(RTRIM(ISNULL(R.IDFOL, '')))) = UPPER(@idfolActual)
+[=>]       WHERE UPPER(LTRIM(RTRIM(ISNULL(R.IDFOL, '')))) = UPPER(@idfolActual)
+[=>]     EXEC dbo.sp_pv_next_visible_folio
+[=>]       @SUC = @sucDb,
+[=>]       @TIPO_FOLIO = @tipotranNorm,
+[=>]       @FECHA = @fechaProcesoDate,
+[=>]       @IDFOL_OUT = @idfolVisibleNuevo OUTPUT,
+[=>]       @CONSEC_OUT = @folioConsecNuevo OUTPUT;
+[=>]     IF ISNULL(LTRIM(RTRIM(@idfolVisibleNuevo)), '') = ''
+[=>]       THROW 51029, 'No se pudo generar folio visible final para la cotizacion', 1;
+[=>]     SET @traVisibleNuevo = CONVERT(NVARCHAR(255), @folioConsecNuevo);
+[=>]       @pIDFOL = @idfolActual;
+[=>]       SET @formaAutFinal = CASE
+[=>]         WHEN @formaForm IN ('CREDITO', 'DEUDOR') THEN @idfolVisibleNuevo
+[=>]         ELSE @formaAut
+[=>]       END;
+[=>]         @pIDFOL = @idfolVisibleNuevo,
+[=>]         SET @cargoRtxt = 'Cargo ' + LOWER(@formaForm) + ' ticket ' + @idfolVisibleNuevo;
+[=>]               @pIDFOL = @idfolVisibleNuevo,
+[=>]           @pIDFOL = @idfolVisibleNuevo,
+[=>]     UPDATE dbo.PV_TICKET_LOG
+[=>]     SET IDFOL = @idfolVisibleNuevo
+[=>]     WHERE IDFOL = @idfolActual;
+[=>]     SET
+[=>]       IDFOL = @idfolVisibleNuevo,
+[=>]       ESTATUS = 2
+[=>]     WHERE IDFOL = @idfolActual;
+[=>]     IF OBJECT_ID('dbo.REF_DETALLE') IS NOT NULL
+[=>]       UPDATE dbo.REF_DETALLE
+[=>]       SET IDFOL = @idfolVisibleNuevo
+[=>]       WHERE IDFOL = @idfolActual;
+[=>]       @headHasOPVM = MAX(CASE WHEN UPPER(name) = 'OPVM' THEN 1 ELSE 0 END),
+[=>]       @headHasTRA = MAX(CASE WHEN UPPER(name) = 'TRA' THEN 1 ELSE 0 END),
+[=>]       @headHasIDFOLINICIAL = MAX(CASE WHEN UPPER(name) = 'IDFOLINICIAL' THEN 1 ELSE 0 END),
+[=>]       @headHasORIGENAUT = MAX(CASE WHEN UPPER(name) = 'ORIGEN_AUT' THEN 1 ELSE 0 END)
+[=>]         IDFOL = @pIDFOLNEW,
+[=>]         CASE WHEN @headHasOPVM = 1 THEN N', OPVM = @pOPV' ELSE N'' END +
+[=>]         CASE WHEN @headHasTRA = 1 THEN N', TRA = @pTRA' ELSE N'' END +
+[=>]         CASE WHEN @headHasIDFOLINICIAL = 1 THEN N', IDFOLINICIAL = @pIDFOLINICIAL' ELSE N'' END +
+[=>]         CASE WHEN @headHasORIGENAUT = 1 THEN N', ORIGEN_AUT = @pORIGENAUT' ELSE N'' END + N'
+[=>]       WHERE IDFOL = @pIDFOLOLD';
+[=>]       N'@pIDFOLNEW NVARCHAR(255), @pTOTAL MONEY, @pRQFAC INT, @pTIPOTRAN NVARCHAR(10), @pOPV NVARCHAR(255), @pTRA NVARCHAR(255), @pIDFOLINICIAL NVARCHAR(255), @pORIGENAUT VARCHAR(2), @pIDFOLOLD NVARCHAR(255), @pNOW DATETIME',
+[=>]       @pIDFOLNEW = @idfolVisibleNuevo,
+[=>]       @pTRA = @traVisibleNuevo,
+[=>]       @pIDFOLINICIAL = @idfolInicial,
+[=>]       @pORIGENAUT = @targetOrigenAut,
+[=>]       @pIDFOLOLD = @idfolActual,
+[=>]       @idfolVisibleNuevo AS idfol,
+[=>] 
+[=>] 
+[=>] 
+[<=]   DECLARE @origenAutFinal NVARCHAR(2);
+[<=]     WHERE IDFOL = @idfolNorm;
+[<=]     IF @sucDb IS NULL
+[<=]     WHERE IDFOL = @idfolNorm;
+[<=]             AND UPPER(LTRIM(RTRIM(ISNULL(R.IDFOL, '')))) = UPPER(@idfolNorm)
+[<=]       WHERE UPPER(LTRIM(RTRIM(ISNULL(R.IDFOL, '')))) = UPPER(@idfolNorm)
+[<=]       @pIDFOL = @idfolNorm;
+[<=]       SET @formaAutFinal = CASE WHEN @formaForm IN ('CREDITO', 'DEUDOR') THEN @idfolNorm ELSE @formaAut END;
+[<=]         @pIDFOL = @idfolNorm,
+[<=]         SET @cargoRtxt = 'Cargo ' + LOWER(@formaForm) + ' ticket ' + @idfolNorm;
+[<=]               @pIDFOL = @idfolNorm,
+[<=]           @pIDFOL = @idfolNorm,
+[<=]     SET ESTATUS = 2
+[<=]     WHERE IDFOL = @idfolNorm;
+[<=]       @headHasOPVM = MAX(CASE WHEN UPPER(name) = 'OPVM' THEN 1 ELSE 0 END)
+[<=]         CASE WHEN @headHasOPVM = 1 THEN N', OPVM = @pOPV' ELSE N'' END + N'
+[<=]       WHERE IDFOL = @pIDFOL';
+[<=]       N'@pTOTAL MONEY, @pRQFAC INT, @pTIPOTRAN NVARCHAR(10), @pOPV NVARCHAR(255), @pIDFOL NVARCHAR(255), @pNOW DATETIME',
+[<=]       @pIDFOL = @idfolNorm,
+[<=]     SET @origenAutFinal = CASE WHEN @tipotranNorm = 'VF' THEN 'VF' ELSE 'CA' END;
+[<=]     IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'IDFOLINICIAL') IS NOT NULL
+[<=]       SET @sql = N'
+[<=]         UPDATE dbo.PV_CTR_FOL_ASVR
+[<=]         SET IDFOLINICIAL = CASE
+[<=]           WHEN NULLIF(LTRIM(RTRIM(ISNULL(IDFOLINICIAL, ''''))), '''') IS NULL THEN @pIDFOLINICIAL
+[<=]           ELSE IDFOLINICIAL
+[<=]         END
+[<=]         WHERE IDFOL = @pIDFOL;';
+[<=]       EXEC sys.sp_executesql
+[<=]         @sql,
+[<=]         N'@pIDFOLINICIAL NVARCHAR(255), @pIDFOL NVARCHAR(255)',
+[<=]         @pIDFOLINICIAL = @idfolNorm,
+[<=]         @pIDFOL = @idfolNorm;
+[<=]     IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'ORIGEN_AUT') IS NOT NULL
+[<=]       SET @sql = N'
+[<=]         UPDATE dbo.PV_CTR_FOL_ASVR
+[<=]         SET ORIGEN_AUT = @pORIGENAUT
+[<=]         WHERE IDFOL = @pIDFOL;';
+[<=]       EXEC sys.sp_executesql
+[<=]         @sql,
+[<=]         N'@pORIGENAUT NVARCHAR(2), @pIDFOL NVARCHAR(255)',
+[<=]         @pORIGENAUT = @origenAutFinal,
+[<=]         @pIDFOL = @idfolNorm;
+[<=]       @idfolNorm AS idfol,
+[<=]     BEGIN
+[<=]     END

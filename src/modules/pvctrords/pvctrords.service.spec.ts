@@ -14,7 +14,7 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
     descArt: 'Articulo demo',
     ctd: 1,
     clien: 2,
-    estado: 'EDITANDO',
+    estado: 'PENDIENTE',
     tipo: 'LAB',
     suc: 'DF01',
     opv: '5001',
@@ -72,7 +72,7 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
     expect(dataSource.query).not.toHaveBeenCalled();
   });
 
-  it('rechaza cuando estado != EDITANDO', async () => {
+  it('rechaza cuando estado != PENDIENTE', async () => {
     await assertErrorCode(
       () =>
         service.createFromQuoteLine({
@@ -160,3 +160,4 @@ async function assertErrorCode(
   }
   throw new Error(`Expected HttpException with code ${expectedCode}`);
 }
+

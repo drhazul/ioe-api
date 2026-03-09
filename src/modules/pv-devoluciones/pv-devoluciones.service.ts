@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 import { DataSource, QueryFailedError, QueryRunner } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { inferOrigenAut } from '../pvctrfolasvr/pv-folio-homologation.util';
 import { CreateDevolucionDto } from './dto/create-devolucion.dto';
 import { ListDevolucionesQueryDto } from './dto/list-devoluciones-query.dto';
 import { PagoFinalizarFormaDto } from './dto/pago-finalizar-forma.dto';
@@ -26,6 +27,7 @@ type SqlExecutor = {
 
 type FolioInfo = {
   idfol: string;
+  idfolInicial: string;
   suc: string;
   aut: string;
   esta: string | null;
@@ -35,10 +37,12 @@ type FolioInfo = {
   opv: string | null;
   opvm: string | null;
   idfolOrig: string | null;
+  origenAut: 'CA' | 'VF' | null;
 };
 
 type DevolucionContext = {
   idfolDev: string;
+  idfolInicial: string;
   idfolOrig: string;
   suc: string;
   clien: number | null;
@@ -47,6 +51,7 @@ type DevolucionContext = {
   estaDev: string | null;
   rqfacDefault: boolean;
   tipotran: 'CA' | 'VF';
+  origenAut: 'CA' | 'VF';
   opv: string | null;
   opvm: string | null;
 };
@@ -107,7 +112,7 @@ export class PvDevolucionesService {
   private static readonly DEV_AUT_INICIALES = new Set(['DCA', 'DVF']);
   private static readonly DEV_AUT_FINALES = new Set(['DCA', 'DVF']);
   private static readonly DEV_AUT_ALL = new Set(['DCA', 'DVF']);
-  private static readonly ORIG_AUT_VALIDOS = new Set(['VF', 'CA', 'APF']);
+  private static readonly ORIG_AUT_VALIDOS = new Set(['VF', 'CA']);
 
   private static readonly CTA_CTRL_CTAS = '101001002';
   private static readonly CMOV_DEV_ABONO_ANULACION = 601;
@@ -170,8 +175,8 @@ export class PvDevolucionesService {
       LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
       WHERE a.SUC = @0
         AND (
-              (a.OPV  = @1 AND a.ESTA IN ('PENDIENTE','PAGADO','TRANSMITIR') AND a.AUT IN ('DCA','DVF'))
-           OR (a.OPVM = @1 AND a.ESTA IN ('PENDIENTE','PAGADO','TRANSMITIR') AND a.AUT IN ('DCA','DVF'))
+              (a.OPV  = @1 AND a.ESTA IN ('PENDIENTE','EDITANDO','PAGADO') AND a.AUT IN ('DCA','DVF'))
+           OR (a.OPVM = @1 AND a.ESTA IN ('PENDIENTE','EDITANDO','PAGADO') AND a.AUT IN ('DCA','DVF'))
         )
         AND (
           @2 = ''
@@ -300,19 +305,7 @@ export class PvDevolucionesService {
     return {
       ok: true,
       ordBlockThreshold: this.ordBlockThreshold,
-      header: {
-        idfolDev: context.idfolDev,
-        idfolOrig: context.idfolOrig,
-        suc: context.suc,
-        clien: context.clien,
-        autDev: context.autDev,
-        autOrig: context.autOrig,
-        estaDev: context.estaDev,
-        rqfacDefault: context.rqfacDefault,
-        tipotran: context.tipotran,
-        opv: context.opv,
-        opvm: context.opvm,
-      },
+      header: this.buildDevolucionContextPayload(context),
       lines,
       summary: this.buildSummary(lines),
     };
@@ -506,19 +499,7 @@ export class PvDevolucionesService {
       return {
         ok: true,
         ordBlockThreshold: this.ordBlockThreshold,
-        context: {
-          idfolDev: context.idfolDev,
-          idfolOrig: context.idfolOrig,
-          suc: context.suc,
-          clien: context.clien,
-          autDev: context.autDev,
-          autOrig: context.autOrig,
-          estaDev: context.estaDev,
-          rqfacDefault: context.rqfacDefault,
-          tipotran: context.tipotran,
-          opv: context.opv,
-          opvm: context.opvm,
-        },
+        context: this.buildDevolucionContextPayload(context),
         items,
         summary: {
           lines: items.length,
@@ -573,17 +554,7 @@ export class PvDevolucionesService {
     return {
       ok: true,
       ordBlockThreshold: this.ordBlockThreshold,
-      context: {
-        idfolDev: context.idfolDev,
-        idfolOrig: context.idfolOrig,
-        suc: context.suc,
-        clien: context.clien,
-        autDev: context.autDev,
-        autOrig: context.autOrig,
-        estaDev: context.estaDev,
-        rqfacDefault: context.rqfacDefault,
-        tipotran: context.tipotran,
-      },
+      context: this.buildDevolucionContextPayload(context),
       totals,
       formasSugeridas,
       linesSelected: lines.filter((line) => (line.ctdd ?? 0) > 0).length,
@@ -726,6 +697,23 @@ export class PvDevolucionesService {
         finalizedAt,
       });
 
+      let idfolFinal = context.idfolDev;
+      const tipoVisibleActual = this.extractVisibleFolioType(context.idfolDev);
+      if (tipoVisibleActual !== context.tipotran) {
+        const nextVisible = await this.generateNextVisibleFolio(queryRunner, {
+          suc: context.suc,
+          tipoFolio: context.tipotran,
+          fecha: finalizedAt,
+        });
+        await this.switchDevolucionVisibleFolio(queryRunner, {
+          idfolActual: context.idfolDev,
+          idfolNuevo: nextVisible.idfol,
+          traVisible: nextVisible.consec,
+          finalizedAt,
+        });
+        idfolFinal = nextVisible.idfol;
+      }
+
       await queryRunner.commitTransaction();
 
       await this.audit.log({
@@ -733,10 +721,11 @@ export class PvDevolucionesService {
         ACTION: 'PV_DEV_FINALIZE',
         MODULO: 'punto-venta',
         ENTIDAD: 'PV_CTR_FOL_ASVR',
-        ENTIDAD_ID: context.idfolDev,
+        ENTIDAD_ID: idfolFinal,
         SUC: context.suc,
         METADATA_JSON: JSON.stringify({
-          idfolDev: context.idfolDev,
+          idfolDevInicial: context.idfolDev,
+          idfolDevFinal: idfolFinal,
           idfolOrig: context.idfolOrig,
           autFinal,
           totales: totals,
@@ -750,7 +739,7 @@ export class PvDevolucionesService {
 
       return {
         ok: true,
-        idfolDev: context.idfolDev,
+        idfolDev: idfolFinal,
         total: totals.total,
         cambio,
         status: 'PAGADO',
@@ -937,7 +926,7 @@ export class PvDevolucionesService {
   }
 
   private assertDevolucionEditable(context: DevolucionContext) {
-    const estado = this.normalizeUpper(context.estaDev ?? '');
+    const estado = this.normalizeEstadoOperativoCompat(context.estaDev);
     if (estado === 'PAGADO' || estado === 'TRANSMITIR') {
       throw new ConflictException(
         `La devolución ${context.idfolDev} ya no es editable por estado ${estado}`,
@@ -1030,6 +1019,8 @@ export class PvDevolucionesService {
       SELECT TOP 1 *
       FROM dbo.PV_CTR_FOL_ASVR${lockHint}
       WHERE IDFOL = @0
+         OR IDFOLINICIAL = @0
+      ORDER BY CASE WHEN IDFOL = @0 THEN 0 ELSE 1 END, FCN DESC, FCNM DESC
       `,
       [idfol],
     );
@@ -1041,9 +1032,17 @@ export class PvDevolucionesService {
     if (!suc) {
       throw new BadRequestException(`El folio ${idfol} no tiene SUC válida`);
     }
+    const idfolNorm = this.normalizeText(row.IDFOL);
+    const homologation = await this.ensureFolioHomologationFields(executor, {
+      idfol: idfolNorm,
+      aut: row.AUT,
+      idfolInicial: row.IDFOLINICIAL,
+      origenAut: row.ORIGEN_AUT,
+    });
 
     return {
-      idfol: this.normalizeText(row.IDFOL),
+      idfol: idfolNorm,
+      idfolInicial: homologation.idfolInicial,
       suc,
       aut: this.normalizeUpper(row.AUT),
       esta: this.nullableText(row.ESTA),
@@ -1053,6 +1052,7 @@ export class PvDevolucionesService {
       opv: this.nullableText(row.OPV),
       opvm: this.nullableText(row.OPVM),
       idfolOrig: this.nullableText(row.IDFOLORIG),
+      origenAut: homologation.origenAut,
     };
   }
 
@@ -1066,7 +1066,9 @@ export class PvDevolucionesService {
       `
       SELECT TOP 1
         dev.IDFOL      AS IDFOL_DEV,
+        dev.IDFOLINICIAL AS IDFOLINICIAL_DEV,
         dev.IDFOLORIG  AS IDFOL_ORIG,
+        dev.ORIGEN_AUT AS ORIGEN_AUT_DEV,
         dev.SUC        AS SUC_DEV,
         dev.CLIEN      AS CLIEN_DEV,
         dev.AUT        AS AUT_DEV,
@@ -1074,6 +1076,8 @@ export class PvDevolucionesService {
         dev.REQF       AS REQF_DEV,
         dev.OPV        AS OPV_DEV,
         dev.OPVM       AS OPVM_DEV,
+        orig.IDFOLINICIAL AS IDFOLINICIAL_ORIG,
+        orig.ORIGEN_AUT AS ORIGEN_AUT_ORIG,
         orig.AUT       AS AUT_ORIG,
         orig.REQF      AS REQF_ORIG,
         orig.CLIEN     AS CLIEN_ORIG,
@@ -1082,6 +1086,8 @@ export class PvDevolucionesService {
       LEFT JOIN dbo.PV_CTR_FOL_ASVR orig
         ON orig.IDFOL = dev.IDFOLORIG
       WHERE dev.IDFOL = @0
+         OR dev.IDFOLINICIAL = @0
+      ORDER BY CASE WHEN dev.IDFOL = @0 THEN 0 ELSE 1 END, dev.FCN DESC, dev.FCNM DESC
       `,
       [idfolDev],
     );
@@ -1089,6 +1095,7 @@ export class PvDevolucionesService {
       throw new NotFoundException(`La devolución ${idfolDev} no existe`);
     }
     const row = rows[0] as Record<string, unknown>;
+    const idfolDevNorm = this.normalizeText(row.IDFOL_DEV);
     const autDev = this.normalizeUpper(row.AUT_DEV);
     if (!PvDevolucionesService.DEV_AUT_ALL.has(autDev)) {
       throw new NotFoundException(
@@ -1111,19 +1118,31 @@ export class PvDevolucionesService {
       );
     }
 
-    const autOrig = this.normalizeUpper(row.AUT_ORIG);
-    if (!PvDevolucionesService.ORIG_AUT_VALIDOS.has(autOrig)) {
-      throw new ConflictException(
-        `El folio origen ${idfolOrig} no es devolvible por AUT=${autOrig || 'N/D'}`,
-      );
-    }
-
-    const tipotran: 'CA' | 'VF' = autOrig === 'CA' ? 'CA' : 'VF';
+    const devHomologation = await this.ensureFolioHomologationFields(executor, {
+      idfol: idfolDevNorm,
+      aut: autDev,
+      idfolInicial: row.IDFOLINICIAL_DEV,
+      origenAut: row.ORIGEN_AUT_DEV,
+    });
+    const autOrigRaw = this.normalizeUpper(row.AUT_ORIG);
+    const origHomologation = await this.ensureFolioHomologationFields(executor, {
+      idfol: idfolOrig,
+      aut: autOrigRaw,
+      idfolInicial: row.IDFOLINICIAL_ORIG,
+      origenAut: row.ORIGEN_AUT_ORIG,
+      fallback: devHomologation.origenAut,
+    });
+    const autOrig =
+      autOrigRaw === 'CA' || autOrigRaw === 'VF'
+        ? autOrigRaw
+        : origHomologation.origenAut;
+    const tipotran: 'CA' | 'VF' = origHomologation.origenAut;
     const reqfOrig =
       (this.toInt(row.REQF_ORIG) ?? this.toInt(row.REQF_DEV) ?? 0) === 1;
 
     return {
-      idfolDev: this.normalizeText(row.IDFOL_DEV),
+      idfolDev: idfolDevNorm,
+      idfolInicial: devHomologation.idfolInicial,
       idfolOrig,
       suc,
       clien: this.toNumber(row.CLIEN_DEV) ?? this.toNumber(row.CLIEN_ORIG),
@@ -1132,6 +1151,7 @@ export class PvDevolucionesService {
       estaDev: this.nullableText(row.ESTA_DEV),
       rqfacDefault: tipotran === 'CA' ? false : reqfOrig,
       tipotran,
+      origenAut: devHomologation.origenAut,
       opv: this.nullableText(row.OPV_DEV),
       opvm: this.nullableText(row.OPVM_DEV),
     };
@@ -1214,16 +1234,8 @@ export class PvDevolucionesService {
       DECLARE @opvNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@1, '')));
       DECLARE @terNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@2, ''))), '');
       DECLARE @now DATETIME = GETDATE();
-      DECLARE @todayPart CHAR(8);
       DECLARE @nextTra INT;
       DECLARE @idfol NVARCHAR(255);
-      DECLARE @lockResult INT;
-      DECLARE @lockResource NVARCHAR(128);
-
-      SET @todayPart =
-        RIGHT('00' + CAST(DAY(@now) AS VARCHAR(2)), 2) +
-        RIGHT('00' + CAST(MONTH(@now) AS VARCHAR(2)), 2) +
-        CAST(YEAR(@now) AS CHAR(4));
 
       BEGIN TRY
         IF @@TRANCOUNT = 0
@@ -1232,37 +1244,15 @@ export class PvDevolucionesService {
           BEGIN TRANSACTION;
         END;
 
-        SET @lockResource = 'PV_DEV_FOLIO_CREATE_' + UPPER(@sucNorm);
-        EXEC @lockResult = sp_getapplock
-          @Resource = @lockResource,
-          @LockMode = 'Exclusive',
-          @LockOwner = 'Transaction',
-          @LockTimeout = 15000;
+        EXEC dbo.sp_pv_next_visible_folio
+          @SUC = @sucNorm,
+          @TIPO_FOLIO = 'CP',
+          @FECHA = CONVERT(DATE, @now),
+          @IDFOL_OUT = @idfol OUTPUT,
+          @CONSEC_OUT = @nextTra OUTPUT;
 
-        IF @lockResult < 0
-          THROW 57031, 'No se pudo obtener lock para crear folio de devolución', 1;
-
-        SELECT @nextTra = ISNULL(MAX(TRY_CONVERT(INT, TRA)), 1000) + 1
-        FROM dbo.PV_CTR_FOL_ASVR WITH (UPDLOCK, HOLDLOCK)
-        WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = UPPER(@sucNorm);
-
-        IF @nextTra IS NULL OR @nextTra < 1001 SET @nextTra = 1001;
-
-        SET @idfol = CONCAT(
-          @sucNorm,
-          @todayPart,
-          RIGHT('0000' + CAST(@nextTra AS VARCHAR(10)), 4)
-        );
-
-        WHILE EXISTS (SELECT 1 FROM dbo.PV_CTR_FOL_ASVR WHERE IDFOL = @idfol)
-        BEGIN
-          SET @nextTra = @nextTra + 1;
-          SET @idfol = CONCAT(
-            @sucNorm,
-            @todayPart,
-            RIGHT('0000' + CAST(@nextTra AS VARCHAR(10)), 4)
-          );
-        END;
+        IF ISNULL(LTRIM(RTRIM(@idfol)), '') = ''
+          THROW 57031, 'No se pudo generar folio fallback de devolución', 1;
 
         INSERT INTO dbo.PV_CTR_FOL_ASVR (
           IDFOL,
@@ -1279,7 +1269,9 @@ export class PvDevolucionesService {
           AUT,
           REQF,
           FCNM,
-          OPVM
+          OPVM,
+          IDFOLINICIAL,
+          ORIGEN_AUT
         )
         VALUES (
           @idfol,
@@ -1296,7 +1288,9 @@ export class PvDevolucionesService {
           'CP',
           0,
           @now,
-          @opvNorm
+          @opvNorm,
+          @idfol,
+          'CA'
         );
 
         IF @startedTran = 1 AND @@TRANCOUNT > 0
@@ -1345,27 +1339,47 @@ export class PvDevolucionesService {
       autDev: string;
     },
   ) {
+    const cols = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
+    const sets: string[] = [
+      'IDFOLORIG = @1',
+      'CLIEN = @2',
+      "ESTA = 'PENDIENTE'",
+      'AUT = @3',
+      'IMPT = 0',
+      'FCNM = NULL',
+    ];
+    const params: unknown[] = [
+      input.idfolDev,
+      input.idfolOrig,
+      input.clien,
+      input.autDev,
+    ];
+    let idx = 4;
+    const rqfacCol = this.pickFirstExistingColumn(cols, ['REQF', 'RQFAC']);
+    if (rqfacCol) {
+      sets.push(`[${rqfacCol}] = @${idx}`);
+      params.push(input.reqf ? 1 : 0);
+      idx += 1;
+    }
+    if (cols.has('IDFOLINICIAL')) {
+      sets.push("IDFOLINICIAL = COALESCE(NULLIF(IDFOLINICIAL, ''), IDFOL)");
+    }
+    if (cols.has('ORIGEN_AUT')) {
+      sets.push(`ORIGEN_AUT = @${idx}`);
+      params.push(this.resolveOrigenAutCategoria({ aut: input.autDev }));
+      idx += 1;
+    }
+    if (cols.has('OPVM')) {
+      sets.push('OPVM = NULL');
+    }
     await executor.query(
       `
       UPDATE dbo.PV_CTR_FOL_ASVR
       SET
-        IDFOLORIG = @1,
-        CLIEN = @2,
-        ESTA = 'PENDIENTE',
-        AUT = @3,
-        IMPT = 0,
-        REQF = @4,
-        FCNM = NULL,
-        OPVM = NULL
+        ${sets.join(',\n        ')}
       WHERE IDFOL = @0
       `,
-      [
-        input.idfolDev,
-        input.idfolOrig,
-        input.clien,
-        input.autDev,
-        input.reqf ? 1 : 0,
-      ],
+      params,
     );
   }
 
@@ -2192,6 +2206,14 @@ export class PvDevolucionesService {
       params.push(input.opv);
       idx += 1;
     }
+    if (cols.has('IDFOLINICIAL')) {
+      sets.push("IDFOLINICIAL = COALESCE(NULLIF(IDFOLINICIAL, ''), IDFOL)");
+    }
+    if (cols.has('ORIGEN_AUT')) {
+      sets.push(`ORIGEN_AUT = @${idx}`);
+      params.push(this.resolveOrigenAutCategoria({ aut: input.autFinal }));
+      idx += 1;
+    }
 
     await executor.query(
       `
@@ -2202,6 +2224,260 @@ export class PvDevolucionesService {
       `,
       params,
     );
+  }
+
+  private extractVisibleFolioType(idfol: string): 'CP' | 'CA' | 'VF' | '' {
+    const match = this
+      .normalizeUpper(idfol)
+      .match(/-(CP|CA|VF)-/);
+    const tipo = match?.[1] ?? '';
+    return tipo === 'CP' || tipo === 'CA' || tipo === 'VF' ? tipo : '';
+  }
+
+  private async generateNextVisibleFolio(
+    executor: SqlExecutor,
+    input: {
+      suc: string;
+      tipoFolio: 'CA' | 'VF';
+      fecha: Date;
+    },
+  ) {
+    const rows = await executor.query(
+      `
+      DECLARE @idfolOut NVARCHAR(255);
+      DECLARE @consecOut INT;
+      EXEC dbo.sp_pv_next_visible_folio
+        @SUC = @0,
+        @TIPO_FOLIO = @1,
+        @FECHA = @2,
+        @IDFOL_OUT = @idfolOut OUTPUT,
+        @CONSEC_OUT = @consecOut OUTPUT;
+      SELECT @idfolOut AS IDFOL, @consecOut AS CONSEC;
+      `,
+      [input.suc, input.tipoFolio, input.fecha],
+    );
+    const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+    const idfol = this.normalizeText(row?.IDFOL);
+    const consec = this.toInt(row?.CONSEC);
+    if (!idfol || !consec || consec <= 0) {
+      throw new ConflictException(
+        'No se pudo generar folio visible final para la devolución',
+      );
+    }
+    return { idfol, consec };
+  }
+
+  private async switchDevolucionVisibleFolio(
+    executor: SqlExecutor,
+    input: {
+      idfolActual: string;
+      idfolNuevo: string;
+      traVisible: number;
+      finalizedAt: Date;
+    },
+  ) {
+    if (this.normalizeUpper(input.idfolActual) === this.normalizeUpper(input.idfolNuevo)) {
+      return;
+    }
+
+    const targetExists = await executor.query(
+      `
+      SELECT TOP 1 IDFOL
+      FROM dbo.PV_CTR_FOL_ASVR WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
+      WHERE IDFOL = @0
+      `,
+      [input.idfolNuevo],
+    );
+    if (targetExists?.length) {
+      throw new ConflictException(
+        `El folio visible ${input.idfolNuevo} ya existe`,
+      );
+    }
+
+    await executor.query(
+      `
+      UPDATE dbo.PV_TICKET_LOG
+      SET IDFOL = @1
+      WHERE IDFOL = @0
+      `,
+      [input.idfolActual, input.idfolNuevo],
+    );
+
+    const folioFormTable = await this.resolveFolioFormTable(executor);
+    await executor.query(
+      `
+      UPDATE ${folioFormTable}
+      SET IDFOL = @1
+      WHERE IDFOL = @0
+      `,
+      [input.idfolActual, input.idfolNuevo],
+    );
+    const folioFormCols = await this.loadTableColumns(executor, folioFormTable);
+    if (folioFormCols.has('AUT')) {
+      await executor.query(
+        `
+        UPDATE ${folioFormTable}
+        SET AUT = @1
+        WHERE IDFOL = @1
+          AND LTRIM(RTRIM(ISNULL(AUT, ''))) = @0
+        `,
+        [input.idfolActual, input.idfolNuevo],
+      );
+    }
+
+    if (await this.tableExists(executor, 'dbo.PV_DEV_DET_TMP')) {
+      const tmpCols = await this.loadTableColumns(executor, 'dbo.PV_DEV_DET_TMP');
+      if (tmpCols.has('IDFOLDEV')) {
+        await executor.query(
+          `
+          UPDATE dbo.PV_DEV_DET_TMP
+          SET IDFOLDEV = @1
+          WHERE IDFOLDEV = @0
+          `,
+          [input.idfolActual, input.idfolNuevo],
+        );
+      }
+    }
+
+    if (await this.tableExists(executor, 'dbo.FACT_IDFOLDEV')) {
+      const factCols = await this.loadTableColumns(executor, 'dbo.FACT_IDFOLDEV');
+      if (factCols.has('IDFOLDEV')) {
+        await executor.query(
+          `
+          UPDATE dbo.FACT_IDFOLDEV
+          SET IDFOLDEV = @1
+          WHERE IDFOLDEV = @0
+          `,
+          [input.idfolActual, input.idfolNuevo],
+        );
+      }
+    }
+
+    const cols = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
+    const sets: string[] = ['IDFOL = @1'];
+    const params: unknown[] = [input.idfolActual, input.idfolNuevo];
+    let idx = 2;
+
+    if (cols.has('TRA')) {
+      sets.push(`TRA = @${idx}`);
+      params.push(String(input.traVisible));
+      idx += 1;
+    }
+    if (cols.has('FCNM')) {
+      sets.push(`FCNM = @${idx}`);
+      params.push(input.finalizedAt);
+      idx += 1;
+    }
+    if (cols.has('IDFOLINICIAL')) {
+      sets.push("IDFOLINICIAL = COALESCE(NULLIF(IDFOLINICIAL, ''), @0)");
+    }
+
+    await executor.query(
+      `
+      UPDATE dbo.PV_CTR_FOL_ASVR
+      SET
+        ${sets.join(',\n        ')}
+      WHERE IDFOL = @0
+      `,
+      params,
+    );
+  }
+
+  private buildDevolucionContextPayload(context: DevolucionContext) {
+    return {
+      idfolDev: context.idfolDev,
+      idfolInicial: context.idfolInicial,
+      idfolOrig: context.idfolOrig,
+      suc: context.suc,
+      clien: context.clien,
+      autDev: context.autDev,
+      autOrig: context.autOrig,
+      estaDev: context.estaDev,
+      rqfacDefault: context.rqfacDefault,
+      tipotran: context.tipotran,
+      origenAut: context.origenAut,
+      opv: context.opv,
+      opvm: context.opvm,
+    };
+  }
+
+  private normalizeEstadoOperativoCompat(value: unknown) {
+    const estado = this.normalizeUpper(value);
+    if (!estado) return 'PENDIENTE';
+    if (
+      estado === 'EDITANDO' ||
+      estado === 'DEV PEND' ||
+      estado === 'PAGADO2'
+    ) {
+      return 'PENDIENTE';
+    }
+    if (estado.startsWith('PAGADO')) return 'PAGADO';
+    if (estado.startsWith('TRANSMIT')) return 'TRANSMITIR';
+    return estado;
+  }
+
+  private resolveOrigenAutCategoria(input: {
+    aut?: unknown;
+    origenAut?: unknown;
+    fallback?: 'CA' | 'VF';
+  }): 'CA' | 'VF' {
+    const resolved = inferOrigenAut({
+      aut: input.aut,
+      origenAut: input.origenAut,
+      fallback: input.fallback,
+    });
+    return resolved === 'VF' ? 'VF' : 'CA';
+  }
+
+  private async ensureFolioHomologationFields(
+    executor: SqlExecutor,
+    input: {
+      idfol: string;
+      aut?: unknown;
+      idfolInicial?: unknown;
+      origenAut?: unknown;
+      fallback?: 'CA' | 'VF';
+    },
+  ): Promise<{ idfolInicial: string; origenAut: 'CA' | 'VF' }> {
+    const idfol = this.normalizeText(input.idfol);
+    const idfolInicial = this.normalizeText(input.idfolInicial) || idfol;
+    const origenAut = this.resolveOrigenAutCategoria({
+      aut: input.aut,
+      origenAut: input.origenAut,
+      fallback: input.fallback,
+    });
+    const cols = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
+    const needsIdfolInicial =
+      cols.has('IDFOLINICIAL') && !this.normalizeText(input.idfolInicial);
+    const needsOrigenAut =
+      cols.has('ORIGEN_AUT') && !this.normalizeUpper(input.origenAut);
+    if (!needsIdfolInicial && !needsOrigenAut) {
+      return { idfolInicial, origenAut };
+    }
+
+    const sets: string[] = [];
+    const params: unknown[] = [idfol];
+    let idx = 1;
+    if (needsIdfolInicial) {
+      sets.push("IDFOLINICIAL = COALESCE(NULLIF(IDFOLINICIAL, ''), IDFOL)");
+    }
+    if (needsOrigenAut) {
+      sets.push(`ORIGEN_AUT = @${idx}`);
+      params.push(origenAut);
+      idx += 1;
+    }
+
+    await executor.query(
+      `
+      UPDATE dbo.PV_CTR_FOL_ASVR
+      SET
+        ${sets.join(',\n        ')}
+      WHERE IDFOL = @0
+      `,
+      params,
+    );
+
+    return { idfolInicial, origenAut };
   }
 
   private async resolveFolioFormTable(executor: SqlExecutor) {

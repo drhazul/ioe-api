@@ -1,0 +1,420 @@
+diff --git "a/sql\\live_sp\\backup_20260309_002408\\sp_ps_pago_finalize.before.sql" "b/sql\\live_sp\\sp_ps_pago_finalize.sql"
+index 6a01be6..aad11f5 100644
+--- "a/sql\\live_sp\\backup_20260309_002408\\sp_ps_pago_finalize.before.sql"
++++ "b/sql\\live_sp\\sp_ps_pago_finalize.sql"
+@@ -1,3 +1,5 @@
++
++                                                                                                                                                                                                                                                             
+ CREATE   PROCEDURE dbo.sp_ps_pago_finalize
+                                                                                                                                                                                                                    
+   @IDFOL NVARCHAR(255),
+@@ -20,12 +22,32 @@ BEGIN
+                                                                                                                                                                                                                               
+   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
+                                                                                                                                                                                        
++  DECLARE @idfolActual NVARCHAR(255);
++                                                                                                                                                                                                                        
++  DECLARE @idfolInicial NVARCHAR(255);
++                                                                                                                                                                                                                       
++  DECLARE @idfolVisibleNuevo NVARCHAR(255);
++                                                                                                                                                                                                                  
++  DECLARE @folioConsecNuevo INT = NULL;
++                                                                                                                                                                                                                      
++  DECLARE @traActual NVARCHAR(255);
++                                                                                                                                                                                                                          
++  DECLARE @traVisibleNuevo NVARCHAR(255);
++                                                                                                                                                                                                                    
++  DECLARE @origenAut VARCHAR(2);
++                                                                                                                                                                                                                             
++  DECLARE @tipoVisibleFinal VARCHAR(2);
++                                                                                                                                                                                                                      
++  DECLARE @folioActualUpper NVARCHAR(255);
++                                                                                                                                                                                                                   
+   DECLARE @formasJsonNorm NVARCHAR(MAX) = LTRIM(RTRIM(ISNULL(@FORMAS_JSON, '')));
+                                                                                                                                                                             
+   DECLARE @userNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@USER, ''))), '');
+                                                                                                                                                                              
+   DECLARE @fechaProceso DATETIME = GETDATE();
+                                                                                                                                                                                                                 
++  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, GETDATE());
++                                                                                                                                                                                                 
+   DECLARE @sucDb NVARCHAR(20);
+                                                                                                                                                                                                                                
+   DECLARE @opvDb NVARCHAR(255);
+@@ -34,12 +56,6 @@ BEGIN
+                                                                                                                                                                                                                                       
+   DECLARE @estado NVARCHAR(40);
+                                                                                                                                                                                                                               
+-  DECLARE @autActual NVARCHAR(40);
+-                                                                                                                                                                                                                           
+-  DECLARE @origenAutActual NVARCHAR(2);
+-                                                                                                                                                                                                                      
+-  DECLARE @origenAutFinal NVARCHAR(2);
+-                                                                                                                                                                                                                       
+   DECLARE @serviceType CHAR(2);
+                                                                                                                                                                                                                               
+   DECLARE @isCashOut BIT = 0;
+@@ -278,27 +294,95 @@ BEGIN
+                                                                                                                                                                                                                                                              
+     SELECT TOP 1
+                                                                                                                                                                                                                                              
++      @idfolActual = LTRIM(RTRIM(ISNULL(IDFOL, ''))),
++                                                                                                                                                                                                        
++      @idfolInicial = ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(IDFOLINICIAL, ''))), ''), LTRIM(RTRIM(ISNULL(IDFOL, '')))),
++                                                                                                                                           
++      @traActual = LTRIM(RTRIM(ISNULL(TRA, ''))),
++                                                                                                                                                                                                            
++      @origenAut = CASE
++                                                                                                                                                                                                                                      
++        WHEN UPPER(LTRIM(RTRIM(ISNULL(ORIGEN_AUT, '')))) IN ('CA', 'VF')
++                                                                                                                                                                                     
++          THEN UPPER(LTRIM(RTRIM(ISNULL(ORIGEN_AUT, ''))))
++                                                                                                                                                                                                   
++        WHEN UPPER(LTRIM(RTRIM(ISNULL(AUT, '')))) IN ('DVF', 'VF')
++                                                                                                                                                                                           
++          THEN 'VF'
++                                                                                                                                                                                                                                          
++        ELSE 'CA'
++                                                                                                                                                                                                                                            
++      END,
++                                                                                                                                                                                                                                                   
+       @sucDb = LTRIM(RTRIM(ISNULL(SUC, ''))),
+                                                                                                                                                                                                                 
+       @opvDb = LTRIM(RTRIM(ISNULL(OPV, ''))),
+                                                                                                                                                                                                                 
+       @clien = TRY_CONVERT(FLOAT, CLIEN),
+                                                                                                                                                                                                                     
+-      @estado = UPPER(LTRIM(RTRIM(ISNULL(ESTA, '')))),
+-                                                                                                                                                                                                       
+-      @autActual = UPPER(LTRIM(RTRIM(ISNULL(AUT, ''))))
+-                                                                                                                                                                                                      
++      @estado = UPPER(LTRIM(RTRIM(ISNULL(ESTA, ''))))
++                                                                                                                                                                                                        
+     FROM dbo.PV_CTR_FOL_ASVR WITH (UPDLOCK, HOLDLOCK)
+                                                                                                                                                                                                         
+-    WHERE IDFOL = @idfolNorm;
+-                                                                                                                                                                                                                                
++    WHERE IDFOL = @idfolNorm
++                                                                                                                                                                                                                                 
++       OR IDFOLINICIAL = @idfolNorm
++                                                                                                                                                                                                                          
++    ORDER BY CASE WHEN IDFOL = @idfolNorm THEN 0 ELSE 1 END, FCN DESC, FCNM DESC;
++                                                                                                                                                                            
+ 
+                                                                                                                                                                                                                                                              
+-    IF @sucDb IS NULL
+-                                                                                                                                                                                                                                        
++    IF ISNULL(@idfolActual, '') = ''
++                                                                                                                                                                                                                         
+       THROW 57125, 'El folio PS no existe', 1;
+                                                                                                                                                                                                                
+ 
++                                                                                                                                                                                                                                                             
++    SET @idfolNorm = @idfolActual;
++                                                                                                                                                                                                                           
++    IF ISNULL(@idfolInicial, '') = ''
++                                                                                                                                                                                                                        
++      SET @idfolInicial = @idfolActual;
++                                                                                                                                                                                                                      
++    SET @tipoVisibleFinal = CASE WHEN UPPER(ISNULL(@origenAut, 'CA')) = 'VF' THEN 'VF' ELSE 'CA' END;
++                                                                                                                                                        
++    SET @folioActualUpper = UPPER(@idfolActual);
++                                                                                                                                                                                                             
++    SET @idfolVisibleNuevo = @idfolActual;
++                                                                                                                                                                                                                   
++    SET @traVisibleNuevo = NULLIF(@traActual, '');
++                                                                                                                                                                                                           
++
++                                                                                                                                                                                                                                                             
++    IF CHARINDEX('-' + @tipoVisibleFinal + '-', @folioActualUpper) = 0
++                                                                                                                                                                                       
++    BEGIN
++                                                                                                                                                                                                                                                    
++      EXEC dbo.sp_pv_next_visible_folio
++                                                                                                                                                                                                                      
++        @SUC = @sucDb,
++                                                                                                                                                                                                                                       
++        @TIPO_FOLIO = @tipoVisibleFinal,
++                                                                                                                                                                                                                     
++        @FECHA = @fechaProcesoDate,
++                                                                                                                                                                                                                          
++        @IDFOL_OUT = @idfolVisibleNuevo OUTPUT,
++                                                                                                                                                                                                              
++        @CONSEC_OUT = @folioConsecNuevo OUTPUT;
++                                                                                                                                                                                                              
++
++                                                                                                                                                                                                                                                             
++      IF ISNULL(LTRIM(RTRIM(@idfolVisibleNuevo)), '') = ''
++                                                                                                                                                                                                   
++        THROW 57135, 'No se pudo generar folio visible final para PS', 1;
++                                                                                                                                                                                    
++
++                                                                                                                                                                                                                                                             
++      SET @traVisibleNuevo = CONVERT(NVARCHAR(255), @folioConsecNuevo);
++                                                                                                                                                                                      
++    END;
++                                                                                                                                                                                                                                                     
++
+                                                                                                                                                                                                                                                              
+     IF @estado = 'PAGADO'
+                                                                                                                                                                                                                                     
+@@ -335,48 +419,6 @@ BEGIN
+     WHERE IDFOL = @idfolNorm;
+                                                                                                                                                                                                                                 
+ 
+-                                                                                                                                                                                                                                                             
+-    IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'ORIGEN_AUT') IS NOT NULL
+-                                                                                                                                                                                           
+-    BEGIN
+-                                                                                                                                                                                                                                                    
+-      SET @sql = N'
+-                                                                                                                                                                                                                                          
+-        SELECT TOP 1 @pORIGEN = UPPER(LTRIM(RTRIM(ISNULL(ORIGEN_AUT, ''''))))
+-                                                                                                                                                                                
+-        FROM dbo.PV_CTR_FOL_ASVR
+-                                                                                                                                                                                                                             
+-        WHERE IDFOL = @pIDFOL;';
+-                                                                                                                                                                                                                             
+-
+-                                                                                                                                                                                                                                                             
+-      EXEC sys.sp_executesql
+-                                                                                                                                                                                                                                 
+-        @sql,
+-                                                                                                                                                                                                                                                
+-        N'@pIDFOL NVARCHAR(255), @pORIGEN NVARCHAR(2) OUTPUT',
+-                                                                                                                                                                                               
+-        @pIDFOL = @idfolNorm,
+-                                                                                                                                                                                                                                
+-        @pORIGEN = @origenAutActual OUTPUT;
+-                                                                                                                                                                                                                  
+-    END
+-                                                                                                                                                                                                                                                      
+-
+-                                                                                                                                                                                                                                                             
+-    SET @origenAutFinal = CASE
+-                                                                                                                                                                                                                               
+-      WHEN @serviceType IN ('DC', 'DG') THEN 'CA'
+-                                                                                                                                                                                                            
+-      WHEN ISNULL(@origenAutActual, '') IN ('CA', 'VF') THEN @origenAutActual
+-                                                                                                                                                                                
+-      WHEN ISNULL(@autActual, '') IN ('DVF', 'VF') THEN 'VF'
+-                                                                                                                                                                                                 
+-      ELSE 'CA'
+-                                                                                                                                                                                                                                              
+-    END;
+-                                                                                                                                                                                                                                                     
+-
+                                                                                                                                                                                                                                                              
+     IF @serviceType IN ('DG', 'DC')
+                                                                                                                                                                                                                           
+@@ -594,8 +636,8 @@ BEGIN
+                                                                            
+         @pIDF = @execIdf,
+                                                                                                                                                                                                                                     
+-        @pIDFOL = @idfolNorm,
+-                                                                                                                                                                                                                                
++        @pIDFOL = @idfolVisibleNuevo,
++                                                                                                                                                                                                                        
+         @pNOW = @fechaProceso,
+                                                                                                                                                                                                                                
+         @pFORM = @formaForm,
+@@ -750,10 +792,10 @@ BEGIN
+                                                                                                                                                                                                                                    
+           SET @lineImpt = ABS(ISNULL(@lineTotal, 0));
+                                                                                                                                                                                                         
+-          SET @lineIdFol = @idfolNorm;
+-                                                                                                                                                                                                                       
+-          SET @rtxt = 'Abono a cliente ticket ' + @idfolNorm;
+-                                                                                                                                                                                                
++          SET @lineIdFol = @idfolVisibleNuevo;
++                                                                                                                                                                                                               
++          SET @rtxt = 'Abono a cliente ticket ' + @idfolVisibleNuevo;
++                                                                                                                                                                                        
+ 
+                                                                                                                                                                                                                                                              
+           IF @datCmovObjId IS NOT NULL
+@@ -806,8 +848,8 @@ BEGIN
+                                                                                                                                                                                                                                             
+               IF OBJECT_ID('dbo.DAT_CMOV_C', 'U') IS NOT NULL
+                                                                                                                                                                                                 
+-                 AND COL_LENGTH('dbo.DAT_CMOV_C', 'RELACION') IS NOT NULL
+-                                                                                                                                                                                    
++     AND COL_LENGTH('dbo.DAT_CMOV_C', 'RELACION') IS NOT NULL
++                                                                                                                                                                                                
+                  AND COL_LENGTH('dbo.DAT_CMOV_C', 'CMOV') IS NOT NULL
+                                                                                                                                                                                         
+               BEGIN
+@@ -854,22 +896,22 @@ BEGIN
+                                                                                                                                                                                                                                               
+             SET @lineImpt = -ABS(ISNULL(@lineTotal, 0));
+                                                                                                                                                                                                      
+-            SET @lineIdFol = @idfolNorm;
+-                                                                                                                                                                                                                     
+-            SET @rtxt = LTRIM(RTRIM(ISNULL(@lineOrd, ''))) + ' ticket ' + @idfolNorm;
+-                                                                                                                                                                        
++            SET @lineIdFol = @idfolVisibleNuevo;
++                                                                                                                                                                                                             
++            SET @rtxt = LTRIM(RTRIM(ISNULL(@lineOrd, ''))) + ' ticket ' + @idfolVisibleNuevo;
++                                                                                                                                                                
+           END
+                                                                                                                                                                                                                                                 
+-     ELSE IF @lineTipps = 'DC'
+-                                                                                                                                                                                                                               
++          ELSE IF @lineTipps = 'DC'
++                                                                                                                                                                                                                          
+           BEGIN
+                                                                                                                                                                                                                                               
+             SET @lineImpt = ABS(ISNULL(@lineTotal, 0));
+                                                                                                                                                                                                       
+-            SET @lineIdFol = @idfolNorm;
+-                                                                                                                                                                                                                     
+-            SET @rtxt = LTRIM(RTRIM(ISNULL(@lineOrd, ''))) + ' ticket ' + @idfolNorm;
+-                                                                                                                                                                        
++            SET @lineIdFol = @idfolVisibleNuevo;
++                                                                                                                                                                                                             
++            SET @rtxt = LTRIM(RTRIM(ISNULL(@lineOrd, ''))) + ' ticket ' + @idfolVisibleNuevo;
++                                                                                                                                                                
+           END
+                                                                                                                                                                                                                                                 
+           ELSE
+@@ -880,14 +922,14 @@ BEGIN
+                                                                                                                                                                                                       
+             SET @lineIdFol = CASE
+                                                                                                                                                                                                                             
+-              WHEN LTRIM(RTRIM(ISNULL(@lineOrd, ''))) = '' THEN @idfolNorm
+-                                                                                                                                                                                   
++              WHEN LTRIM(RTRIM(ISNULL(@lineOrd, ''))) = '' THEN @idfolVisibleNuevo
++                                                                                                                                                                           
+               ELSE @lineOrd
+                                                                                                                                                                                                                                   
+             END;
+                                                                                                                                                                                                                                              
+-            SET @rtxt = 'Abono a cliente ticket ' + @idfolNorm;
+-                                                                                                                                                                                              
++            SET @rtxt = 'Abono a cliente ticket ' + @idfolVisibleNuevo;
++                                                                                                                                                                                      
+           END;
+                                                                                                                                                                                                                                                
+ 
+@@ -1085,13 +1127,29 @@ BEGIN
+     END;
+                                                                                                                                                                                                                                                      
+ 
++                                                                                                                                                                                                                                                             
++    IF UPPER(ISNULL(@idfolVisibleNuevo, '')) <> UPPER(ISNULL(@idfolNorm, ''))
++                                                                                                                                                                                
++    BEGIN
++                                                                                                                                                                                                                                                    
++      UPDATE dbo.PV_TICKET_LOG
++                                                                                                                                                                                                                               
++      SET IDFOL = @idfolVisibleNuevo
++                                                                                                                                                                                                                         
++      WHERE IDFOL = @idfolNorm;
++                                                                                                                                                                                                                              
++    END;
++                                                                                                                                                                                                                                                     
++
+                                                                                                                                                                                                                                                              
+     UPDATE dbo.PV_CTR_FOL_ASVR
+                                                                                                                                                                                                                                
+     SET
+                                                                                                                                                                                                                                                       
+-      AUT = @serviceType,
+-                                                                                                                                                                                                                                    
++      IDFOL = @idfolVisibleNuevo,
++                                                                                                                                                                                                                            
++      TRA = COALESCE(NULLIF(@traVisibleNuevo, ''), TRA),
++                                                                                                                                                                                                     
+       ESTA = 'PAGADO',
+                                                                                                                                                                                                                                        
+       IMPT = CASE WHEN @isCashOut = 1 THEN (@total * -1) ELSE @total END,
+@@ -1102,72 +1160,14 @@ BEGIN
+                                                                                                                                                                                                                                    
+       FCNM = @fechaProceso,
+                                                                                                                                                                                                                                   
+-      OPVM = COALESCE(@userNorm, OPVM)
+-                                                                                                                                                                                                                       
+-    WHERE IDFOL = @idfolNorm;
+-                                                                                                                                                                                                                                
+-
+-                                                                                                                                                                                                                                                             
+-    IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'IDFOLINICIAL') IS NOT NULL
+-                                                                                                                                                                                         
+-    BEGIN
+-                                                                                                                                                                                                                                                    
+-      SET @sql = N'
+-                                                                                                                                                                                                                                          
+-        UPDATE dbo.PV_CTR_FOL_ASVR
+-                                                                                                                                                                                                                           
+-        SET IDFOLINICIAL = CASE
+-                                                                                                                                                                                                                              
+-          WHEN NULLIF(LTRIM(RTRIM(ISNULL(IDFOLINICIAL, ''''))), '''') IS NULL THEN @pIDFOLINICIAL
+-                                                                                                                                                            
+-          ELSE IDFOLINICIAL
+-                                                                                                                                                                                                                                  
+-        END
+-                                                                                                                                                                                                                                                  
+-        WHERE IDFOL = @pIDFOL;';
+-                                                                                                                                                                                                                             
+-
+-                                                                                                                                                                                                                                                             
+-      EXEC sys.sp_executesql
+-                                                                                                                                                                                                                                 
+-        @sql,
+-                                                                                                                                                                                                                                                
+-        N'@pIDFOLINICIAL NVARCHAR(255), @pIDFOL NVARCHAR(255)',
+-                                                                                                                                                                                              
+-        @pIDFOLINICIAL = @idfolNorm,
+-                                                                                                                                                                                                                         
+-        @pIDFOL = @idfolNorm;
+-                                                                                                                                                                                                                                
+-    END
+-                                                                                                                                                                                                                                                      
+-
+-                                                                                                                                                                                                                                                             
+-    IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'ORIGEN_AUT') IS NOT NULL
+-                                                                                                                                                                                           
+-    BEGIN
+-                                                                                                                                                                                                                                                    
+-      SET @sql = N'
+-                                                                                                                                                                                                                                          
+-        UPDATE dbo.PV_CTR_FOL_ASVR
+-                                                                                                                                                                                                                           
+-        SET ORIGEN_AUT = @pORIGENAUT
++      OPVM = COALESCE(@userNorm, OPVM),
++                                                                                                                                                                                                                      
++      IDFOLINICIAL = ISNULL(NULLIF(LTRIM(RTRIM(IDFOLINICIAL)), ''), @idfolInicial),
++                                                                                                                                                                          
++      ORIGEN_AUT = @tipoVisibleFinal
+                                                                                                                                                                                                                          
+-        WHERE IDFOL = @pIDFOL;';
+-                                                                                                                                                                                                                             
+-
+-                                                                                                                                                                                                                                                             
+-      EXEC sys.sp_executesql
+-                                                                                                                                                                                                                                 
+-        @sql,
+-                                                                                                                                                                                                                                                
+-        N'@pORIGENAUT NVARCHAR(2), @pIDFOL NVARCHAR(255)',
+-                                                                                                                                                                                                   
+-        @pORIGENAUT = @origenAutFinal,
+-                                                                                                                                                                                                                       
+-        @pIDFOL = @idfolNorm;
++    WHERE IDFOL = @idfolNorm;
+                                                                                                                                                                                                                                 
+-    END
+-                                                                                                                                                                                                                                                      
+ 
+                                                                                                                                                                                                                                                              
+     IF @startedTran = 1 AND @@TRANCOUNT > 0
+@@ -1178,8 +1178,8 @@ BEGIN
+                                                                                                                                                                                                                                                              
+     SELECT
+                                                                                                                                                                                                                                                    
+-      @idfolNorm AS IDFOL,
+-                                                                                                                                                                                                                                   
++      @idfolVisibleNuevo AS IDFOL,
++                                                                                                                                                                                                                           
+       'PAGADO' AS ESTA,
+                                                                                                                                                                                                                                       
+       @total AS TOTAL,

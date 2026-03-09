@@ -1,4 +1,4 @@
-CREATE OR ALTER PROCEDURE dbo.sp_pv_ctr_ords_create_from_quote_line
+CREATE   PROCEDURE dbo.sp_pv_ctr_ords_create_from_quote_line
   @IDFOL NVARCHAR(255),
   @ART NVARCHAR(255),
   @DESCART NVARCHAR(255) = NULL,
@@ -196,5 +196,3 @@ BEGIN
     THROW;
   END CATCH
 END
-GO
-

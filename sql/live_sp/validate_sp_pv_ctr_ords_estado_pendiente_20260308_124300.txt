@@ -1,0 +1,17 @@
+SP: dbo.sp_pv_ctr_ords_create_from_quote_line
+Fecha: 2026-03-08 12:43:00 America/Mexico_City
+Servidor: 192.168.10.234
+Base: IOELOCAL
+
+Validacion estructural:
+- TieneMensajePendiente: 1
+- ValidaEstadoPendiente: 1
+- MantieneCompatibilidadLegacy: 1
+- TieneMensajeLegacyEditando: 0
+
+Smoke test transaccional (BEGIN TRAN / ROLLBACK):
+- IdFolProbado: DF1607032026GEN001DF162
+- ArtProbado: 3011867
+- IordPendiente: DF16132150001
+- IordLegacy: DF16132150002
+- Resultado: OK

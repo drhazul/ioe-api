@@ -1,0 +1,42 @@
+SET NOCOUNT ON;
+BEGIN TRAN;
+
+DECLARE @created TABLE (
+  IDFOL NVARCHAR(255),
+  SUC NVARCHAR(20),
+  TRA NVARCHAR(255),
+  OPV NVARCHAR(255),
+  ESTA NVARCHAR(40),
+  ORIGEN_AUT NVARCHAR(10)
+);
+
+INSERT INTO @created
+EXEC dbo.sp_ps_folio_create @SUC='DF10', @TER='1004', @OPV='opvp', @USER='codex';
+
+DECLARE @idfolCp NVARCHAR(255) = (SELECT TOP 1 IDFOL FROM @created);
+
+INSERT INTO dbo.PV_TICKET_LOG (ID, IDFOL, UPC, ART, DES, CTD, PVTA, PVTAT, ORD, UPDATED_AT)
+VALUES (CONVERT(NVARCHAR(36), NEWID()), @idfolCp, 'AD', 'AD', 'SERVICIO PRUEBA', 1, 100, 100, 'REF-TEST', GETDATE());
+
+DECLARE @result TABLE (IDFOL NVARCHAR(255), ESTA NVARCHAR(40), TOTAL DECIMAL(18,4), PAGADO DECIMAL(18,4), CAMBIO DECIMAL(18,4));
+INSERT INTO @result
+EXEC dbo.sp_ps_pago_finalize
+  @IDFOL = @idfolCp,
+  @FORMAS_JSON = '[{"form":"EFECTIVO","impp":100}]',
+  @USER = 'codex';
+
+DECLARE @secondMsg NVARCHAR(4000) = '';
+BEGIN TRY
+  EXEC dbo.sp_ps_pago_finalize
+    @IDFOL = @idfolCp,
+    @FORMAS_JSON = '[{"form":"EFECTIVO","impp":100}]',
+    @USER = 'codex';
+END TRY
+BEGIN CATCH
+  SET @secondMsg = ERROR_MESSAGE();
+END CATCH;
+
+SELECT TOP 1 'FINAL' AS TAG, IDFOL FROM @result;
+SELECT 'SECOND_MSG' AS TAG, @secondMsg AS MSG;
+
+ROLLBACK;

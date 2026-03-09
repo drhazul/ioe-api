@@ -1,0 +1,23 @@
+diff --git "a/C:\\Users\\PCDESARROLLO\\Proyectos\\ioe-api\\sql\\live_sp\\backup_20260308_124157\\sp_pv_ctr_ords_create_from_quote_line.before.sql" "b/C:\\Users\\PCDESARROLLO\\Proyectos\\ioe-api\\sql\\live_sp\\backup_20260308_124157\\sp_pv_ctr_ords_create_from_quote_line.after.sql"
+index 9101f6a..0ae5c0b 100644
+--- "a/C:\\Users\\PCDESARROLLO\\Proyectos\\ioe-api\\sql\\live_sp\\backup_20260308_124157\\sp_pv_ctr_ords_create_from_quote_line.before.sql"
++++ "b/C:\\Users\\PCDESARROLLO\\Proyectos\\ioe-api\\sql\\live_sp\\backup_20260308_124157\\sp_pv_ctr_ords_create_from_quote_line.after.sql"
+@@ -54,8 +54,11 @@ BEGIN
+   IF @clienNorm IS NULL OR @clienNorm = 1
+     THROW 50060, 'No se permite crear ORD para el cliente seleccionado.', 1;
+ 
+-  IF @estadoNorm <> 'EDITANDO'
+-    THROW 50061, 'El documento no esta en estado EDITANDO.', 1;
++  IF @estadoNorm IN ('EDITANDO', 'PAGADO2', 'DEV PEND')
++    SET @estadoNorm = 'PENDIENTE';
++
++  IF @estadoNorm <> 'PENDIENTE'
++    THROW 50061, 'El documento no esta en estado PENDIENTE.', 1;
+ 
+   IF @ctdNorm IS NULL
+     THROW 50062, 'La cantidad registrada para el articulo no permite crear ORD.', 1;
+@@ -193,4 +196,3 @@ BEGIN
+     THROW;
+   END CATCH
+ END
+-

@@ -44,13 +44,14 @@ export class PagosServiciosService {
 
   async listFolios(query: ListPsFoliosQueryDto, user: JwtPayload) {
     try {
+      const estadosPanelPermitidos = new Set(['PENDIENTE', 'EDITANDO', 'PAGADO']);
       const isAdmin = this.isAdmin(user);
       const actorSuc = this.normalize(user?.suc ?? '');
       const actorOpv = this.normalize(user?.username ?? '');
       const requestedSuc = this.normalize(query.suc ?? '');
       const requestedOpv = this.normalize(query.opv ?? '');
       const esta =
-        this.normalize(query.esta ?? 'PENDIENTE').toUpperCase() || 'PENDIENTE';
+        this.normalize(query.esta ?? 'ALL').toUpperCase() || 'ALL';
       const search = this.normalize(query.search ?? '');
 
       if (!isAdmin && actorSuc.length === 0) {
@@ -95,6 +96,18 @@ export class PagosServiciosService {
             const rowObj = row as Record<string, unknown>;
             const rowOpv = this.normalizeUpper(rowObj?.OPV ?? '');
             const rowOpvm = this.normalizeUpper(rowObj?.OPVM ?? '');
+            const rowEsta = this.normalizeUpper(rowObj?.ESTA ?? '');
+            if (!estadosPanelPermitidos.has(rowEsta)) {
+              return false;
+            }
+            if (
+              esta !== 'ALL' &&
+              esta !== 'TODOS' &&
+              esta !== '*' &&
+              rowEsta !== esta
+            ) {
+              return false;
+            }
             return rowOpv === opvNorm || rowOpvm === opvNorm;
           })
         : [];
@@ -699,15 +712,20 @@ export class PagosServiciosService {
         [folio.IDFOL, JSON.stringify(formas), this.auditActor(user)],
       );
       const result = this.firstRow(rows);
-      const summary = await this.fetchSummary(folio.IDFOL);
+      const idfolFinal = this.normalize(
+        result?.IDFOL ?? result?.idfol ?? folio.IDFOL,
+      );
+      const summary = await this.fetchSummary(idfolFinal);
 
       await this.auditMutation({
         action: 'PS_PAGO_FINALIZAR',
         entity: 'PV_CTR_FOL_ASVR',
-        entityId: folio.IDFOL,
+        entityId: idfolFinal,
         suc: folio.SUC,
         metadata: {
-          idfol: folio.IDFOL,
+          idfolInicial: folio.IDFOLINICIAL,
+          idfolPrevio: folio.IDFOL,
+          idfolFinal,
           formas,
           result,
         },
@@ -715,9 +733,16 @@ export class PagosServiciosService {
         ip,
       });
 
+      const resultPayload =
+        result ??
+        ({
+          IDFOL: idfolFinal,
+          idfol: idfolFinal,
+        } as Record<string, unknown>);
+
       return {
         ok: true,
-        result: result ?? { idfol: folio.IDFOL },
+        result: resultPayload,
         summary,
       };
     } catch (error) {
@@ -755,6 +780,8 @@ export class PagosServiciosService {
         TRY_CONVERT(FLOAT, CLIEN) AS CLIEN
       FROM dbo.PV_CTR_FOL_ASVR
       WHERE IDFOL = @0
+         OR IDFOLINICIAL = @0
+      ORDER BY CASE WHEN IDFOL = @0 THEN 0 ELSE 1 END, FCN DESC, FCNM DESC
       `,
       [idFol],
     );
@@ -808,6 +835,8 @@ export class PagosServiciosService {
         TRY_CONVERT(FLOAT, CLIEN) AS CLIEN
       FROM dbo.PV_CTR_FOL_ASVR
       WHERE IDFOL = @0
+         OR IDFOLINICIAL = @0
+      ORDER BY CASE WHEN IDFOL = @0 THEN 0 ELSE 1 END, FCN DESC, FCNM DESC
       `,
       [idFol],
     );
@@ -863,6 +892,8 @@ export class PagosServiciosService {
       SELECT TOP 1 AUT, ORIGEN_AUT
       FROM dbo.PV_CTR_FOL_ASVR
       WHERE IDFOL = @0
+         OR IDFOLINICIAL = @0
+      ORDER BY CASE WHEN IDFOL = @0 THEN 0 ELSE 1 END, FCN DESC, FCNM DESC
       `,
       [refIdfol],
     );

@@ -1,0 +1,2 @@
+INPUT DF1406032026GEN001DF1410 DF14 GEN001DF14 175.0000 [{"form":"CREDITO","impp":175.00}]
+51027 Cliente sin limite de credito disponible

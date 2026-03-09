@@ -1,4 +1,4 @@
-CREATE OR ALTER PROCEDURE dbo.sp_pv_ctr_ords_create_from_quote_line
+CREATE   PROCEDURE dbo.sp_pv_ctr_ords_create_from_quote_line
   @IDFOL NVARCHAR(255),
   @ART NVARCHAR(255),
   @DESCART NVARCHAR(255) = NULL,
@@ -54,11 +54,8 @@ BEGIN
   IF @clienNorm IS NULL OR @clienNorm = 1
     THROW 50060, 'No se permite crear ORD para el cliente seleccionado.', 1;
 
-  IF @estadoNorm IN ('EDITANDO', 'PAGADO2', 'DEV PEND')
-    SET @estadoNorm = 'PENDIENTE';
-
-  IF @estadoNorm <> 'PENDIENTE'
-    THROW 50061, 'El documento no esta en estado PENDIENTE.', 1;
+  IF @estadoNorm <> 'EDITANDO'
+    THROW 50061, 'El documento no esta en estado EDITANDO.', 1;
 
   IF @ctdNorm IS NULL
     THROW 50062, 'La cantidad registrada para el articulo no permite crear ORD.', 1;
@@ -196,5 +193,4 @@ BEGIN
     THROW;
   END CATCH
 END
-GO
 

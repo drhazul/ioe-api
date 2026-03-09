@@ -16,12 +16,17 @@ ALTER PROCEDURE dbo.sp_pvctrfolasvr_create
 AS
 BEGIN
   SET NOCOUNT ON;
+  SET XACT_ABORT ON;
 
   DECLARE @sucTrim NVARCHAR(255) = LTRIM(RTRIM(@SUC));
   DECLARE @opvTrim NVARCHAR(255) = LTRIM(RTRIM(@OPV));
   DECLARE @autNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@AUT, 'CP'))));
   DECLARE @estaNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@ESTA, 'PENDIENTE'))));
   DECLARE @origenAut VARCHAR(2);
+  DECLARE @folioTipo VARCHAR(2);
+  DECLARE @folioVisible NVARCHAR(255);
+  DECLARE @folioConsec INT;
+  DECLARE @today DATE = CONVERT(DATE, GETDATE());
 
   IF (@sucTrim IS NULL OR @sucTrim = N'')
   BEGIN
@@ -40,6 +45,11 @@ BEGIN
   IF @estaNorm LIKE 'TRANSMIT%' SET @estaNorm = 'TRANSMITIR';
   IF @estaNorm NOT IN ('PENDIENTE','PAGADO','TRANSMITIR') SET @estaNorm = 'PENDIENTE';
 
+  SET @folioTipo = CASE
+    WHEN @autNorm IN ('CP', 'CA', 'VF') THEN @autNorm
+    ELSE 'CP'
+  END;
+
   SET @origenAut = CASE
     WHEN @autNorm IN ('DCA','CA','DC','DG') THEN 'CA'
     WHEN @autNorm IN ('DVF','VF') THEN 'VF'
@@ -47,27 +57,21 @@ BEGIN
     ELSE 'CA'
   END;
 
-  DECLARE @today DATE = CONVERT(DATE, GETDATE());
-  DECLARE @count INT = 0;
-
-  SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
-
   BEGIN TRY
     BEGIN TRAN;
 
-    SELECT @count = COUNT(1)
-    FROM dbo.PV_CTR_FOL_ASVR WITH (UPDLOCK, HOLDLOCK)
-    WHERE SUC = @sucTrim
-      AND CONVERT(DATE, FCN) = @today;
+    EXEC dbo.sp_pv_next_visible_folio
+      @SUC = @sucTrim,
+      @TIPO_FOLIO = @folioTipo,
+      @FECHA = @today,
+      @IDFOL_OUT = @folioVisible OUTPUT,
+      @CONSEC_OUT = @folioConsec OUTPUT;
 
-    SET @TRA_OUT = ISNULL(@count, 0) + 1;
+    IF ISNULL(LTRIM(RTRIM(@folioVisible)), '') = ''
+      THROW 57110, 'No se pudo generar folio visible para PV_CTR_FOL_ASVR', 1;
 
-    DECLARE @seq INT = 1000 + @TRA_OUT;
-    SET @IDFOL_OUT = @sucTrim
-      + RIGHT('00' + CAST(DAY(@today) AS NVARCHAR(2)), 2)
-      + RIGHT('00' + CAST(MONTH(@today) AS NVARCHAR(2)), 2)
-      + CAST(YEAR(@today) AS NVARCHAR(4))
-      + CAST(@seq AS NVARCHAR(10));
+    SET @IDFOL_OUT = @folioVisible;
+    SET @TRA_OUT = ISNULL(@folioConsec, 0);
 
     INSERT INTO dbo.PV_CTR_FOL_ASVR (
       IDFOL, CLIEN, DOC, FCN, SUC, TER, TRA, OPV, ESTA,

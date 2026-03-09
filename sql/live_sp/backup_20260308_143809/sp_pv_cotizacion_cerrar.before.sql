@@ -1,4 +1,4 @@
-CREATE OR ALTER PROCEDURE dbo.sp_pv_cotizacion_cerrar
+CREATE   PROCEDURE dbo.sp_pv_cotizacion_cerrar
   @IDFOL NVARCHAR(255),
   @SUC NVARCHAR(255) = NULL,
   @TIPOTRAN NVARCHAR(10),
@@ -17,14 +17,6 @@ BEGIN
   DECLARE @opvNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@IDOPV, ''))), '');
   DECLARE @epsilon DECIMAL(18, 6) = 0.0001;
   DECLARE @fechaProceso DATETIME = GETDATE();
-  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, GETDATE());
-
-  DECLARE @idfolActual NVARCHAR(255);
-  DECLARE @idfolInicial NVARCHAR(255);
-  DECLARE @idfolVisibleNuevo NVARCHAR(255);
-  DECLARE @folioConsecNuevo INT;
-  DECLARE @traVisibleNuevo NVARCHAR(255);
-  DECLARE @targetOrigenAut VARCHAR(2);
 
   DECLARE @sucDb NVARCHAR(255);
   DECLARE @clien FLOAT;
@@ -100,6 +92,7 @@ BEGIN
   DECLARE @execIdf NVARCHAR(255);
   DECLARE @execImptNeg MONEY;
   DECLARE @execRqfac INT;
+  DECLARE @origenAutFinal NVARCHAR(2);
 
   DECLARE @lockResult INT;
   DECLARE @maxCtrl BIGINT = 0;
@@ -114,9 +107,6 @@ BEGIN
   DECLARE @headHasAUT BIT = 0;
   DECLARE @headHasFCNM BIT = 0;
   DECLARE @headHasOPVM BIT = 0;
-  DECLARE @headHasTRA BIT = 0;
-  DECLARE @headHasIDFOLINICIAL BIT = 0;
-  DECLARE @headHasORIGENAUT BIT = 0;
 
   IF @idfolNorm = ''
     THROW 51001, 'IDFOL es requerido', 1;
@@ -150,26 +140,17 @@ BEGIN
     END;
 
     SELECT TOP 1
-      @idfolActual = LTRIM(RTRIM(ISNULL(IDFOL, ''))),
-      @idfolInicial = ISNULL(NULLIF(LTRIM(RTRIM(IDFOLINICIAL)), ''), LTRIM(RTRIM(ISNULL(IDFOL, '')))),
       @sucDb = LTRIM(RTRIM(ISNULL(SUC, ''))),
       @clien = TRY_CONVERT(FLOAT, CLIEN),
       @esta = UPPER(LTRIM(RTRIM(ISNULL(ESTA, ''))))
     FROM dbo.PV_CTR_FOL_ASVR WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
-    WHERE IDFOL = @idfolNorm
-       OR IDFOLINICIAL = @idfolNorm
-    ORDER BY CASE WHEN IDFOL = @idfolNorm THEN 0 ELSE 1 END, FCN DESC, FCNM DESC;
+    WHERE IDFOL = @idfolNorm;
 
-    IF ISNULL(@idfolActual, '') = ''
+    IF @sucDb IS NULL
       THROW 51004, 'La cotizacion no existe', 1;
 
     IF @sucDb = ''
       THROW 51005, 'La cotizacion no tiene sucursal asignada', 1;
-
-    IF ISNULL(@idfolInicial, '') = ''
-      SET @idfolInicial = @idfolActual;
-
-    SET @targetOrigenAut = CASE WHEN @tipotranNorm = 'VF' THEN 'VF' ELSE 'CA' END;
 
     IF @sucInput <> '' AND @sucInput <> @sucDb
       THROW 51006, 'La sucursal enviada no corresponde al folio', 1;
@@ -189,7 +170,7 @@ BEGIN
       @itemsCount = COUNT(1),
       @totalBase = ROUND(SUM(ISNULL(CTD, 0) * ISNULL(PVTA, 0)), 2)
     FROM dbo.PV_TICKET_LOG
-    WHERE IDFOL = @idfolActual;
+    WHERE IDFOL = @idfolNorm;
 
     IF ISNULL(@itemsCount, 0) <= 0
       THROW 51008, 'La cotizacion no tiene articulos para cierre', 1;
@@ -281,8 +262,8 @@ BEGIN
 
     IF @tipotranNorm = 'CA'
     BEGIN
-      IF EXISTS (SELECT 1 FROM @FORMAS WHERE FORM NOT IN ('EFECTIVO', 'CREDITO'))
-        THROW 51014, 'Para cierre tipo CA solo se permite EFECTIVO o CREDITO', 1;
+      IF EXISTS (SELECT 1 FROM @FORMAS WHERE FORM <> 'EFECTIVO')
+        THROW 51014, 'Para cierre tipo CA solo se permite EFECTIVO', 1;
       IF (SELECT COUNT(DISTINCT FORM) FROM @FORMAS) > 1
         THROW 51015, 'Para cierre tipo CA solo se permite una forma de pago', 1;
     END
@@ -336,7 +317,7 @@ BEGIN
           SELECT 1
           FROM dbo.REF_DETALLE R
           WHERE UPPER(LTRIM(RTRIM(ISNULL(R.IDREF, '')))) = UPPER(LTRIM(RTRIM(ISNULL(F.AUT, ''))))
-            AND UPPER(LTRIM(RTRIM(ISNULL(R.IDFOL, '')))) = UPPER(@idfolActual)
+            AND UPPER(LTRIM(RTRIM(ISNULL(R.IDFOL, '')))) = UPPER(@idfolNorm)
             AND UPPER(LTRIM(RTRIM(ISNULL(R.ESTATUS, '')))) = 'PROCESADO'
             AND (
               NULLIF(UPPER(LTRIM(RTRIM(ISNULL(R.TIPO, '')))), '') IS NULL
@@ -351,7 +332,7 @@ BEGIN
     IF EXISTS (
       SELECT 1
       FROM dbo.REF_DETALLE R
-      WHERE UPPER(LTRIM(RTRIM(ISNULL(R.IDFOL, '')))) = UPPER(@idfolActual)
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(R.IDFOL, '')))) = UPPER(@idfolNorm)
         AND UPPER(LTRIM(RTRIM(ISNULL(R.ESTATUS, '')))) IN ('CAPTURADO', 'PROCESADO')
         AND NOT EXISTS (
           SELECT 1
@@ -395,13 +376,12 @@ BEGIN
         THROW 51027, 'Cliente sin limite de credito disponible', 1;
 
       SELECT
-        @ejercido = ROUND(SUM(ISNULL(IMPT, 0)), 2)
+        @ejercido = ROUND(SUM(ABS(ISNULL(IMPT, 0))), 2)
       FROM dbo.DAT_CTRL_CTAS
       WHERE CTA = '101001002'
         AND CLIENT = @clien;
 
       SET @ejercido = ISNULL(@ejercido, 0);
-      SET @ejercido = CASE WHEN @ejercido < 0 THEN ABS(@ejercido) ELSE 0 END;
       SET @disponible = ROUND(@limite - @ejercido, 2);
 
       IF @disponible + @epsilon < @creditoSolicitado
@@ -423,23 +403,11 @@ BEGIN
     FROM sys.columns
     WHERE object_id = @folFormObjId;
 
-    EXEC dbo.sp_pv_next_visible_folio
-      @SUC = @sucDb,
-      @TIPO_FOLIO = @tipotranNorm,
-      @FECHA = @fechaProcesoDate,
-      @IDFOL_OUT = @idfolVisibleNuevo OUTPUT,
-      @CONSEC_OUT = @folioConsecNuevo OUTPUT;
-
-    IF ISNULL(LTRIM(RTRIM(@idfolVisibleNuevo)), '') = ''
-      THROW 51029, 'No se pudo generar folio visible final para la cotizacion', 1;
-
-    SET @traVisibleNuevo = CONVERT(NVARCHAR(255), @folioConsecNuevo);
-
     SET @sql = N'DELETE FROM ' + @folFormTable + N' WHERE IDFOL = @pIDFOL';
     EXEC sys.sp_executesql
       @sql,
       N'@pIDFOL NVARCHAR(255)',
-      @pIDFOL = @idfolActual;
+      @pIDFOL = @idfolNorm;
 
     SET @cambio = CASE WHEN @sumPagos > @totalFinal THEN ROUND(@sumPagos - @totalFinal, 2) ELSE 0 END;
     SET @cambioPendiente = @cambio;
@@ -462,10 +430,7 @@ BEGIN
         SET @efectivoCambioAsignado = 1;
       END
 
-      SET @formaAutFinal = CASE
-        WHEN @formaForm IN ('CREDITO', 'DEUDOR') THEN @idfolVisibleNuevo
-        ELSE @formaAut
-      END;
+      SET @formaAutFinal = CASE WHEN @formaForm IN ('CREDITO', 'DEUDOR') THEN @idfolNorm ELSE @formaAut END;
       SET @execIdf = CONVERT(NVARCHAR(255), NEWID());
 
       SET @sql = N'
@@ -496,7 +461,7 @@ BEGIN
         @sql,
         N'@pIDF NVARCHAR(255), @pIDFOL NVARCHAR(255), @pNOW DATETIME, @pFORM NVARCHAR(40), @pIMPP MONEY, @pIMPC MONEY, @pIMPD MONEY, @pAUT NVARCHAR(255)',
         @pIDF = @execIdf,
-        @pIDFOL = @idfolVisibleNuevo,
+        @pIDFOL = @idfolNorm,
         @pNOW = @fechaProceso,
         @pFORM = @formaForm,
         @pIMPP = @formaImpp,
@@ -545,7 +510,7 @@ BEGIN
 
         SET @nextNdoc = (SELECT MAX(V) FROM (VALUES (@maxCtrl), (@maxDoc), (6000000)) AS T(V)) + 1;
         SET @ndoc = 'N' + CONVERT(VARCHAR(50), @nextNdoc);
-        SET @cargoRtxt = 'Cargo ' + LOWER(@formaForm) + ' ticket ' + @idfolVisibleNuevo;
+        SET @cargoRtxt = 'Cargo ' + LOWER(@formaForm) + ' ticket ' + @idfolNorm;
 
         IF OBJECT_ID('dbo.DAT_CTR_DOC') IS NOT NULL
         BEGIN
@@ -618,7 +583,7 @@ BEGIN
               @sql,
               N'@pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pCLIENT FLOAT, @pCTA NVARCHAR(255), @pCLSD INT, @pIMPT_POS MONEY, @pSUC NVARCHAR(255), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(40), @pRTXT NVARCHAR(255), @pNOW DATETIME',
               @pNDOC = @ndoc,
-              @pIDFOL = @idfolVisibleNuevo,
+              @pIDFOL = @idfolNorm,
               @pCLIENT = @clien,
               @pCTA = '101001002',
               @pCLSD = 602,
@@ -709,7 +674,7 @@ BEGIN
           @pCLSD = 602,
           @pIMPT_NEG = @execImptNeg,
           @pNDOC = @ndoc,
-          @pIDFOL = @idfolVisibleNuevo,
+          @pIDFOL = @idfolNorm,
           @pSUC = @sucDb,
           @pOPV = @opvNorm,
           @pTIPO = @formaForm,
@@ -723,22 +688,9 @@ BEGIN
     CLOSE forma_cursor;
     DEALLOCATE forma_cursor;
 
-    UPDATE dbo.PV_TICKET_LOG
-    SET IDFOL = @idfolVisibleNuevo
-    WHERE IDFOL = @idfolActual;
-
     UPDATE dbo.PV_CTR_ORDS
-    SET
-      IDFOL = @idfolVisibleNuevo,
-      ESTATUS = 2
-    WHERE IDFOL = @idfolActual;
-
-    IF OBJECT_ID('dbo.REF_DETALLE') IS NOT NULL
-    BEGIN
-      UPDATE dbo.REF_DETALLE
-      SET IDFOL = @idfolVisibleNuevo
-      WHERE IDFOL = @idfolActual;
-    END
+    SET ESTATUS = 2
+    WHERE IDFOL = @idfolNorm;
 
     SET @headerObjId = OBJECT_ID('dbo.PV_CTR_FOL_ASVR');
     SELECT
@@ -746,49 +698,71 @@ BEGIN
       @headHasRQFAC = MAX(CASE WHEN UPPER(name) = 'RQFAC' THEN 1 ELSE 0 END),
       @headHasAUT = MAX(CASE WHEN UPPER(name) = 'AUT' THEN 1 ELSE 0 END),
       @headHasFCNM = MAX(CASE WHEN UPPER(name) = 'FCNM' THEN 1 ELSE 0 END),
-      @headHasOPVM = MAX(CASE WHEN UPPER(name) = 'OPVM' THEN 1 ELSE 0 END),
-      @headHasTRA = MAX(CASE WHEN UPPER(name) = 'TRA' THEN 1 ELSE 0 END),
-      @headHasIDFOLINICIAL = MAX(CASE WHEN UPPER(name) = 'IDFOLINICIAL' THEN 1 ELSE 0 END),
-      @headHasORIGENAUT = MAX(CASE WHEN UPPER(name) = 'ORIGEN_AUT' THEN 1 ELSE 0 END)
+      @headHasOPVM = MAX(CASE WHEN UPPER(name) = 'OPVM' THEN 1 ELSE 0 END)
     FROM sys.columns
     WHERE object_id = @headerObjId;
 
     SET @sql = N'
       UPDATE dbo.PV_CTR_FOL_ASVR
       SET
-        IDFOL = @pIDFOLNEW,
         ESTA = ''PAGADO'',
         IMPT = @pTOTAL' +
         CASE WHEN @headHasREQF = 1 THEN N', REQF = @pRQFAC' ELSE N'' END +
         CASE WHEN @headHasRQFAC = 1 THEN N', RQFAC = @pRQFAC' ELSE N'' END +
         CASE WHEN @headHasAUT = 1 THEN N', AUT = @pTIPOTRAN' ELSE N'' END +
         CASE WHEN @headHasFCNM = 1 THEN N', FCNM = @pNOW' ELSE N'' END +
-        CASE WHEN @headHasOPVM = 1 THEN N', OPVM = @pOPV' ELSE N'' END +
-        CASE WHEN @headHasTRA = 1 THEN N', TRA = @pTRA' ELSE N'' END +
-        CASE WHEN @headHasIDFOLINICIAL = 1 THEN N', IDFOLINICIAL = @pIDFOLINICIAL' ELSE N'' END +
-        CASE WHEN @headHasORIGENAUT = 1 THEN N', ORIGEN_AUT = @pORIGENAUT' ELSE N'' END + N'
-      WHERE IDFOL = @pIDFOLOLD';
+        CASE WHEN @headHasOPVM = 1 THEN N', OPVM = @pOPV' ELSE N'' END + N'
+      WHERE IDFOL = @pIDFOL';
     SET @execRqfac = CASE WHEN @tipotranNorm = 'CA' THEN 0 ELSE CASE WHEN @RQFAC = 1 THEN 1 ELSE 0 END END;
 
     EXEC sys.sp_executesql
       @sql,
-      N'@pIDFOLNEW NVARCHAR(255), @pTOTAL MONEY, @pRQFAC INT, @pTIPOTRAN NVARCHAR(10), @pOPV NVARCHAR(255), @pTRA NVARCHAR(255), @pIDFOLINICIAL NVARCHAR(255), @pORIGENAUT VARCHAR(2), @pIDFOLOLD NVARCHAR(255), @pNOW DATETIME',
-      @pIDFOLNEW = @idfolVisibleNuevo,
+      N'@pTOTAL MONEY, @pRQFAC INT, @pTIPOTRAN NVARCHAR(10), @pOPV NVARCHAR(255), @pIDFOL NVARCHAR(255), @pNOW DATETIME',
       @pTOTAL = @totalFinal,
       @pRQFAC = @execRqfac,
       @pTIPOTRAN = @tipotranNorm,
       @pOPV = @opvNorm,
-      @pTRA = @traVisibleNuevo,
-      @pIDFOLINICIAL = @idfolInicial,
-      @pORIGENAUT = @targetOrigenAut,
-      @pIDFOLOLD = @idfolActual,
+      @pIDFOL = @idfolNorm,
       @pNOW = @fechaProceso;
+
+    SET @origenAutFinal = CASE WHEN @tipotranNorm = 'VF' THEN 'VF' ELSE 'CA' END;
+
+    IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'IDFOLINICIAL') IS NOT NULL
+    BEGIN
+      SET @sql = N'
+        UPDATE dbo.PV_CTR_FOL_ASVR
+        SET IDFOLINICIAL = CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(IDFOLINICIAL, ''''))), '''') IS NULL THEN @pIDFOLINICIAL
+          ELSE IDFOLINICIAL
+        END
+        WHERE IDFOL = @pIDFOL;';
+
+      EXEC sys.sp_executesql
+        @sql,
+        N'@pIDFOLINICIAL NVARCHAR(255), @pIDFOL NVARCHAR(255)',
+        @pIDFOLINICIAL = @idfolNorm,
+        @pIDFOL = @idfolNorm;
+    END
+
+    IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'ORIGEN_AUT') IS NOT NULL
+    BEGIN
+      SET @sql = N'
+        UPDATE dbo.PV_CTR_FOL_ASVR
+        SET ORIGEN_AUT = @pORIGENAUT
+        WHERE IDFOL = @pIDFOL;';
+
+      EXEC sys.sp_executesql
+        @sql,
+        N'@pORIGENAUT NVARCHAR(2), @pIDFOL NVARCHAR(255)',
+        @pORIGENAUT = @origenAutFinal,
+        @pIDFOL = @idfolNorm;
+    END
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0
       COMMIT TRANSACTION;
 
     SELECT
-      @idfolVisibleNuevo AS idfol,
+      @idfolNorm AS idfol,
       @tipotranNorm AS tipotran,
       CAST(CASE WHEN @tipotranNorm = 'CA' THEN 0 ELSE CASE WHEN @RQFAC = 1 THEN 1 ELSE 0 END END AS BIT) AS rqfac,
       ROUND(@subtotal, 2) AS subtotal,
@@ -812,4 +786,4 @@ BEGIN
     THROW;
   END CATCH
 END;
-GO
+

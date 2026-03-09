@@ -153,6 +153,10 @@ export class PvCotizacionesCierreService {
     'CREDITO',
     'DEUDOR',
   ]);
+  private static readonly FORMAS_CA_PERMITIDAS = new Set([
+    'EFECTIVO',
+    'CREDITO',
+  ]);
 
   private static readonly ESTADOS_BLOQUEADOS = [
     'TRANSMITIR',
@@ -231,10 +235,10 @@ export class PvCotizacionesCierreService {
       FROM dbo.PV_CTR_FOL_ASVR
       WHERE IDFOL = @0
       `,
-      [idfol],
+      [context.idfol],
     );
     if (!folioRows?.length) {
-      throw new NotFoundException(`La cotizacion ${idfol} no existe`);
+      throw new NotFoundException(`La cotizacion ${context.idfol} no existe`);
     }
     const folio = (folioRows[0] ?? {}) as Record<string, unknown>;
     const tipotran = this.normalizeTipoTranFromFolio(folio.AUT);
@@ -250,9 +254,9 @@ export class PvCotizacionesCierreService {
 
     const [header, items, formas, ords] = await Promise.all([
       this.loadPrintHeader(this.dataSource, context.suc),
-      this.loadPrintTicketItems(this.dataSource, idfol),
-      this.loadPrintFormas(this.dataSource, idfol),
-      this.loadPrintOrds(this.dataSource, idfol),
+      this.loadPrintTicketItems(this.dataSource, context.idfol),
+      this.loadPrintFormas(this.dataSource, context.idfol),
+      this.loadPrintOrds(this.dataSource, context.idfol),
     ]);
 
     const sumPagos = this.round2(
@@ -713,6 +717,8 @@ export class PvCotizacionesCierreService {
       SELECT TOP 1 *
       FROM dbo.PV_CTR_FOL_ASVR${lockHint}
       WHERE IDFOL = @0
+         OR IDFOLINICIAL = @0
+      ORDER BY CASE WHEN IDFOL = @0 THEN 0 ELSE 1 END, FCN DESC, FCNM DESC
       `,
       [idfol],
     );
@@ -721,10 +727,14 @@ export class PvCotizacionesCierreService {
     }
 
     const folio = folioRows[0] as Record<string, unknown>;
+    const currentIdfol = this.normalizeText(folio.IDFOL);
+    if (!currentIdfol) {
+      throw new NotFoundException(`La cotizacion ${idfol} no existe`);
+    }
     const suc = this.normalizeText(folio.SUC);
     if (!suc) {
       throw new BadRequestException(
-        `La cotizacion ${idfol} no tiene sucursal asignada`,
+        `La cotizacion ${currentIdfol} no tiene sucursal asignada`,
       );
     }
 
@@ -743,7 +753,7 @@ export class PvCotizacionesCierreService {
     const esta = this.normalizeText(folio.ESTA) || null;
     if (validateEstado && this.isEstadoBloqueado(esta)) {
       throw new ConflictException(
-        `La cotizacion ${idfol} ya no permite cierre en estado ${esta}`,
+        `La cotizacion ${currentIdfol} ya no permite cierre en estado ${esta}`,
       );
     }
 
@@ -755,20 +765,20 @@ export class PvCotizacionesCierreService {
       FROM dbo.PV_TICKET_LOG
       WHERE IDFOL = @0
       `,
-      [idfol],
+      [currentIdfol],
     );
     const ticketStats = (ticketRows?.[0] ?? {}) as Record<string, unknown>;
     const itemsCount = this.toInt(ticketStats.ITEMS_COUNT) ?? 0;
     if (itemsCount <= 0) {
       throw new BadRequestException(
-        `La cotizacion ${idfol} no tiene articulos para cierre`,
+        `La cotizacion ${currentIdfol} no tiene articulos para cierre`,
       );
     }
 
     const totalBase = this.round2(this.toNumber(ticketStats.TOTAL_BASE) ?? 0);
     if (totalBase <= 0) {
       throw new BadRequestException(
-        `La cotizacion ${idfol} tiene total base invalido`,
+        `La cotizacion ${currentIdfol} tiene total base invalido`,
       );
     }
 
@@ -793,7 +803,7 @@ export class PvCotizacionesCierreService {
     const rqfacDefault = (this.toInt(folio.REQF) ?? 0) === 1;
 
     return {
-      idfol,
+      idfol: currentIdfol,
       suc,
       clien,
       esta,
@@ -940,6 +950,15 @@ export class PvCotizacionesCierreService {
     const incomingSet = new Set(formas.map((item) => item.form));
 
     if (input.tipotran === 'CA') {
+      const formasInvalidasCa = formas.filter(
+        (item) =>
+          !PvCotizacionesCierreService.FORMAS_CA_PERMITIDAS.has(item.form),
+      );
+      if (formasInvalidasCa.length > 0) {
+        throw new BadRequestException(
+          'Para cierre tipo CA solo se permite EFECTIVO o CREDITO',
+        );
+      }
       if (incomingSet.size > 1) {
         throw new BadRequestException(
           'Para cierre tipo CA solo se permite una forma de pago',
@@ -1600,15 +1619,16 @@ export class PvCotizacionesCierreService {
   ) {
     const rows = await executor.query(
       `
-      SELECT SUM(ABS(ISNULL(IMPT, 0))) AS SALDO_VIGENTE
+      SELECT SUM(ISNULL(IMPT, 0)) AS SALDO_NETO
       FROM dbo.DAT_CTRL_CTAS
       WHERE CTA = @0
         AND CLIENT = @1
       `,
       [PvCotizacionesCierreService.CTA_CTRL_CTAS_CARGO_CREDITO, clientId],
     );
-    const saldo = this.toNumber((rows?.[0] ?? {})['SALDO_VIGENTE']) ?? 0;
-    return this.round2(Math.max(saldo, 0));
+    const saldoNeto = this.toNumber((rows?.[0] ?? {})['SALDO_NETO']) ?? 0;
+    const creditoEjercido = Math.max(-saldoNeto, 0);
+    return this.round2(creditoEjercido);
   }
 
   private async procedureExists(executor: SqlExecutor, procedureName: string) {

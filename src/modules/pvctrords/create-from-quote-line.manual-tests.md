@@ -3,7 +3,7 @@
 Casos minimos de validacion:
 
 1. Creacion normal
-- `clien != 1`, `estado = EDITANDO`, `ctd = 1` o `0.5`, `ordExistente` vacio.
+- `clien != 1`, `estado = PENDIENTE`, `ctd = 1` o `0.5`, `ordExistente` vacio.
 - `tipo` en `TALLADO` o `BISELADO`, `fechaEntrega` opcional, `comad` opcional.
 - Resultado esperado: `created = true`, `iord` con formato `SUC + serie1990 + consecutivo`, 1 header y 3 details (`OD`, `OI`, `ADD`).
 
@@ -12,7 +12,7 @@ Casos minimos de validacion:
 - Resultado esperado: HTTP 400 con `code = CLIENT_REQUIRED`.
 
 3. Estado invalido
-- `estado != EDITANDO`.
+- `estado != PENDIENTE`.
 - Resultado esperado: HTTP 400 con `code = INVALID_STATUS`.
 
 4. Cantidad invalida
@@ -42,7 +42,7 @@ $body = @{
   descArt = 'Articulo demo'
   ctd = 1
   clien = 2
-  estado = 'EDITANDO'
+  estado = 'PENDIENTE'
   tipo = 'TALLADO'
   fechaEntrega = '2026-02-20T00:00:00.000Z'
   comad = 'Observaciones del tallado'
@@ -56,3 +56,4 @@ $body = @{
   }
 }
 ```
+
