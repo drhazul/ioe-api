@@ -44,14 +44,17 @@ export class PagosServiciosService {
 
   async listFolios(query: ListPsFoliosQueryDto, user: JwtPayload) {
     try {
-      const estadosPanelPermitidos = new Set(['PENDIENTE', 'EDITANDO', 'PAGADO']);
+      const estadosPanelPermitidos = new Set([
+        'PENDIENTE',
+        'EDITANDO',
+        'PAGADO',
+      ]);
       const isAdmin = this.isAdmin(user);
       const actorSuc = this.normalize(user?.suc ?? '');
       const actorOpv = this.normalize(user?.username ?? '');
       const requestedSuc = this.normalize(query.suc ?? '');
       const requestedOpv = this.normalize(query.opv ?? '');
-      const esta =
-        this.normalize(query.esta ?? 'ALL').toUpperCase() || 'ALL';
+      const esta = this.normalize(query.esta ?? 'ALL').toUpperCase() || 'ALL';
       const search = this.normalize(query.search ?? '');
 
       if (!isAdmin && actorSuc.length === 0) {
@@ -393,7 +396,10 @@ export class PagosServiciosService {
         items: this.parseJsonArray(detalleJson),
       };
     } catch (error) {
-      throw this.mapError(error, 'No se pudo consultar detalle de adeudos por folio');
+      throw this.mapError(
+        error,
+        'No se pudo consultar detalle de adeudos por folio',
+      );
     }
   }
 
@@ -411,12 +417,7 @@ export class PagosServiciosService {
 
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_ps_ticket_set_reference_folio @IDFOL_ACTUAL=@0, @TICKET_LINE_ID=@1, @IDFOL_REF=@2, @USER=@3',
-        [
-          folio.IDFOL,
-          this.normalize(dto.art),
-          refIdfol,
-          this.auditActor(user),
-        ],
+        [folio.IDFOL, this.normalize(dto.art), refIdfol, this.auditActor(user)],
       );
       const result = this.firstRow(rows);
 
@@ -886,7 +887,9 @@ export class PagosServiciosService {
     row.ORIGEN_AUT = origenAut;
   }
 
-  private async resolveReferenceOriginByFolio(refIdfol: string): Promise<'CA' | 'VF'> {
+  private async resolveReferenceOriginByFolio(
+    refIdfol: string,
+  ): Promise<'CA' | 'VF'> {
     const rows = await this.dataSource.query(
       `
       SELECT TOP 1 AUT, ORIGEN_AUT
@@ -909,7 +912,10 @@ export class PagosServiciosService {
     });
   }
 
-  private async assertNoMixedOrigen(folio: FolioRow, targetOrigin: 'CA' | 'VF') {
+  private async assertNoMixedOrigen(
+    folio: FolioRow,
+    targetOrigin: 'CA' | 'VF',
+  ) {
     const explicitOrigin = this.normalizeUpper(folio.ORIGEN_AUT ?? '');
     const aut = normalizeAut(folio.AUT ?? '');
     const hasExplicit = explicitOrigin === 'CA' || explicitOrigin === 'VF';
@@ -921,7 +927,11 @@ export class PagosServiciosService {
     }
 
     if (!hasExplicit && aut !== 'PS') {
-      const inferred = inferOrigenAut({ aut, origenAut: explicitOrigin, fallback: 'CA' });
+      const inferred = inferOrigenAut({
+        aut,
+        origenAut: explicitOrigin,
+        fallback: 'CA',
+      });
       if (inferred !== targetOrigin) {
         throw new ConflictException(
           `No se permite mezclar referencias de origen ${inferred} con ${targetOrigin} en la misma transacción de pago de servicio.`,

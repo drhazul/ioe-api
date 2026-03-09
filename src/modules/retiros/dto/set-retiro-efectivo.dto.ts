@@ -51,4 +51,3 @@ export class SetRetiroEfectivoDto {
   @Type(() => SetRetiroEfectivoItemDto)
   items?: SetRetiroEfectivoItemDto[];
 }
-

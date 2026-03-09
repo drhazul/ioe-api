@@ -160,4 +160,3 @@ async function assertErrorCode(
   }
   throw new Error(`Expected HttpException with code ${expectedCode}`);
 }
-

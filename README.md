@@ -92,10 +92,11 @@ Opcionales:
 - `/conteos/*`, `/capturas/*`, `/datcontctrl`, `/datdetsvr`, `/datmb51`, `/dat-mb51/search`, `/dat-mb52/resumen`
 - Control de cuentas:
 - `/cat-ctas/*`, `/ctrl-ctas/config`, `/ctrl-ctas/catalog/*`, `/ctrl-ctas/consulta/*`
+- Compatibilidad histórica (2026-03): en `POST /ctrl-ctas/consulta/*`, API ejecuta SQL directo para estos reportes, normaliza rango `FCND` (completa faltantes con `1900-01-01` y `2100-12-31`) e incluye filas legacy con `SUC` nulo/vacío cuando hay filtro por sucursal.
 - Nota de integracion UI: la condicion para habilitar exportacion Excel en `Resumen por Deudor` (CTA unica o CLIENT seleccionado) se resuelve en frontend y no requiere cambios de API.
 - Nota de integracion UI: cuando hay CTA unica y no hay CLIENT seleccionado, frontend exporta `resumen-transaccion` y `detalle` para todos los CLIENT de esa consulta (consulta `detalle` por cliente en bloques de `idfols`), sin cambios de contrato.
 - Nota de integracion UI: el progreso de exportacion se maneja en un modal del frontend; no requiere cambios en API.
-- Nota de integracion UI: el filtro `!= 0` inicia activo por defecto en la pantalla de resumen (comportamiento solo frontend).
+- Nota de integracion UI: el filtro `!= 0` inicia desactivado por defecto en la pantalla de resumen para mostrar todos los registros (comportamiento solo frontend; el usuario puede activarlo manualmente).
 - Punto de venta:
 - `/factclientshp`, `/pvctrfolasvr`, `/pvctrfolform`, `/pvctrords`, `/pvctrordsdet`, `/pvticketlog`, `/refdetalle`
 - Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.

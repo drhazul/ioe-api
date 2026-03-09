@@ -35,4 +35,3 @@ export class ListPsFoliosQueryDto {
   @Length(1, 255)
   search?: string;
 }
-

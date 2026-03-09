@@ -10,4 +10,3 @@ import { RetirosService } from './retiros.service';
   providers: [RetirosService],
 })
 export class RetirosModule {}
-

@@ -49,6 +49,28 @@ export class CtrlCtasService {
     return normalized;
   }
 
+  private normalizeDateRange(
+    fecIniRaw: string | null,
+    fecFinRaw: string | null,
+  ) {
+    // Compatibilidad con SPs legacy que, al recibir NULL, fuerzan ventana corta.
+    const minDate = '1900-01-01';
+    const maxDate = '2100-12-31';
+
+    const fecIni = fecIniRaw ?? minDate;
+    const fecFin = fecFinRaw ?? maxDate;
+
+    const start = new Date(fecIni);
+    const end = new Date(fecFin);
+    if (start.getTime() > end.getTime()) {
+      throw new BadRequestException(
+        'Rango de fechas invalido: fecIni es mayor a fecFin',
+      );
+    }
+
+    return { fecIni, fecFin };
+  }
+
   private requireUserSuc(user?: JwtPayload | null) {
     const suc = String(user?.suc ?? '').trim();
     if (!suc.length) {
@@ -140,6 +162,135 @@ export class CtrlCtasService {
     return Array.isArray(rows) && rows.length > 0;
   }
 
+  private getConsultaSelectSql(
+    consultaName:
+      | 'sp_ctrlctas_resumen_cliente'
+      | 'sp_ctrlctas_resumen_transaccion'
+      | 'sp_ctrlctas_detalle_transaccion',
+  ) {
+    switch (consultaName) {
+      case 'sp_ctrlctas_resumen_cliente':
+        return `
+      SELECT
+        ctas.CLIENT,
+        cli.RazonSocialReceptor,
+        SUM(ISNULL(ctas.IMPT, 0)) AS TOTAL
+      FROM dbo.DAT_CTRL_CTAS ctas
+      LEFT JOIN dbo.FACT_CLIENT_SHP cli
+        ON cli.IDC = ctas.CLIENT
+      WHERE
+        (
+          NOT EXISTS(SELECT 1 FROM @Sucs)
+          OR ctas.SUC IN (SELECT Value FROM @Sucs)
+          OR NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(255), ctas.SUC))), '') IS NULL
+        )
+        AND (NOT EXISTS(SELECT 1 FROM @Ctas) OR ctas.CTA IN (SELECT Value FROM @Ctas))
+        AND (NOT EXISTS(SELECT 1 FROM @Clsds) OR ctas.CLSD IN (SELECT Value FROM @Clsds))
+        AND (NOT EXISTS(SELECT 1 FROM @IdFols) OR ctas.IDFOL IN (SELECT Value FROM @IdFols))
+        AND (NOT EXISTS(SELECT 1 FROM @Clients) OR CAST(ctas.CLIENT AS nvarchar(255)) IN (SELECT Value FROM @Clients))
+        AND (@6 IS NULL OR ctas.FCND >= @6)
+        AND (@7 IS NULL OR ctas.FCND < DATEADD(day, 1, @7))
+        AND (
+          COL_LENGTH('dbo.DAT_CTRL_CTAS', 'IDOPV') IS NULL
+          OR NOT EXISTS(SELECT 1 FROM @Opvs)
+          OR EXISTS (
+            SELECT 1
+            FROM OPENJSON((SELECT ctas.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)) opv
+            WHERE opv.[key] = 'IDOPV'
+              AND LTRIM(RTRIM(CONVERT(nvarchar(255), opv.[value]))) IN (SELECT Value FROM @Opvs)
+          )
+        )
+      GROUP BY ctas.CLIENT, cli.RazonSocialReceptor
+      ORDER BY TOTAL DESC;
+      `;
+      case 'sp_ctrlctas_resumen_transaccion':
+        return `
+      SELECT
+        ctas.CLIENT,
+        cli.RazonSocialReceptor,
+        ctas.CTA,
+        ctas.IDFOL,
+        SUM(ISNULL(ctas.IMPT, 0)) AS TOTAL
+      FROM dbo.DAT_CTRL_CTAS ctas
+      LEFT JOIN dbo.FACT_CLIENT_SHP cli
+        ON cli.IDC = ctas.CLIENT
+      WHERE
+        (
+          NOT EXISTS(SELECT 1 FROM @Sucs)
+          OR ctas.SUC IN (SELECT Value FROM @Sucs)
+          OR NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(255), ctas.SUC))), '') IS NULL
+        )
+        AND (NOT EXISTS(SELECT 1 FROM @Ctas) OR ctas.CTA IN (SELECT Value FROM @Ctas))
+        AND (NOT EXISTS(SELECT 1 FROM @Clsds) OR ctas.CLSD IN (SELECT Value FROM @Clsds))
+        AND (NOT EXISTS(SELECT 1 FROM @IdFols) OR ctas.IDFOL IN (SELECT Value FROM @IdFols))
+        AND (NOT EXISTS(SELECT 1 FROM @Clients) OR CAST(ctas.CLIENT AS nvarchar(255)) IN (SELECT Value FROM @Clients))
+        AND (@6 IS NULL OR ctas.FCND >= @6)
+        AND (@7 IS NULL OR ctas.FCND < DATEADD(day, 1, @7))
+        AND (
+          COL_LENGTH('dbo.DAT_CTRL_CTAS', 'IDOPV') IS NULL
+          OR NOT EXISTS(SELECT 1 FROM @Opvs)
+          OR EXISTS (
+            SELECT 1
+            FROM OPENJSON((SELECT ctas.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)) opv
+            WHERE opv.[key] = 'IDOPV'
+              AND LTRIM(RTRIM(CONVERT(nvarchar(255), opv.[value]))) IN (SELECT Value FROM @Opvs)
+          )
+        )
+      GROUP BY ctas.CLIENT, cli.RazonSocialReceptor, ctas.CTA, ctas.IDFOL
+      ORDER BY ctas.CLIENT, ctas.CTA, ctas.IDFOL;
+      `;
+      case 'sp_ctrlctas_detalle_transaccion':
+      default:
+        return `
+      SELECT
+        ctas.NDOC,
+        ctas.SUC,
+        ctas.FCND,
+        ctas.CLIENT,
+        cli.RazonSocialReceptor,
+        ctas.CTA,
+        ctas.CLSD,
+        ctas.IDFOL,
+        ctas.RTXT,
+        ctas.IMPT,
+        CASE
+          WHEN COL_LENGTH('dbo.DAT_CTRL_CTAS', 'IDOPV') IS NULL THEN NULL
+          ELSE (
+            SELECT TOP 1 LTRIM(RTRIM(CONVERT(nvarchar(255), opv.[value])))
+            FROM OPENJSON((SELECT ctas.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)) opv
+            WHERE opv.[key] = 'IDOPV'
+          )
+        END AS IDOPV
+      FROM dbo.DAT_CTRL_CTAS ctas
+      LEFT JOIN dbo.FACT_CLIENT_SHP cli
+        ON cli.IDC = ctas.CLIENT
+      WHERE
+        ctas.IDFOL IN (SELECT Value FROM @IdFols)
+        AND (
+          NOT EXISTS(SELECT 1 FROM @Sucs)
+          OR ctas.SUC IN (SELECT Value FROM @Sucs)
+          OR NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(255), ctas.SUC))), '') IS NULL
+        )
+        AND (NOT EXISTS(SELECT 1 FROM @Ctas) OR ctas.CTA IN (SELECT Value FROM @Ctas))
+        AND (NOT EXISTS(SELECT 1 FROM @Clsds) OR ctas.CLSD IN (SELECT Value FROM @Clsds))
+        AND (NOT EXISTS(SELECT 1 FROM @Clients) OR CAST(ctas.CLIENT AS nvarchar(255)) IN (SELECT Value FROM @Clients))
+        AND (@6 IS NULL OR ctas.FCND >= @6)
+        AND (@7 IS NULL OR ctas.FCND < DATEADD(day, 1, @7))
+        AND (
+          COL_LENGTH('dbo.DAT_CTRL_CTAS', 'IDOPV') IS NULL
+          OR NOT EXISTS(SELECT 1 FROM @Opvs)
+          OR EXISTS (
+            SELECT 1
+            FROM OPENJSON((SELECT ctas.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)) opv
+            WHERE opv.[key] = 'IDOPV'
+              AND LTRIM(RTRIM(CONVERT(nvarchar(255), opv.[value]))) IN (SELECT Value FROM @Opvs)
+          )
+        )
+      ORDER BY ctas.FCND DESC, ctas.NDOC;
+      `;
+    }
+  }
+
   private async executeConsulta(
     procedureName:
       | 'sp_ctrlctas_resumen_cliente'
@@ -164,8 +315,10 @@ export class CtrlCtasService {
     const clsds = this.normalizeList(dto.clsds);
     const idfols = this.normalizeList([...(dto.idfols ?? []), dto.idfol ?? '']);
     const opvs = hasIdopv ? this.normalizeList(dto.opvs) : [];
-    const fecIni = this.parseDate(dto.fecIni);
-    const fecFin = this.parseDate(dto.fecFin);
+    const dateRange = this.normalizeDateRange(
+      this.parseDate(dto.fecIni),
+      this.parseDate(dto.fecFin),
+    );
 
     if (
       procedureName === 'sp_ctrlctas_detalle_transaccion' &&
@@ -175,6 +328,7 @@ export class CtrlCtasService {
         'Para detalle se requiere al menos un IDFOL',
       );
     }
+    const consultaSql = this.getConsultaSelectSql(procedureName);
 
     const rows = await this.dataSource.query(
       `
@@ -215,15 +369,7 @@ export class CtrlCtasService {
       FROM OPENJSON(@5)
       WHERE LTRIM(RTRIM([value])) <> '';
 
-      EXEC dbo.${procedureName}
-        @Sucs = @Sucs,
-        @Ctas = @Ctas,
-        @Clients = @Clients,
-        @Clsds = @Clsds,
-        @IdFols = @IdFols,
-        @Opvs = @Opvs,
-        @FecIni = @6,
-        @FecFin = @7;
+      ${consultaSql}
       `,
       [
         JSON.stringify(sucs),
@@ -232,8 +378,8 @@ export class CtrlCtasService {
         JSON.stringify(clsds),
         JSON.stringify(idfols),
         JSON.stringify(opvs),
-        fecIni,
-        fecFin,
+        dateRange.fecIni,
+        dateRange.fecFin,
       ],
     );
 

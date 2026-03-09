@@ -56,7 +56,12 @@ export class PvCtrFolAsvrEntity {
   @Column({ name: 'IDFOLORIG', type: 'varchar', length: 50, nullable: true })
   IDFOLORIG: string | null;
 
-  @Column({ name: 'IDFOLINICIAL', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'IDFOLINICIAL',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   IDFOLINICIAL: string | null;
 
   @Column({ name: 'ORIGEN_AUT', type: 'varchar', length: 2, nullable: true })

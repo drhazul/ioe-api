@@ -99,7 +99,7 @@ export class CajonEstadoService {
         NOM: this.normalize(raw.NOM),
         IMPT: this.toNumber(raw.IMPT) ?? 0,
         IMPR: this.toNumber(raw.IMPR) ?? 0,
-        IMPE: raw.IMPE == null ? null : this.toNumber(raw.IMPE) ?? 0,
+        IMPE: raw.IMPE == null ? null : (this.toNumber(raw.IMPE) ?? 0),
         DIFD: this.toNumber(raw.DIFD) ?? 0,
       }));
 

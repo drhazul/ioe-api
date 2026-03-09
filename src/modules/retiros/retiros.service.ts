@@ -69,7 +69,9 @@ export class RetirosService {
       const created = this.firstRow(rows);
       const idret = this.normalize(this.getRowValue(created, 'IDRET'));
       if (!idret) {
-        throw new ConflictException('No se pudo recuperar IDRET del nuevo retiro');
+        throw new ConflictException(
+          'No se pudo recuperar IDRET del nuevo retiro',
+        );
       }
 
       const payload = await this.getById(idret, user);
@@ -225,11 +227,7 @@ export class RetirosService {
     }
   }
 
-  async deleteDetalle(
-    idforRaw: string,
-    user: JwtPayload,
-    ip: string | null,
-  ) {
+  async deleteDetalle(idforRaw: string, user: JwtPayload, ip: string | null) {
     try {
       const opv = this.resolveOpv(user);
       const idfor = this.normalize(idforRaw);
@@ -397,9 +395,7 @@ export class RetirosService {
       ok: true,
       header,
       detalles,
-      total: this.round2(
-        detalles.reduce((acc, item) => acc + item.impf, 0),
-      ),
+      total: this.round2(detalles.reduce((acc, item) => acc + item.impf, 0)),
     };
   }
 

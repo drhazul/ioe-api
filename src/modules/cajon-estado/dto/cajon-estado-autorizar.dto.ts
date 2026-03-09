@@ -5,7 +5,9 @@ import { IsString, MinLength } from 'class-validator';
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
 
 export class CajonEstadoAutorizarDto {
-  @ApiProperty({ description: 'Password del supervisor para autorizar consulta' })
+  @ApiProperty({
+    description: 'Password del supervisor para autorizar consulta',
+  })
   @Transform(({ value }) => toTrimmedString(value))
   @IsString()
   @MinLength(1)

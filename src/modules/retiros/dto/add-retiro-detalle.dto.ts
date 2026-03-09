@@ -20,4 +20,3 @@ export class AddRetiroDetalleDto {
   @Min(0)
   impf?: number;
 }
-

@@ -99,4 +99,3 @@ export class RetirosController {
     return ip ? String(ip) : null;
   }
 }
-

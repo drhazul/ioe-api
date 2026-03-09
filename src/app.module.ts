@@ -58,6 +58,7 @@ import { PagosServiciosModule } from './modules/pagos-servicios/pagos-servicios.
 import { RetirosModule } from './modules/retiros/retiros.module';
 import { FormasPagoCambiosModule } from './modules/formas-pago-cambios/formas-pago-cambios.module';
 import { CajonEstadoModule } from './modules/cajon-estado/cajon-estado.module';
+import { CajaGeneralModule } from './modules/caja-general/caja-general.module';
 
 @Module({
   imports: [
@@ -118,6 +119,7 @@ import { CajonEstadoModule } from './modules/cajon-estado/cajon-estado.module';
     RetirosModule,
     FormasPagoCambiosModule,
     CajonEstadoModule,
+    CajaGeneralModule,
   ],
   providers: [
     {

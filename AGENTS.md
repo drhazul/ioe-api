@@ -71,6 +71,7 @@
 ### Control de cuentas
 
 - `ctrl-ctas`: fuente principal `DAT_CTRL_CTAS`, catalogos `DAT_CAT_CTAS`, `FACT_CLIENT_SHP`, `PV_OPV`.
+- compatibilidad histórica `ctrl-ctas` (2026-03): en `POST /ctrl-ctas/consulta/*`, API ejecuta SQL directo (sin depender de SP legacy para estos reportes), normaliza `FCND`, rellena faltantes (`fecIni`/`fecFin`) con `1900-01-01` y `2100-12-31`, e incluye filas legacy con `SUC` nulo/vacío cuando hay filtro por sucursal.
 - `cat-ctas`: `DAT_CAT_CTAS` (`CTA`, `DCTA`, `RELACION`, `SUC`), con autorizacion por `USR_MOD_SUC`.
 
 ### Punto de venta / referencias
@@ -476,7 +477,7 @@
 - Trazabilidad UI (frontend): la regla de habilitacion de exportar en `Resumen por Deudor` se controla en app (CTA unica o CLIENT seleccionado) y no modifica contrato ni payload de los endpoints `/ctrl-ctas/consulta/*`.
 - Trazabilidad UI (frontend): en exportacion sin CLIENT (CTA unica), la app consulta `resumen-transaccion` y `detalle` para todos los CLIENT aplicables, enviando `idfols` por cliente en bloques; tampoco cambia contrato API.
 - Trazabilidad UI (frontend): el progreso de exportacion se muestra en modal de app; no introduce endpoints nuevos ni cambios de payload.
-- Trazabilidad UI (frontend): el filtro visual `!= 0` inicia activo por defecto en los tres niveles de la pantalla de resumen, sin cambios de contrato API.
+- Trazabilidad UI (frontend): el filtro visual `!= 0` inicia desactivado por defecto en los tres niveles de la pantalla de resumen para mostrar todos los registros; el usuario puede activarlo manualmente (sin cambios de contrato API).
 
 ## Buenas practicas
 

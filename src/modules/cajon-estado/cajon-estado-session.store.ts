@@ -58,7 +58,9 @@ export class CajonEstadoSessionStore {
 
   private trimOverflow(): void {
     while (this.sessions.size > this.maxSessions) {
-      const oldestToken = this.sessions.keys().next().value as string | undefined;
+      const oldestToken = this.sessions.keys().next().value as
+        | string
+        | undefined;
       if (!oldestToken) return;
       const oldestSession = this.sessions.get(oldestToken);
       this.sessions.delete(oldestToken);

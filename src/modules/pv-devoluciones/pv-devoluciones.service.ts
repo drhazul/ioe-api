@@ -1125,13 +1125,16 @@ export class PvDevolucionesService {
       origenAut: row.ORIGEN_AUT_DEV,
     });
     const autOrigRaw = this.normalizeUpper(row.AUT_ORIG);
-    const origHomologation = await this.ensureFolioHomologationFields(executor, {
-      idfol: idfolOrig,
-      aut: autOrigRaw,
-      idfolInicial: row.IDFOLINICIAL_ORIG,
-      origenAut: row.ORIGEN_AUT_ORIG,
-      fallback: devHomologation.origenAut,
-    });
+    const origHomologation = await this.ensureFolioHomologationFields(
+      executor,
+      {
+        idfol: idfolOrig,
+        aut: autOrigRaw,
+        idfolInicial: row.IDFOLINICIAL_ORIG,
+        origenAut: row.ORIGEN_AUT_ORIG,
+        fallback: devHomologation.origenAut,
+      },
+    );
     const autOrig =
       autOrigRaw === 'CA' || autOrigRaw === 'VF'
         ? autOrigRaw
@@ -2053,9 +2056,7 @@ export class PvDevolucionesService {
       if (colsSet.has('AUT')) {
         cols.push('AUT');
         values.push(`@${params.length}`);
-        params.push(
-          isCreditoDeudor ? input.idfolDev : forma.aut,
-        );
+        params.push(isCreditoDeudor ? input.idfolDev : forma.aut);
       }
 
       await executor.query(
@@ -2179,12 +2180,7 @@ export class PvDevolucionesService {
     },
   ) {
     const cols = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
-    const sets: string[] = [
-      'ESTA = @1',
-      'AUT = @2',
-      'IMPT = @3',
-      'FCNM = @4',
-    ];
+    const sets: string[] = ['ESTA = @1', 'AUT = @2', 'IMPT = @3', 'FCNM = @4'];
     const params: unknown[] = [
       input.idfolDev,
       'PAGADO',
@@ -2227,9 +2223,7 @@ export class PvDevolucionesService {
   }
 
   private extractVisibleFolioType(idfol: string): 'CP' | 'CA' | 'VF' | '' {
-    const match = this
-      .normalizeUpper(idfol)
-      .match(/-(CP|CA|VF)-/);
+    const match = this.normalizeUpper(idfol).match(/-(CP|CA|VF)-/);
     const tipo = match?.[1] ?? '';
     return tipo === 'CP' || tipo === 'CA' || tipo === 'VF' ? tipo : '';
   }
@@ -2276,7 +2270,10 @@ export class PvDevolucionesService {
       finalizedAt: Date;
     },
   ) {
-    if (this.normalizeUpper(input.idfolActual) === this.normalizeUpper(input.idfolNuevo)) {
+    if (
+      this.normalizeUpper(input.idfolActual) ===
+      this.normalizeUpper(input.idfolNuevo)
+    ) {
       return;
     }
 
@@ -2326,7 +2323,10 @@ export class PvDevolucionesService {
     }
 
     if (await this.tableExists(executor, 'dbo.PV_DEV_DET_TMP')) {
-      const tmpCols = await this.loadTableColumns(executor, 'dbo.PV_DEV_DET_TMP');
+      const tmpCols = await this.loadTableColumns(
+        executor,
+        'dbo.PV_DEV_DET_TMP',
+      );
       if (tmpCols.has('IDFOLDEV')) {
         await executor.query(
           `
@@ -2340,7 +2340,10 @@ export class PvDevolucionesService {
     }
 
     if (await this.tableExists(executor, 'dbo.FACT_IDFOLDEV')) {
-      const factCols = await this.loadTableColumns(executor, 'dbo.FACT_IDFOLDEV');
+      const factCols = await this.loadTableColumns(
+        executor,
+        'dbo.FACT_IDFOLDEV',
+      );
       if (factCols.has('IDFOLDEV')) {
         await executor.query(
           `
@@ -2885,8 +2888,12 @@ export class PvDevolucionesService {
   private isTransactionAbortError(error: unknown) {
     const err = error as { code?: unknown; message?: unknown } | null;
     const code = this.normalizeUpper(String(err?.code ?? ''));
-    const message = this.normalizeText(String(err?.message ?? '')).toLowerCase();
-    return code === 'EABORT' || message.includes('transaction has been aborted');
+    const message = this.normalizeText(
+      String(err?.message ?? ''),
+    ).toLowerCase();
+    return (
+      code === 'EABORT' || message.includes('transaction has been aborted')
+    );
   }
 
   private mapError(error: unknown, fallback: string): Error {

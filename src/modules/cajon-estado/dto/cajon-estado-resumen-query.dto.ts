@@ -5,7 +5,9 @@ import { IsOptional, IsString, Matches } from 'class-validator';
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
 
 export class CajonEstadoResumenQueryDto {
-  @ApiPropertyOptional({ description: 'Fecha de consulta en formato YYYY-MM-DD' })
+  @ApiPropertyOptional({
+    description: 'Fecha de consulta en formato YYYY-MM-DD',
+  })
   @Transform(({ value }) => {
     const text = toTrimmedString(value);
     return text.length === 0 ? undefined : text;

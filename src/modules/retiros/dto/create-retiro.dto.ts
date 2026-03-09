@@ -12,4 +12,3 @@ export class CreateRetiroDto {
   @Length(1, 255)
   ter?: string;
 }
-

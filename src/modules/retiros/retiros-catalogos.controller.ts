@@ -15,4 +15,3 @@ export class RetirosCatalogosController {
     return this.service.listFormasRetiro();
   }
 }
-

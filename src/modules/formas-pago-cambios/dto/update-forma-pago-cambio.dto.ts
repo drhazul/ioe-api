@@ -45,8 +45,7 @@ export class UpdateFormaPagoCambioDto {
   AUT?: string;
 
   @ApiPropertyOptional({
-    description:
-      'Compatibilidad camelCase de referencia/autorización para AUT',
+    description: 'Compatibilidad camelCase de referencia/autorización para AUT',
     example: 'REF123456',
   })
   @IsOptional()
@@ -64,7 +63,9 @@ export class UpdateFormaPagoCambioDto {
   @IsBoolean()
   @Transform(({ value }) => {
     if (value === true || value === false) return value;
-    const text = String(value ?? '').trim().toLowerCase();
+    const text = String(value ?? '')
+      .trim()
+      .toLowerCase();
     return text == '1' || text == 'true' || text == 'yes';
   })
   clearAut?: boolean;

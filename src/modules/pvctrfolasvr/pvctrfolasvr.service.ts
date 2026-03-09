@@ -104,7 +104,9 @@ export class PvCtrFolAsvrService {
     );
 
     const items = (rows ?? []) as Record<string, unknown>[];
-    await Promise.all(items.map((row) => this.regularizeHistoricalFolioRow(row)));
+    await Promise.all(
+      items.map((row) => this.regularizeHistoricalFolioRow(row)),
+    );
     return items;
   }
 
@@ -141,7 +143,8 @@ export class PvCtrFolAsvrService {
 
     const aut = normalizeAut(dto.AUT ?? 'CP');
     const esta = normalizeEstadoOperativo(dto.ESTA ?? 'PENDIENTE');
-    const idfolInicial = String(dto.IDFOLINICIAL ?? dto.IDFOL ?? '').trim() || dto.IDFOL;
+    const idfolInicial =
+      String(dto.IDFOLINICIAL ?? dto.IDFOL ?? '').trim() || dto.IDFOL;
     const origenAut = inferOrigenAut({
       aut,
       origenAut: dto.ORIGEN_AUT,
@@ -263,7 +266,8 @@ export class PvCtrFolAsvrService {
       });
 
     const merged = this.repo.merge(row, partial);
-    merged.IDFOLINICIAL = String(merged.IDFOLINICIAL ?? '').trim() || merged.IDFOL;
+    merged.IDFOLINICIAL =
+      String(merged.IDFOLINICIAL ?? '').trim() || merged.IDFOL;
     merged.ORIGEN_AUT = inferOrigenAut({
       aut: merged.AUT,
       origenAut: merged.ORIGEN_AUT,

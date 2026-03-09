@@ -76,7 +76,11 @@ export class FormasPagoCambiosService {
     try {
       const opv = this.resolveOpv(user);
       const formTable = await this.resolveFormTable();
-      const hasFormAut = await this.hasColumn(this.dataSource, formTable, 'AUT');
+      const hasFormAut = await this.hasColumn(
+        this.dataSource,
+        formTable,
+        'AUT',
+      );
       const hasSuc = await this.hasColumn(
         this.dataSource,
         'dbo.PV_CTR_FOL_ASVR',
@@ -94,10 +98,10 @@ export class FormasPagoCambiosService {
         ? 'CAST(A.SUC AS nvarchar(50))'
         : 'CAST(NULL AS nvarchar(50))';
       const clienSelect = hasClien
-        ? "CASE WHEN TRY_CONVERT(decimal(19,0), A.CLIEN) IS NOT NULL THEN CONVERT(nvarchar(255), CONVERT(decimal(19,0), A.CLIEN)) ELSE LTRIM(RTRIM(CONVERT(nvarchar(255), A.CLIEN))) END"
+        ? 'CASE WHEN TRY_CONVERT(decimal(19,0), A.CLIEN) IS NOT NULL THEN CONVERT(nvarchar(255), CONVERT(decimal(19,0), A.CLIEN)) ELSE LTRIM(RTRIM(CONVERT(nvarchar(255), A.CLIEN))) END'
         : 'CAST(NULL AS nvarchar(255))';
       const clienExpr = hasClien
-        ? "CASE WHEN TRY_CONVERT(decimal(19,0), A.CLIEN) IS NOT NULL THEN CONVERT(nvarchar(255), CONVERT(decimal(19,0), A.CLIEN)) ELSE LTRIM(RTRIM(CONVERT(nvarchar(255), A.CLIEN))) END"
+        ? 'CASE WHEN TRY_CONVERT(decimal(19,0), A.CLIEN) IS NOT NULL THEN CONVERT(nvarchar(255), CONVERT(decimal(19,0), A.CLIEN)) ELSE LTRIM(RTRIM(CONVERT(nvarchar(255), A.CLIEN))) END'
         : "CAST('' AS nvarchar(255))";
 
       const idfolSearch = this.normalize(query?.idfol);
@@ -174,9 +178,7 @@ export class FormasPagoCambiosService {
 
     const authPassword = this.normalize(dto.AUTH_PASSWORD ?? '');
     if (!authPassword) {
-      throw new ForbiddenException(
-        'Se requiere contraseña de usuario SUPERPV',
-      );
+      throw new ForbiddenException('Se requiere contraseña de usuario SUPERPV');
     }
 
     const supervisor = await this.findSuperPvAuthorizerByPassword(authPassword);
@@ -406,7 +408,7 @@ export class FormasPagoCambiosService {
     columnName: string,
   ) {
     const rows = await runner.query(
-      "SELECT CASE WHEN COL_LENGTH(@0, @1) IS NULL THEN 0 ELSE 1 END AS HAS_COL",
+      'SELECT CASE WHEN COL_LENGTH(@0, @1) IS NULL THEN 0 ELSE 1 END AS HAS_COL',
       [tableName, columnName],
     );
     return this.toInt((rows?.[0] ?? {}).HAS_COL) === 1;

@@ -49,11 +49,7 @@ async function bootstrap() {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     // `cajon-estado/resumen` sends the supervisor authorization in a custom header.
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Cajon-Estado-Token',
-    ],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Cajon-Estado-Token'],
   });
 
   const config = new DocumentBuilder()
