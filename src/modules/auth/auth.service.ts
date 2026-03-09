@@ -1,6 +1,8 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -8,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
+import { type StringValue } from 'ms';
 import { Repository, IsNull } from 'typeorm';
 import { UsersService } from '../users/users.service';
 import { UsuarioTokenEntity } from './usuario-token.entity';
@@ -18,6 +21,7 @@ type JwtPayload = {
   roleId: number;
   nivel: number;
   suc: string | null;
+  mustChangePassword: boolean;
 };
 
 @Injectable()
@@ -34,8 +38,9 @@ export class AuthService {
     return Number(this.config.get('REFRESH_EXPIRES_DAYS') ?? 30);
   }
 
-  private accessExpiresIn(): string {
-    return this.config.get<string>('JWT_EXPIRES_IN') ?? '15m';
+  private accessExpiresIn(): number | StringValue {
+    const configured = this.config.get<string>('JWT_EXPIRES_IN') ?? '15m';
+    return configured as StringValue;
   }
 
   private async issueAccessToken(user: {
@@ -44,6 +49,7 @@ export class AuthService {
     IDROL: number;
     NIVEL: number;
     SUC: string | null;
+    FORZAR_CAMBIO_PASS: boolean;
   }) {
     const payload: JwtPayload = {
       sub: user.IDUSUARIO,
@@ -51,10 +57,11 @@ export class AuthService {
       roleId: user.IDROL,
       nivel: user.NIVEL,
       suc: user.SUC ?? null,
+      mustChangePassword: !!user.FORZAR_CAMBIO_PASS,
     };
 
     return this.jwt.signAsync(payload, {
-      expiresIn: this.accessExpiresIn() as any,
+      expiresIn: this.accessExpiresIn(),
     });
   }
 
@@ -107,6 +114,7 @@ export class AuthService {
       IDROL: user.IDROL,
       NIVEL: user.NIVEL,
       SUC: user.SUC ?? null,
+      FORZAR_CAMBIO_PASS: !!user.FORZAR_CAMBIO_PASS,
     });
 
     const refreshToken = await this.issueRefreshToken(user.IDUSUARIO, meta);
@@ -126,6 +134,7 @@ export class AuthService {
         IDDEPTO: user.IDDEPTO,
         IDPUESTO: user.IDPUESTO,
         SUC: user.SUC,
+        FORZAR_CAMBIO_PASS: !!user.FORZAR_CAMBIO_PASS,
       },
     };
   }
@@ -162,6 +171,7 @@ export class AuthService {
         IDROL: t.USUARIO.IDROL,
         NIVEL: t.USUARIO.NIVEL,
         SUC: t.USUARIO.SUC ?? null,
+        FORZAR_CAMBIO_PASS: !!t.USUARIO.FORZAR_CAMBIO_PASS,
       });
 
       const newRefreshToken = await this.issueRefreshToken(t.USUARIO.IDUSUARIO);
@@ -175,6 +185,70 @@ export class AuthService {
     }
 
     throw new UnauthorizedException('Refresh token inválido o expirado');
+  }
+
+  async changePassword(
+    userId: number,
+    currentPassword: string,
+    newPassword: string,
+    meta?: { ip?: string; userAgent?: string },
+  ) {
+    const user = await this.usersService.findAuthById(userId);
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    if (user.ESTATUS !== 'ACTIVO') {
+      throw new ForbiddenException('Usuario inactivo');
+    }
+
+    const currentOk = await bcrypt.compare(currentPassword, user.PASSWORD_HASH);
+    if (!currentOk) {
+      throw new UnauthorizedException('La contraseña actual es incorrecta');
+    }
+
+    const isSamePassword = await bcrypt.compare(
+      newPassword,
+      user.PASSWORD_HASH,
+    );
+    if (isSamePassword) {
+      throw new ConflictException(
+        'La nueva contraseña debe ser distinta a la actual',
+      );
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await this.usersService.updatePassword(user.IDUSUARIO, newHash, false);
+
+    await this.logoutAll(user.IDUSUARIO);
+
+    const accessToken = await this.issueAccessToken({
+      IDUSUARIO: user.IDUSUARIO,
+      USERNAME: user.USERNAME,
+      IDROL: user.IDROL,
+      NIVEL: user.NIVEL,
+      SUC: user.SUC ?? null,
+      FORZAR_CAMBIO_PASS: false,
+    });
+
+    const refreshToken = await this.issueRefreshToken(user.IDUSUARIO, meta);
+
+    return {
+      accessToken,
+      refreshToken,
+      tokenType: 'Bearer',
+      expiresIn: this.accessExpiresIn(),
+      user: {
+        IDUSUARIO: user.IDUSUARIO,
+        USERNAME: user.USERNAME,
+        MAIL: user.MAIL,
+        ESTATUS: user.ESTATUS,
+        NIVEL: user.NIVEL,
+        IDROL: user.IDROL,
+        IDDEPTO: user.IDDEPTO,
+        IDPUESTO: user.IDPUESTO,
+        SUC: user.SUC,
+        FORZAR_CAMBIO_PASS: false,
+      },
+    };
   }
 
   async logoutAll(userId: number) {

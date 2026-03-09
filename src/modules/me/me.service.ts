@@ -212,6 +212,7 @@ export class MeService {
         ? { id: user.PUESTO.IDPUESTO, nombre: user.PUESTO.NOMBRE }
         : null,
       SUC: user.SUC,
+      FORZAR_CAMBIO_PASS: !!user.FORZAR_CAMBIO_PASS,
       SUCURSAL: user.SUCURSAL
         ? { suc: user.SUCURSAL.SUC, desc: user.SUCURSAL.DESC }
         : null,

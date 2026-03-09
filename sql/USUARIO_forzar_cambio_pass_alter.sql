@@ -1,0 +1,17 @@
+/*
+  Agrega bandera para forzar cambio de contraseña en primer acceso.
+  Ejecutar una sola vez en la base de datos objetivo.
+*/
+
+IF COL_LENGTH('dbo.USUARIO', 'FORZAR_CAMBIO_PASS') IS NULL
+BEGIN
+  ALTER TABLE dbo.USUARIO
+    ADD FORZAR_CAMBIO_PASS bit NOT NULL
+      CONSTRAINT DF_USUARIO_FORZAR_CAMBIO_PASS DEFAULT ((0));
+END;
+GO
+
+UPDATE dbo.USUARIO
+SET FORZAR_CAMBIO_PASS = ISNULL(FORZAR_CAMBIO_PASS, 0)
+WHERE FORZAR_CAMBIO_PASS IS NULL;
+GO

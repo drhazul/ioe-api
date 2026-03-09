@@ -64,6 +64,9 @@ export class UsuarioEntity {
   @JoinColumn({ name: 'SUC' })
   SUCURSAL: DatSucEntity | null;
 
+  @Column({ type: 'bit', default: () => '1' })
+  FORZAR_CAMBIO_PASS: boolean;
+
   @Column({ type: 'datetime2', precision: 0, default: () => 'SYSDATETIME()' })
   FCNR: Date;
 }

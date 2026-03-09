@@ -9,6 +9,7 @@ export type JwtPayload = {
   roleId: number;
   nivel: number;
   suc: string | null;
+  mustChangePassword: boolean;
 };
 
 @Injectable()
@@ -20,7 +21,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: JwtPayload) {
+  validate(payload: JwtPayload) {
     return payload;
   }
 }

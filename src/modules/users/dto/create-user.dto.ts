@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsEmail,
   IsInt,
   IsOptional,
@@ -15,10 +16,11 @@ export class CreateUserDto {
   @Length(3, 60)
   USERNAME: string;
 
-  @ApiProperty({ example: 'Cambio.2019' })
+  @ApiPropertyOptional({ example: '938120' })
+  @IsOptional()
   @IsString()
   @Length(6, 100)
-  PASSWORD: string;
+  PASSWORD?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -68,4 +70,13 @@ export class CreateUserDto {
   @IsString()
   @Length(1, 10)
   SUC?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'Cuando es true, el usuario debe cambiar contraseña al iniciar sesión',
+  })
+  @IsOptional()
+  @IsBoolean()
+  FORZAR_CAMBIO_PASS?: boolean;
 }

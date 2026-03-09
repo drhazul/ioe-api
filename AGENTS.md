@@ -33,8 +33,10 @@
 ### Seguridad y accesos
 
 - `auth`: `USUARIO_TOKEN` (`IDTOKEN`, `IDUSUARIO`, `JTI`, `REFRESH_TOKEN_HASH`, `ISSUED_AT`, `EXPIRES_AT`, `REVOKED_AT`), `USUARIO`.
-- `users`: `USUARIO` (`IDUSUARIO`, `USERNAME`, `NOMBRE`, `APELLIDOS`, `MAIL`, `ESTATUS`, `NIVEL`, `IDROL`, `IDDEPTO`, `IDPUESTO`, `SUC`).
+- `users`: `USUARIO` (`IDUSUARIO`, `USERNAME`, `NOMBRE`, `APELLIDOS`, `MAIL`, `ESTATUS`, `NIVEL`, `IDROL`, `IDDEPTO`, `IDPUESTO`, `SUC`, `FORZAR_CAMBIO_PASS`).
 - validacion `users`: `USERNAME` requiere minimo 3 caracteres.
+- alta usuarios (2026-03): backend acepta `PASSWORD` opcional; cuando no llega, genera contraseña temporal aleatoria de 6 dígitos y responde `PASSWORD_TEMPORAL`.
+- primer acceso (2026-03): al crear usuario se marca `FORZAR_CAMBIO_PASS=1`; login JWT incluye claim `mustChangePassword`; `POST /auth/change-password` actualiza contraseña y limpia la marca.
 - `roles`: `ROL` (`IDROL`, `CODIGO`, `NOMBRE`, `DESCRIPCION`, `ACTIVO`).
 - `deptos`: `DEPARTAMENTO` (`IDDEPTO`, `NOMBRE`, `ACTIVO`).
 - `puestos`: `PUESTO` (`IDPUESTO`, `IDDEPTO`, `NOMBRE`, `ACTIVO`).
@@ -395,6 +397,7 @@
 - `sql/DAT_FORM_schema_alter.sql` agrega `IDFORM` identity como PK y `ESTADO` para activar/bloquear visibilidad de formas de pago.
 - `sql/PV_CTR_ORDS_CLIEN_float.sql` ajusta `PV_CTR_ORDS.CLIEN` a `FLOAT` para soportar IDs grandes.
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta staging de líneas para devoluciones PV.
+- `sql/USUARIO_forzar_cambio_pass_alter.sql` agrega `FORZAR_CAMBIO_PASS` para controlar cambio obligatorio de contraseña en primer acceso.
 - Estado de cajón OPV:
 - `sql/sp_cajon_estado_resumen.sql` crea/actualiza `dbo.sp_cajon_estado_resumen` e índices de soporte para `PV_CTR_FOL_ASVR`, `PV_CTR_FOL_FORM`, `DAT_RET_CTR_SVR`, `DAT_RET_DET_SVR`.
 

@@ -72,11 +72,13 @@ Opcionales:
 - Salud:
 - `/health`, `/health/db`
 - Seguridad:
-- `/auth/login`, `/auth/refresh`, `/auth/logout-all`
+- `/auth/login`, `/auth/refresh`, `/auth/change-password`, `/auth/logout-all`
 - `/me/profile`, `/me/front-menu`, `/me/datmodulos`, `/me/backend-perms`
 - Maestros:
 - `/roles`, `/deptos`, `/puestos`, `/users`, `/dat-suc`, `/datmodulos`
 - Validacion relevante: `/users` exige `USERNAME` con minimo 3 caracteres.
+- Alta usuarios (2026-03): si `PASSWORD` no se envía, backend genera una contraseña temporal aleatoria de 6 dígitos y marca `FORZAR_CAMBIO_PASS=1` para primer acceso.
+- Primer acceso (2026-03): login emite claim JWT `mustChangePassword` y el endpoint autenticado `POST /auth/change-password` permite actualizar contraseña y limpiar `FORZAR_CAMBIO_PASS=0`.
 - Accesos:
 - `/access/modulos`, `/access/grupos-modulo`, `/access/roles/:id/permisos-backend`
 - `/access/mod-front`, `/access/grupos-front`, `/access/roles/:id/enrolamientos-front`
@@ -438,7 +440,7 @@ Opcionales:
 
 ### Seguridad y acceso
 
-- `USUARIO`: `IDUSUARIO`, `USERNAME`, `PASSWORD_HASH`, `NOMBRE`, `APELLIDOS`, `IDROL`, `IDDEPTO`, `IDPUESTO`, `SUC`, `ESTATUS`.
+- `USUARIO`: `IDUSUARIO`, `USERNAME`, `PASSWORD_HASH`, `NOMBRE`, `APELLIDOS`, `IDROL`, `IDDEPTO`, `IDPUESTO`, `SUC`, `ESTATUS`, `FORZAR_CAMBIO_PASS`.
 - `ROL`: `IDROL`, `CODIGO`, `NOMBRE`, `DESCRIPCION`, `ACTIVO`.
 - `USUARIO_TOKEN`: `IDTOKEN`, `IDUSUARIO`, `JTI`, `REFRESH_TOKEN_HASH`, `ISSUED_AT`, `EXPIRES_AT`, `REVOKED_AT`.
 - `USR_MOD_SUC`: `MODULO`, `USUARIO`, `SUC`, `ACTIVO`, `FCNR`.
@@ -502,6 +504,7 @@ Opcionales:
 - `DAT_FORM_schema_alter.sql` (estructura y control de estado para formas de pago)
 - `PV_CTR_ORDS_CLIEN_float.sql` (ajuste de CLIEN a FLOAT para IDs grandes)
 - `PV_DEV_DET_TMP_create.sql` (staging de detalle para devoluciones PV)
+- `USUARIO_forzar_cambio_pass_alter.sql` (agrega bandera `FORZAR_CAMBIO_PASS` para flujo de primer acceso)
 
 ## Reglas de autorizacion por sucursal (criticas)
 

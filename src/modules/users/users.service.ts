@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 import { Repository } from 'typeorm';
 import { UsuarioEntity } from './usuario.entity';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -39,25 +40,49 @@ export class UsersService {
         SUCURSAL: true,
       },
     });
+
     if (!row) throw new NotFoundException(`USUARIO ${id} no existe`);
     return row;
+  }
+
+  async findAuthById(id: number) {
+    return this.repo.findOne({ where: { IDUSUARIO: id } });
   }
 
   async findByUsername(username: string) {
     return this.repo.findOne({ where: { USERNAME: username } });
   }
 
+  async updatePassword(
+    userId: number,
+    passwordHash: string,
+    forzarCambioPass: boolean,
+  ) {
+    await this.repo.update(
+      { IDUSUARIO: userId },
+      {
+        PASSWORD_HASH: passwordHash,
+        FORZAR_CAMBIO_PASS: forzarCambioPass,
+      },
+    );
+  }
+
   async create(dto: CreateUserDto) {
     const existsUser = await this.repo.exist({
       where: { USERNAME: dto.USERNAME },
     });
+
     if (existsUser)
       throw new ConflictException(`USERNAME ${dto.USERNAME} ya existe`);
 
     const existsMail = await this.repo.exist({ where: { MAIL: dto.MAIL } });
     if (existsMail) throw new ConflictException(`MAIL ${dto.MAIL} ya existe`);
 
-    const hash = await bcrypt.hash(dto.PASSWORD, 10);
+    const hasPassword = (dto.PASSWORD ?? '').trim().length > 0;
+    const plainPassword = hasPassword
+      ? dto.PASSWORD!.trim()
+      : this.generateRandomSixDigitPassword();
+    const hash = await bcrypt.hash(plainPassword, 10);
 
     const entity = this.repo.create({
       USERNAME: dto.USERNAME,
@@ -71,58 +96,77 @@ export class UsersService {
       IDDEPTO: dto.IDDEPTO ?? null,
       IDPUESTO: dto.IDPUESTO ?? null,
       SUC: dto.SUC ?? null,
+      FORZAR_CAMBIO_PASS: dto.FORZAR_CAMBIO_PASS ?? true,
     });
 
-    return this.repo.save(entity);
+    const saved = await this.repo.save(entity);
+    const created = await this.findOne(saved.IDUSUARIO);
+
+    if (hasPassword) return created;
+
+    return {
+      ...created,
+      PASSWORD_TEMPORAL: plainPassword,
+    };
   }
 
   async update(id: number, dto: UpdateUserDto) {
-    // Debug log to verify incoming payload values during updates
+    const row = await this.repo.findOne({ where: { IDUSUARIO: id } });
+    if (!row) throw new NotFoundException(`USUARIO ${id} no existe`);
 
-    console.log('UpdateUserDto', { id, dto });
-    const row = await this.findOne(id);
+    const payload: Partial<UsuarioEntity> = {};
+    const { PASSWORD, ...rest } = dto;
 
-    // Si viene PASSWORD, rehace hash
-    let PASSWORD_HASH = row.PASSWORD_HASH;
-    if ((dto as any).PASSWORD) {
-      PASSWORD_HASH = await bcrypt.hash((dto as any).PASSWORD, 10);
+    if (PASSWORD && PASSWORD.trim().length > 0) {
+      payload.PASSWORD_HASH = await bcrypt.hash(PASSWORD.trim(), 10);
+      payload.FORZAR_CAMBIO_PASS =
+        typeof rest.FORZAR_CAMBIO_PASS === 'boolean'
+          ? rest.FORZAR_CAMBIO_PASS
+          : true;
+      delete rest.FORZAR_CAMBIO_PASS;
     }
 
-    // No permitir cambiar USERNAME/MAIL a duplicados
     if (dto.USERNAME && dto.USERNAME !== row.USERNAME) {
       const exists = await this.repo.exist({
         where: { USERNAME: dto.USERNAME },
       });
+
       if (exists)
         throw new ConflictException(`USERNAME ${dto.USERNAME} ya existe`);
     }
+
     if (dto.MAIL && dto.MAIL !== row.MAIL) {
       const exists = await this.repo.exist({ where: { MAIL: dto.MAIL } });
       if (exists) throw new ConflictException(`MAIL ${dto.MAIL} ya existe`);
     }
 
-    const { PASSWORD, ...rest } = dto as any;
+    Object.assign(payload, rest);
 
-    // Solo enviar campos definidos al update para evitar pisar relaciones cargadas
-    const payload: Partial<UsuarioEntity> = {
-      ...rest,
-      PASSWORD_HASH,
-    };
     Object.keys(payload).forEach((key) => {
       if (payload[key as keyof typeof payload] === undefined) {
         delete payload[key as keyof typeof payload];
       }
     });
 
+    if (Object.keys(payload).length === 0) {
+      return this.findOne(id);
+    }
+
     await this.repo.update({ IDUSUARIO: id }, payload);
 
-    // Devuelve con relaciones frescas
     return this.findOne(id);
   }
 
   async remove(id: number) {
-    const row = await this.findOne(id);
+    const row = await this.repo.findOne({ where: { IDUSUARIO: id } });
+    if (!row) throw new NotFoundException(`USUARIO ${id} no existe`);
+
     await this.repo.remove(row);
     return { deleted: true, IDUSUARIO: id };
+  }
+
+  private generateRandomSixDigitPassword(): string {
+    const value = randomInt(100000, 1000000);
+    return String(value);
   }
 }
