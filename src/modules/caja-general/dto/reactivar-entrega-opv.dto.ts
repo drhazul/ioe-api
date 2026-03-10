@@ -38,4 +38,14 @@ export class ReactivarEntregaOpvDto {
   @IsString()
   @Length(1, 255)
   user?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Contraseña de supervisor para autorizar reactivación de fecha no operable',
+  })
+  @Type(() => String)
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  authPassword?: string;
 }

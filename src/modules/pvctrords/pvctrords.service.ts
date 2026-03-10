@@ -20,6 +20,7 @@ type OrdBusinessErrorCode =
   | 'INVALID_QTY'
   | 'FCNM_REQUIRED'
   | 'COMAD_REQUIRED'
+  | 'TICKET_LINE_NOT_FOUND'
   | 'ORD_EXISTS'
   | 'ORD_NOT_FOUND'
   | 'DB_ERROR';
@@ -121,7 +122,7 @@ export class PvCtrOrdsService {
     dto: CreateOrdFromQuoteLineDto,
   ): Promise<CreateOrdFromQuoteLineResponse> {
     const idfol = dto.idfol.trim();
-    const art = dto.art.trim();
+    const ticketId = dto.ticketId.trim();
     const descArt = (dto.descArt ?? '').trim().slice(0, 255);
     const estado = this.normalizeEstadoOperativo(dto.estado);
     const tipo = dto.tipo.trim();
@@ -134,7 +135,6 @@ export class PvCtrOrdsService {
         ? fechaEntregaDate.toISOString()
         : null;
     const comad = (dto.comad ?? '').trim();
-    const ctd = Number(dto.ctd);
     const clien = Number(dto.clien);
 
     if (!Number.isFinite(clien) || clien <= 0 || clien === 1) {
@@ -151,6 +151,11 @@ export class PvCtrOrdsService {
         HttpStatus.BAD_REQUEST,
       );
     }
+
+    const ticketLine = await this.findTicketLineById(ticketId, idfol);
+    const art = ticketLine.art;
+    const ctd = ticketLine.ctd;
+
     if (!this.isAllowedOrdQty(ctd)) {
       this.throwBusinessError(
         'INVALID_QTY',
@@ -174,9 +179,7 @@ export class PvCtrOrdsService {
     }
 
     const ordByPayload = this.normalizeOrdValue(dto.ordExistente);
-    const ordByTicket = ordByPayload
-      ? null
-      : await this.findOrdFromTicketLine(idfol, art);
+    const ordByTicket = ordByPayload ? null : ticketLine.ord;
     const existingOrd = ordByPayload ?? ordByTicket;
     if (existingOrd) {
       await this.updateOrdHeaderFromQuoteLine({
@@ -259,8 +262,8 @@ export class PvCtrOrdsService {
     dto: DeleteOrdFromQuoteLineDto,
   ): Promise<DeleteOrdFromQuoteLineResponse> {
     const iord = dto.iord.trim();
+    const ticketId = dto.ticketId.trim();
     const idfol = (dto.idfol ?? '').trim();
-    const art = (dto.art ?? '').trim();
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -301,19 +304,17 @@ export class PvCtrOrdsService {
         [iord],
       );
 
-      const idfolCondition = idfol ? 'AND IDFOL = @1' : '';
-      const artCondition = art ? `AND ART = @${idfol ? '2' : '1'}` : '';
-      const params: Array<string> = [iord];
+      const idfolCondition = idfol ? 'AND IDFOL = @2' : '';
+      const params: Array<string> = [iord, ticketId];
       if (idfol) params.push(idfol);
-      if (art) params.push(art);
 
       await queryRunner.query(
         `
         UPDATE dbo.PV_TICKET_LOG
         SET ORD = NULL
         WHERE LTRIM(RTRIM(ISNULL(ORD, ''))) = @0
+          AND ID = @1
           ${idfolCondition}
-          ${artCondition}
         `,
         params,
       );
@@ -436,26 +437,60 @@ export class PvCtrOrdsService {
     return value;
   }
 
-  private async findOrdFromTicketLine(
+  private async findTicketLineById(
+    ticketId: string,
     idfol: string,
-    art: string,
-  ): Promise<string | null> {
+  ): Promise<{
+    art: string;
+    ctd: number;
+    ord: string | null;
+  }> {
     const rows = await this.dataSource.query(
       `
-      SELECT TOP 1 LTRIM(RTRIM(ORD)) AS ORD
+      SELECT TOP 1
+        LTRIM(RTRIM(ISNULL(ART, ''))) AS ART,
+        TRY_CONVERT(FLOAT, CTD) AS CTD,
+        LTRIM(RTRIM(ISNULL(ORD, ''))) AS ORD
       FROM dbo.PV_TICKET_LOG
-      WHERE IDFOL = @0
-        AND ART = @1
-        AND ORD IS NOT NULL
-        AND LTRIM(RTRIM(ORD)) <> ''
-        AND LTRIM(RTRIM(ORD)) <> '0'
-      ORDER BY updated_at DESC, ID DESC
+      WHERE ID = @0
+        AND IDFOL = @1
+      ORDER BY updated_at DESC
       `,
-      [idfol, art],
+      [ticketId, idfol],
     );
 
-    const ord = (rows?.[0] as Record<string, unknown> | undefined)?.ORD;
-    return this.normalizeOrdValue(ord == null ? undefined : String(ord));
+    const row = (rows?.[0] as Record<string, unknown> | undefined) ?? null;
+    if (!row) {
+      this.throwBusinessError(
+        'TICKET_LINE_NOT_FOUND',
+        'No se encontró el renglón seleccionado en el ticket.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const art = String(row.ART ?? '').trim();
+    if (!art) {
+      this.throwBusinessError(
+        'TICKET_LINE_NOT_FOUND',
+        'No se encontró el renglón seleccionado en el ticket.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const ctd = Number(row.CTD);
+    if (!Number.isFinite(ctd) || ctd <= 0) {
+      this.throwBusinessError(
+        'INVALID_QTY',
+        'La cantidad registrada para el articulo no permite crear ORD.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const ord = this.normalizeOrdValue(
+      row.ORD == null ? undefined : String(row.ORD),
+    );
+
+    return { art, ctd, ord };
   }
 
   private async findOrdBundle(iord: string): Promise<{

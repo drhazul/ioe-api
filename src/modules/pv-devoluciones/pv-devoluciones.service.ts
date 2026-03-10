@@ -481,10 +481,11 @@ export class PvDevolucionesService {
       }
 
       await this.validateSelectedLines(queryRunner, context, selected);
+      const processNow = await this.loadSqlProcessNow(queryRunner);
       await this.regenerateTicketDevolucion(
         queryRunner,
         context.idfolDev,
-        new Date(),
+        processNow,
       );
       const items = await this.loadTicketDevolucionLines(
         queryRunner,
@@ -650,7 +651,7 @@ export class PvDevolucionesService {
       const nart = this.round4(
         selected.reduce((acc, item) => acc + (item.ctdd ?? 0), 0),
       );
-      const finalizedAt = new Date();
+      const finalizedAt = await this.loadSqlProcessNow(queryRunner);
 
       await this.insertFactIdfolDev(queryRunner, {
         idfolDev: context.idfolDev,
@@ -878,6 +879,39 @@ export class PvDevolucionesService {
   private toInt(value: unknown) {
     const num = this.toNumber(value);
     return num == null ? null : Math.trunc(num);
+  }
+
+  private async loadSqlProcessNow(executor: SqlExecutor): Promise<Date> {
+    const rows = await executor.query(
+      `
+      SELECT
+        GETDATE() AS NOW_SQL,
+        DATEPART(TZOFFSET, SYSDATETIMEOFFSET()) AS OFFSET_MINUTES
+      `,
+    );
+    const row = (rows?.[0] ?? {}) as Record<string, unknown>;
+    const nowRaw = row.NOW_SQL ?? row.now_sql ?? row.now ?? null;
+    const nowSql =
+      nowRaw instanceof Date
+        ? nowRaw
+        : new Date(this.normalizeText(nowRaw ?? ''));
+
+    if (Number.isNaN(nowSql.getTime())) {
+      throw new InternalServerErrorException(
+        'No se pudo resolver fecha actual desde SQL Server',
+      );
+    }
+
+    const offsetMinutes = this.toInt(
+      row.OFFSET_MINUTES ?? row.offset_minutes ?? null,
+    );
+    if (offsetMinutes != null && offsetMinutes !== -360) {
+      throw new ConflictException(
+        `Timezone SQL Server inválido (${offsetMinutes} min). Se requiere America/Mexico_City (-360).`,
+      );
+    }
+
+    return nowSql;
   }
 
   private round2(value: number) {

@@ -67,8 +67,28 @@ export class PvTicketLogService {
 
   async update(id: string, dto: UpdatePvTicketLogDto) {
     const row = await this.findOne(id);
+    const ordAssigned = this.normalizeOrd(row.ORD);
+
+    if (ordAssigned && dto.CTD !== undefined) {
+      const currentQty = Number(row.CTD);
+      const nextQty = Number(dto.CTD);
+      const qtyChanged =
+        !Number.isFinite(currentQty) ||
+        !Number.isFinite(nextQty) ||
+        Math.abs(currentQty - nextQty) > 0.0001;
+      if (qtyChanged) {
+        throw new ForbiddenException(
+          'No se permite modificar CTD cuando el artículo ya tiene ORD asignada.',
+        );
+      }
+    }
 
     if (dto.PVTA !== undefined) {
+      if (ordAssigned) {
+        throw new ForbiddenException(
+          'No se permite modificar PVTA cuando el artículo ya tiene ORD asignada.',
+        );
+      }
       throw new ForbiddenException(
         'Para actualizar PVTA usa el endpoint de autorizacion /pvticketlog/:id/precio',
       );
@@ -101,6 +121,12 @@ export class PvTicketLogService {
     ip: string | null,
   ) {
     const row = await this.findOne(id);
+    const ordAssigned = this.normalizeOrd(row.ORD);
+    if (ordAssigned) {
+      throw new ForbiddenException(
+        'No se permite modificar PVTA cuando el artículo ya tiene ORD asignada.',
+      );
+    }
 
     const nextPvtaRaw = Number(dto.PVTA);
     if (!Number.isFinite(nextPvtaRaw) || nextPvtaRaw <= 0) {
@@ -214,18 +240,83 @@ export class PvTicketLogService {
   }
 
   async remove(id: string) {
-    const row = await this.findOne(id);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
-      await this.repo.remove(row);
+      const rows = await queryRunner.query(
+        `
+        SELECT TOP 1
+          ID,
+          LTRIM(RTRIM(ISNULL(ORD, ''))) AS ORD
+        FROM dbo.PV_TICKET_LOG
+        WHERE ID = @0
+        `,
+        [id],
+      );
+      const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+      if (!row) {
+        throw new NotFoundException(`PV_TICKET_LOG ${id} no existe`);
+      }
+
+      const ordAssigned = this.normalizeOrd(row.ORD);
+      if (ordAssigned) {
+        await queryRunner.query(
+          `
+          UPDATE dbo.PV_TICKET_LOG
+          SET ORD = NULL
+          WHERE LTRIM(RTRIM(ISNULL(ORD, ''))) = @0
+          `,
+          [ordAssigned],
+        );
+
+        await queryRunner.query(
+          `
+          DELETE FROM dbo.PV_CTR_ORDS_DET
+          WHERE IORD = @0
+          `,
+          [ordAssigned],
+        );
+
+        await queryRunner.query(
+          `
+          DELETE FROM dbo.PV_CTR_ORDS
+          WHERE IORD = @0
+          `,
+          [ordAssigned],
+        );
+      }
+
+      await queryRunner.query(
+        `
+        DELETE FROM dbo.PV_TICKET_LOG
+        WHERE ID = @0
+        `,
+        [id],
+      );
+
+      await queryRunner.commitTransaction();
     } catch (err) {
+      await queryRunner.rollbackTransaction();
+      if (err instanceof NotFoundException) {
+        throw err;
+      }
       if (err instanceof QueryFailedError) {
         throw new ConflictException(
           `No se puede eliminar PV_TICKET_LOG ${id} porque está referenciado por otros registros.`,
         );
       }
       throw err;
+    } finally {
+      await queryRunner.release();
     }
+
     return { deleted: true, ID: id };
+  }
+
+  private normalizeOrd(value: unknown) {
+    return String(value ?? '').trim();
   }
 
   private normalizeUpper(value: unknown) {

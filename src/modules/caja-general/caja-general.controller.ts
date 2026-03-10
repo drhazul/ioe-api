@@ -11,6 +11,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { CajaGeneralFormaDetalleQueryDto } from './dto/caja-general-forma-detalle-query.dto';
 import { CajaGeneralGlobalQueryDto } from './dto/caja-general-global-query.dto';
 import { CajaGeneralOpvQueryDto } from './dto/caja-general-opv-query.dto';
 import { CerrarEntregaOpvDto } from './dto/cerrar-entrega-opv.dto';
@@ -64,6 +65,14 @@ export class CajaGeneralController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.getReporteOpv(query, user);
+  }
+
+  @Get('opv/forma-detalle')
+  getDetalleFormaOpv(
+    @Query() query: CajaGeneralFormaDetalleQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.getDetalleFormaOpv(query, user);
   }
 
   @Get('global/reporte')

@@ -37,7 +37,11 @@ export class PvCtrFolAsvrService {
     const search = this.normalizeText(query?.search ?? '');
 
     const suc = requestedSuc || (isAdmin ? '' : actorSuc);
-    const opv = requestedOpv || (isAdmin ? '' : actorOpv);
+    const actorOpvUpper = this.normalizeUpper(actorOpv);
+    const requestedOpvUpper = this.normalizeUpper(requestedOpv);
+    const requestedOpvIsActor =
+      requestedOpvUpper.length > 0 && requestedOpvUpper === actorOpvUpper;
+    const runOwnScope = isAdmin || !requestedOpv || requestedOpvIsActor;
 
     if (
       !isAdmin &&
@@ -48,62 +52,116 @@ export class PvCtrFolAsvrService {
         'No autorizado para consultar otra sucursal',
       );
     }
-    if (
-      !isAdmin &&
-      requestedOpv &&
-      this.normalizeUpper(requestedOpv) !== this.normalizeUpper(actorOpv)
-    ) {
-      throw new ForbiddenException(
-        'No autorizado para consultar cotizaciones de otro OPV',
-      );
-    }
-
     if (!isAdmin && suc.length == 0) {
       throw new BadRequestException(
         'No se pudo resolver sucursal para consultar cotizaciones',
       );
     }
-    if (!isAdmin && opv.length == 0) {
+    if (!isAdmin && actorOpv.length == 0) {
       throw new BadRequestException(
         'No se pudo resolver OPV para consultar cotizaciones',
       );
     }
 
-    const params: unknown[] = [];
-    const where: string[] = ["a.ESTA IN ('PENDIENTE','EDITANDO','PAGADO')"];
-
-    if (suc.length > 0) {
-      where.push(`a.SUC = @${params.length}`);
-      params.push(suc);
-    }
-
-    if (opv.length > 0) {
-      where.push(`(a.OPV = @${params.length} OR a.OPVM = @${params.length})`);
-      params.push(opv);
-    }
-
-    if (search.length > 0) {
-      const like = `%${search}%`;
-      where.push(
-        `(a.IDFOL LIKE @${params.length} OR ISNULL(a.IDFOLINICIAL, '') LIKE @${params.length} OR ISNULL(c.RazonSocialReceptor, '') LIKE @${params.length} OR CAST(ISNULL(a.CLIEN, 0) AS NVARCHAR(50)) LIKE @${params.length})`,
+    const queryRows = async (
+      where: string[],
+      params: unknown[],
+    ): Promise<Record<string, unknown>[]> => {
+      const rows = await this.dataSource.query(
+        `
+        SELECT
+          a.*,
+          c.RazonSocialReceptor AS RazonSocialReceptor
+        FROM dbo.PV_CTR_FOL_ASVR a
+        LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
+        WHERE ${where.join(' AND ')}
+        ORDER BY a.FCN DESC, a.TRA DESC;
+        `,
+        params,
       );
-      params.push(like);
+      return (rows ?? []) as Record<string, unknown>[];
+    };
+
+    let ownRows: Record<string, unknown>[] = [];
+    if (runOwnScope) {
+      const ownParams: unknown[] = [];
+      const ownWhere: string[] = [
+        "a.AUT IN ('CA','VF','CP')",
+        "a.ESTA IN ('PENDIENTE','EDITANDO','PAGADO','ANULADO')",
+      ];
+
+      if (suc.length > 0) {
+        ownWhere.push(`a.SUC = @${ownParams.length}`);
+        ownParams.push(suc);
+      }
+
+      if (isAdmin) {
+        if (requestedOpv.length > 0) {
+          ownWhere.push(
+            `(a.OPV = @${ownParams.length} OR a.OPVM = @${ownParams.length})`,
+          );
+          ownParams.push(requestedOpv);
+        }
+      } else {
+        ownWhere.push(
+          `(a.OPV = @${ownParams.length} OR a.OPVM = @${ownParams.length})`,
+        );
+        ownParams.push(actorOpv);
+      }
+
+      if (search.length > 0) {
+        const like = `%${search}%`;
+        ownWhere.push(
+          `(a.IDFOL LIKE @${ownParams.length} OR ISNULL(a.IDFOLINICIAL, '') LIKE @${ownParams.length} OR ISNULL(c.RazonSocialReceptor, '') LIKE @${ownParams.length} OR CAST(ISNULL(a.CLIEN, 0) AS NVARCHAR(50)) LIKE @${ownParams.length})`,
+        );
+        ownParams.push(like);
+      }
+
+      ownRows = await queryRows(ownWhere, ownParams);
     }
 
-    const rows = await this.dataSource.query(
-      `
-      SELECT
-        a.*,
-        c.RazonSocialReceptor AS RazonSocialReceptor
-      FROM dbo.PV_CTR_FOL_ASVR a
-      LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
-      WHERE ${where.join(' AND ')}
-      ORDER BY a.FCN DESC, a.TRA DESC;
-      `,
-      params,
-    );
+    const shouldQueryCrossScope =
+      !isAdmin && (search.length > 0 || (requestedOpv.length > 0 && !requestedOpvIsActor));
+    let crossRows: Record<string, unknown>[] = [];
 
-    const items = (rows ?? []) as Record<string, unknown>[];
+    if (shouldQueryCrossScope) {
+      const crossParams: unknown[] = [];
+      const crossWhere: string[] = [
+        "a.AUT = 'CP'",
+        "a.ESTA IN ('PENDIENTE','ANULADO')",
+      ];
+
+      if (suc.length > 0) {
+        crossWhere.push(`a.SUC = @${crossParams.length}`);
+        crossParams.push(suc);
+      }
+
+      crossWhere.push(
+        `(ISNULL(LTRIM(RTRIM(a.OPV)), '') <> @${crossParams.length} AND ISNULL(LTRIM(RTRIM(a.OPVM)), '') <> @${crossParams.length})`,
+      );
+      crossParams.push(actorOpv);
+
+      const crossSearchWhere = this.buildCrossScopeSearchWhere({
+        requestedOpv,
+        requestedOpvIsActor,
+        search,
+        params: crossParams,
+      });
+      if (crossSearchWhere.length > 0) {
+        crossWhere.push(...crossSearchWhere);
+      }
+
+      crossRows = await queryRows(crossWhere, crossParams);
+    }
+
+    const dedup = new Map<string, Record<string, unknown>>();
+    for (const row of [...ownRows, ...crossRows]) {
+      const idfol = this.normalizeText(String(row.IDFOL ?? ''));
+      if (!idfol) continue;
+      if (!dedup.has(idfol)) dedup.set(idfol, row);
+    }
+
+    const items = Array.from(dedup.values());
     await Promise.all(
       items.map((row) => this.regularizeHistoricalFolioRow(row)),
     );
@@ -302,6 +360,73 @@ export class PvCtrFolAsvrService {
 
   private normalizeUpper(value: string) {
     return this.normalizeText(value).toUpperCase();
+  }
+
+  private buildCrossScopeSearchWhere(input: {
+    requestedOpv: string;
+    requestedOpvIsActor: boolean;
+    search: string;
+    params: unknown[];
+  }): string[] {
+    const where: string[] = [];
+    const crossByRequestedOpv =
+      input.requestedOpv && !input.requestedOpvIsActor
+        ? this.normalizeText(input.requestedOpv)
+        : '';
+    if (crossByRequestedOpv) {
+      where.push(`a.OPV = @${input.params.length}`);
+      input.params.push(crossByRequestedOpv);
+    }
+
+    const search = this.normalizeText(input.search);
+    if (!search) return where;
+
+    if (this.looksLikeOpvSearch(search) && !crossByRequestedOpv) {
+      where.push(`a.OPV = @${input.params.length}`);
+      input.params.push(search);
+      return where;
+    }
+
+    if (this.looksLikeIdFolSearch(search)) {
+      where.push(
+        `(a.IDFOL = @${input.params.length} OR ISNULL(a.IDFOLINICIAL, '') = @${input.params.length})`,
+      );
+      input.params.push(search);
+      return where;
+    }
+
+    if (this.looksLikeClientSearch(search)) {
+      where.push(
+        `(CAST(TRY_CONVERT(BIGINT, a.CLIEN) AS NVARCHAR(50)) = @${input.params.length} OR CAST(ISNULL(a.CLIEN, 0) AS NVARCHAR(50)) = @${input.params.length})`,
+      );
+      input.params.push(search);
+      return where;
+    }
+
+    const like = `%${search}%`;
+    where.push(
+      `(a.IDFOL LIKE @${input.params.length} OR ISNULL(a.IDFOLINICIAL, '') LIKE @${input.params.length} OR ISNULL(c.RazonSocialReceptor, '') LIKE @${input.params.length} OR CAST(ISNULL(a.CLIEN, 0) AS NVARCHAR(50)) LIKE @${input.params.length})`,
+    );
+    input.params.push(like);
+    return where;
+  }
+
+  private looksLikeIdFolSearch(value: string) {
+    const text = this.normalizeText(value);
+    if (text.length < 6 || text.includes(' ')) return false;
+    const hasValidChars = /^[A-Za-z0-9_-]+$/.test(text);
+    const hasDigit = /\d/.test(text);
+    return hasValidChars && hasDigit;
+  }
+
+  private looksLikeClientSearch(value: string) {
+    const text = this.normalizeText(value);
+    return /^\d+$/.test(text) && text.length !== 4;
+  }
+
+  private looksLikeOpvSearch(value: string) {
+    const text = this.normalizeText(value);
+    return /^\d{4}$/.test(text);
   }
 
   private async resolveCurrentIdfol(idfol: string) {

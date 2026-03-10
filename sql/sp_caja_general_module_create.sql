@@ -234,6 +234,279 @@ BEGIN
     ISNULL(@totalTransacciones, 0) AS totalTransacciones;
 END;
 GO
+CREATE OR ALTER PROCEDURE dbo.sp_cg_sync_entrega_opv_abierta
+  @SUC VARCHAR(25),
+  @FCN DATE,
+  @OPV NVARCHAR(255),
+  @TIPO_CORTE VARCHAR(10) = 'GLOBAL'
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  DECLARE @startedTran BIT = 0;
+  DECLARE @sucNorm VARCHAR(25) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
+  DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@OPV, ''))));
+  DECLARE @tipoNorm VARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPO_CORTE, 'GLOBAL'))));
+  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
+  DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
+  DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
+
+  IF @tipoNorm NOT IN ('CA', 'VF', 'GLOBAL')
+    SET @tipoNorm = 'GLOBAL';
+
+  IF @sucNorm = ''
+    THROW 58015, 'SUC es obligatorio', 1;
+
+  IF @opvNorm = ''
+    THROW 58016, 'OPV es obligatorio', 1;
+
+  DECLARE @serial INT = DATEDIFF(DAY, '1899-12-30', @fcnDate);
+  DECLARE @ide NVARCHAR(255) = CONCAT(@serial, @opvNorm);
+  DECLARE @estaActual NVARCHAR(20) = NULL;
+  DECLARE @terNorm NVARCHAR(255) = NULL;
+
+  SELECT TOP (1)
+    @estaActual = UPPER(LTRIM(RTRIM(ISNULL(fin.ESTA, ''))))
+  FROM dbo.DAT_FORM_FIN fin
+  WHERE fin.IDE = @ide;
+
+  IF @estaActual = 'CERRADO'
+  BEGIN
+    SELECT
+      @ide AS IDE,
+      @opvNorm AS OPV,
+      @dtIni AS FCN,
+      CAST(NULL AS FLOAT) AS ART,
+      CAST(NULL AS FLOAT) AS TRN,
+      CAST(NULL AS MONEY) AS DIF,
+      'CERRADO' AS ESTA,
+      @sucNorm AS SUC;
+    RETURN;
+  END;
+
+  SELECT TOP (1)
+    @terNorm = NULLIF(LTRIM(RTRIM(ISNULL(e.TER, ''))), '')
+  FROM dbo.DAT_FORM_ENTR_OPV_SVR e
+  WHERE UPPER(LTRIM(RTRIM(ISNULL(e.SUC, '')))) = @sucNorm
+    AND UPPER(LTRIM(RTRIM(ISNULL(e.OPV, '')))) = @opvNorm
+    AND CONVERT(DATE, e.FCN) = @fcnDate;
+
+  BEGIN TRY
+    IF @@TRANCOUNT = 0
+    BEGIN
+      SET @startedTran = 1;
+      BEGIN TRANSACTION;
+    END;
+
+    DECLARE @formas TABLE (
+      FORM NVARCHAR(255) PRIMARY KEY,
+      NOM NVARCHAR(255) NULL,
+      IMPT MONEY NOT NULL,
+      IMPR MONEY NOT NULL,
+      IMPE MONEY NOT NULL,
+      DIFD MONEY NOT NULL,
+      TRECIBIDO MONEY NOT NULL
+    );
+
+    ;WITH Folios AS (
+      SELECT
+        a.IDFOL,
+        UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT
+      FROM dbo.PV_CTR_FOL_ASVR a
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+        AND a.FCNM >= @dtIni
+        AND a.FCNM < @dtFin
+        AND UPPER(LTRIM(RTRIM(ISNULL(
+          CASE
+            WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
+            ELSE a.OPV
+          END,
+        '')))) = @opvNorm
+        AND (
+          (@tipoNorm = 'GLOBAL' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA'))
+          OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
+          OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+        )
+    ),
+    Cobrado AS (
+      SELECT
+        dbo.fn_cg_normalize_forma(f.FORM) AS FORM,
+        SUM(ISNULL(f.IMPD, 0)) AS IMPT
+      FROM dbo.PV_CTR_FOL_FORM f
+      INNER JOIN Folios fo ON fo.IDFOL = f.IDFOL
+      GROUP BY dbo.fn_cg_normalize_forma(f.FORM)
+    ),
+    Retiros AS (
+      SELECT
+        dbo.fn_cg_normalize_forma(d.FORMA) AS FORM,
+        SUM(ISNULL(d.IMPF, 0)) AS IMPR
+      FROM dbo.DAT_RET_CTR_SVR r
+      INNER JOIN dbo.DAT_RET_DET_SVR d ON d.IDRET = r.IDRET
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(r.OPV, '')))) = @opvNorm
+        AND r.FCNR >= @dtIni
+        AND r.FCNR < @dtFin
+        AND UPPER(LTRIM(RTRIM(ISNULL(r.ESTA, '')))) NOT IN ('CANCELADO', 'CANCEL', 'ANULADO')
+      GROUP BY dbo.fn_cg_normalize_forma(d.FORMA)
+    ),
+    EntregadoPrevio AS (
+      SELECT
+        dbo.fn_cg_normalize_forma(e.FORM) AS FORM,
+        SUM(ISNULL(e.IMPE, 0)) AS IMPE
+      FROM dbo.DAT_FORM_ENTR_OPV_SVR e
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(e.SUC, '')))) = @sucNorm
+        AND UPPER(LTRIM(RTRIM(ISNULL(e.OPV, '')))) = @opvNorm
+        AND CONVERT(DATE, e.FCN) = @fcnDate
+      GROUP BY dbo.fn_cg_normalize_forma(e.FORM)
+    ),
+    Catalogo AS (
+      SELECT
+        dbo.fn_cg_normalize_forma(df.FORM) AS FORM,
+        MAX(LTRIM(RTRIM(ISNULL(df.NOM, '')))) AS NOM,
+        MAX(CAST(ISNULL(df.ESTADO, 1) AS INT)) AS ESTADO
+      FROM dbo.DAT_FORM df
+      WHERE NULLIF(LTRIM(RTRIM(ISNULL(df.FORM, ''))), '') IS NOT NULL
+      GROUP BY dbo.fn_cg_normalize_forma(df.FORM)
+    ),
+    Formas AS (
+      SELECT FORM FROM Catalogo
+      UNION
+      SELECT FORM FROM Cobrado
+      UNION
+      SELECT FORM FROM Retiros
+      UNION
+      SELECT FORM FROM EntregadoPrevio
+    )
+    INSERT INTO @formas (FORM, NOM, IMPT, IMPR, IMPE, DIFD, TRECIBIDO)
+    SELECT
+      f.FORM,
+      NULLIF(LTRIM(RTRIM(CASE WHEN LEN(ISNULL(cat.NOM, '')) >= LEN(f.FORM) THEN cat.NOM ELSE f.FORM END)), '') AS NOM,
+      ISNULL(c.IMPT, 0) AS IMPT,
+      ISNULL(r.IMPR, 0) AS IMPR,
+      ISNULL(ep.IMPE, 0) AS IMPE,
+      ISNULL(c.IMPT, 0) - ISNULL(r.IMPR, 0) - ISNULL(ep.IMPE, 0) AS DIFD,
+      ISNULL(c.IMPT, 0) - ISNULL(r.IMPR, 0) AS TRECIBIDO
+    FROM Formas f
+    LEFT JOIN Catalogo cat ON cat.FORM = f.FORM
+    LEFT JOIN Cobrado c ON c.FORM = f.FORM
+    LEFT JOIN Retiros r ON r.FORM = f.FORM
+    LEFT JOIN EntregadoPrevio ep ON ep.FORM = f.FORM
+    WHERE NULLIF(LTRIM(RTRIM(ISNULL(f.FORM, ''))), '') IS NOT NULL;
+
+    DECLARE @trn FLOAT = 0;
+    DECLARE @art FLOAT = 0;
+
+    ;WITH Folios AS (
+      SELECT
+        a.IDFOL,
+        UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT
+      FROM dbo.PV_CTR_FOL_ASVR a
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+        AND a.FCNM >= @dtIni
+        AND a.FCNM < @dtFin
+        AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA')
+        AND UPPER(LTRIM(RTRIM(ISNULL(
+          CASE
+            WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
+            ELSE a.OPV
+          END,
+        '')))) = @opvNorm
+        AND (
+          @tipoNorm = 'GLOBAL'
+          OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
+          OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+        )
+    )
+    SELECT
+      @trn = COUNT(1),
+      @art = SUM(CASE WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END)
+    FROM Folios f
+    LEFT JOIN dbo.PV_TICKET_LOG t ON t.IDFOL = f.IDFOL;
+
+    DECLARE @difTotal MONEY = ISNULL((SELECT SUM(ISNULL(DIFD, 0)) FROM @formas), 0);
+
+    IF EXISTS (SELECT 1 FROM dbo.DAT_FORM_FIN WITH (UPDLOCK, HOLDLOCK) WHERE IDE = @ide)
+    BEGIN
+      UPDATE dbo.DAT_FORM_FIN
+      SET
+        OPV = @opvNorm,
+        FCN = @dtIni,
+        ART = ISNULL(@art, 0),
+        TRN = ISNULL(@trn, 0),
+        DIF = @difTotal,
+        ESTA = 'ABIERTA',
+        SUC = @sucNorm
+      WHERE IDE = @ide;
+    END
+    ELSE
+    BEGIN
+      INSERT INTO dbo.DAT_FORM_FIN (IDE, OPV, FCN, ART, TRN, DIF, ESTA, SUC)
+      VALUES (@ide, @opvNorm, @dtIni, ISNULL(@art, 0), ISNULL(@trn, 0), @difTotal, 'ABIERTA', @sucNorm);
+    END;
+
+    DELETE FROM dbo.DAT_FORM_ENTR_OPV_SVR
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @sucNorm
+      AND UPPER(LTRIM(RTRIM(ISNULL(OPV, '')))) = @opvNorm
+      AND CONVERT(DATE, FCN) = @fcnDate;
+
+    INSERT INTO dbo.DAT_FORM_ENTR_OPV_SVR (
+      IDE,
+      FCN,
+      OPV,
+      TER,
+      FORM,
+      IMPT,
+      IMPR,
+      IMPE,
+      DIFD,
+      SUC
+    )
+    SELECT
+      CONCAT(
+        @serial,
+        CASE
+          WHEN FORM = 'CHEQUE' THEN 'CHE'
+          WHEN FORM = 'CREDITO' THEN 'CRE'
+          WHEN FORM = 'DEPOSITO 3RO' THEN 'DEP'
+          WHEN FORM = 'DEUDOR' THEN 'DEU'
+          WHEN FORM = 'EFECTIVO' THEN 'EFE'
+          WHEN FORM = 'TARJETA' THEN 'TAR'
+          WHEN FORM = 'TRANSFERENCIA' THEN 'TRA'
+          ELSE LEFT(REPLACE(FORM, ' ', '') + 'XXX', 3)
+        END,
+        @opvNorm
+      ) AS IDE,
+      @dtIni AS FCN,
+      @opvNorm AS OPV,
+      @terNorm AS TER,
+      FORM,
+      IMPT,
+      IMPR,
+      IMPE,
+      DIFD,
+      @sucNorm AS SUC
+    FROM @formas;
+
+    IF @startedTran = 1 AND @@TRANCOUNT > 0
+      COMMIT TRANSACTION;
+
+    SELECT
+      @ide AS IDE,
+      @opvNorm AS OPV,
+      @dtIni AS FCN,
+      ISNULL(@art, 0) AS ART,
+      ISNULL(@trn, 0) AS TRN,
+      @difTotal AS DIF,
+      'ABIERTA' AS ESTA,
+      @sucNorm AS SUC;
+  END TRY
+  BEGIN CATCH
+    IF @startedTran = 1 AND @@TRANCOUNT > 0
+      ROLLBACK TRANSACTION;
+    THROW;
+  END CATCH
+END;
+GO
 CREATE OR ALTER PROCEDURE dbo.sp_cg_resumen_opv
   @SUC VARCHAR(25),
   @FCN DATE,
@@ -358,7 +631,6 @@ BEGIN
     WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
       AND a.FCNM >= @dtIni
       AND a.FCNM < @dtFin
-      AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA')
       AND UPPER(LTRIM(RTRIM(ISNULL(
         CASE
           WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
@@ -366,7 +638,7 @@ BEGIN
         END,
       '')))) = @opvNorm
       AND (
-        @tipoNorm = 'GLOBAL'
+        (@tipoNorm = 'GLOBAL' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA'))
         OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
         OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
       )
@@ -823,7 +1095,6 @@ BEGIN
       WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
         AND a.FCNM >= @dtIni
         AND a.FCNM < @dtFin
-        AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA')
         AND UPPER(LTRIM(RTRIM(ISNULL(
           CASE
             WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
@@ -831,7 +1102,7 @@ BEGIN
           END,
         '')))) = @opvNorm
         AND (
-          @tipoNorm = 'GLOBAL'
+          (@tipoNorm = 'GLOBAL' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA'))
           OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
           OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
         )
@@ -1088,7 +1359,8 @@ CREATE OR ALTER PROCEDURE dbo.sp_cg_reactivar_entrega_opv
   @FCN DATE,
   @OPV NVARCHAR(255),
   @TER NVARCHAR(255) = NULL,
-  @USER NVARCHAR(255) = NULL
+  @USER NVARCHAR(255) = NULL,
+  @ALLOW_HISTORIC_REACTIVATION BIT = 0
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -1099,6 +1371,7 @@ BEGIN
   DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@OPV, ''))));
   DECLARE @terNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@TER, ''))), '');
   DECLARE @userNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@USER, ''))), '');
+  DECLARE @allowHistoric BIT = CASE WHEN ISNULL(@ALLOW_HISTORIC_REACTIVATION, 0) = 1 THEN 1 ELSE 0 END;
   DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
   DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
   DECLARE @fechaProceso DATETIME = GETDATE();
@@ -1110,7 +1383,7 @@ BEGIN
   IF @opvNorm = ''
     THROW 58121, 'OPV es obligatorio', 1;
 
-  IF @fcnDate <> @today
+  IF @fcnDate <> @today AND @allowHistoric = 0
     THROW 58122, 'Solo se permite reactivar entregas de la fecha operable actual', 1;
 
   DECLARE @serial INT = DATEDIFF(DAY, '1899-12-30', @fcnDate);

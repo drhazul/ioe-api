@@ -3,13 +3,21 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { DataSource, QueryFailedError } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { CajaGeneralFormaDetalleQueryDto } from './dto/caja-general-forma-detalle-query.dto';
 import { CajaGeneralGlobalQueryDto } from './dto/caja-general-global-query.dto';
 import { CajaGeneralOpvQueryDto } from './dto/caja-general-opv-query.dto';
 import { CerrarEntregaOpvDto } from './dto/cerrar-entrega-opv.dto';
 import { ReactivarEntregaOpvDto } from './dto/reactivar-entrega-opv.dto';
+
+type SupervisorAuthorizer = {
+  idUsuario: number;
+  username: string;
+  roleCode: string;
+};
 
 @Injectable()
 export class CajaGeneralService {
@@ -26,6 +34,11 @@ export class CajaGeneralService {
       const tipo = this.operationTipo();
 
       this.assertSucursalAccess(suc, user);
+
+      await this.dataSource.query(
+        'EXEC dbo.sp_cg_sync_entrega_opv_abierta @SUC=@0, @FCN=@1, @OPV=@2, @TIPO_CORTE=@3',
+        [suc, fcn, opv, tipo],
+      );
 
       const [
         validationRows,
@@ -76,6 +89,97 @@ export class CajaGeneralService {
       };
     } catch (error) {
       throw this.mapError(error, 'No se pudo consultar resumen de entrega OPV');
+    }
+  }
+
+  async getDetalleFormaOpv(
+    query: CajaGeneralFormaDetalleQueryDto,
+    user: JwtPayload,
+  ) {
+    try {
+      const suc = this.normalizeUpper(query.suc);
+      const opv = this.normalizeUpper(query.opv);
+      const fcn = this.normalizeDate(query.fcn);
+      const tipo = this.normalizeTipo(query.tipo);
+      const form = this.normalizeUpper(query.form);
+
+      if (!form) {
+        throw new BadRequestException('form es obligatorio');
+      }
+
+      this.assertSucursalAccess(suc, user);
+
+      const rows = await this.dataSource.query(
+        `
+        DECLARE @sucNorm VARCHAR(25) = UPPER(LTRIM(RTRIM(ISNULL(@0, ''))));
+        DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@1, ''))));
+        DECLARE @fcnDate DATE = CONVERT(DATE, @2);
+        DECLARE @tipoNorm VARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@3, 'GLOBAL'))));
+        DECLARE @formNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@4, ''))));
+        DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
+        DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
+
+        IF @tipoNorm NOT IN ('CA', 'VF', 'GLOBAL')
+          SET @tipoNorm = 'GLOBAL';
+
+        ;WITH Folios AS (
+          SELECT
+            a.IDFOL,
+            UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT,
+            UPPER(LTRIM(RTRIM(ISNULL(a.ESTA, '')))) AS ESTA,
+            UPPER(LTRIM(RTRIM(ISNULL(
+              CASE
+                WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
+                ELSE a.OPV
+              END,
+            '')))) AS OPV_ACT
+          FROM dbo.PV_CTR_FOL_ASVR a
+          WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+            AND a.FCNM >= @dtIni
+            AND a.FCNM < @dtFin
+            AND UPPER(LTRIM(RTRIM(ISNULL(
+              CASE
+                WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
+                ELSE a.OPV
+              END,
+            '')))) = @opvNorm
+            AND (
+              (@tipoNorm = 'GLOBAL' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA'))
+              OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
+              OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+            )
+        )
+        SELECT
+          fo.OPV_ACT AS OPV,
+          dbo.fn_cg_normalize_forma(f.FORM) AS FORM,
+          f.IDFOL AS IDFOL,
+          SUM(ISNULL(f.IMPD, 0)) AS IMPT,
+          MAX(fo.AUT) AS AUT,
+          MAX(fo.ESTA) AS ESTA
+        FROM dbo.PV_CTR_FOL_FORM f
+        INNER JOIN Folios fo ON fo.IDFOL = f.IDFOL
+        WHERE dbo.fn_cg_normalize_forma(f.FORM) = @formNorm
+        GROUP BY fo.OPV_ACT, dbo.fn_cg_normalize_forma(f.FORM), f.IDFOL
+        ORDER BY f.IDFOL
+        `,
+        [suc, opv, fcn, tipo, form],
+      );
+
+      return {
+        ok: true,
+        suc,
+        opv,
+        fcn,
+        tipo,
+        form,
+        total: (rows ?? []).reduce((sum: number, item: any) => {
+          const value = this.toNumber(item?.IMPT) ?? 0;
+          return sum + value;
+        }, 0),
+        items: rows ?? [],
+      };
+    } catch (error) {
+      throw this.mapError(error, 'No se pudo consultar detalle por forma');
     }
   }
 
@@ -145,26 +249,88 @@ export class CajaGeneralService {
       const fcn = this.normalizeDate(dto.fcn);
       const ter = this.normalize(dto.ter ?? '') || null;
       const actor = this.resolveActor(dto.user, user);
+      const authPassword = this.normalize(dto.authPassword ?? '');
+      const isHistoricalDate = !this.isOperableDate(fcn);
 
       this.assertSucursalAccess(suc, user);
 
+      let supervisor: SupervisorAuthorizer | null = null;
+      if (isHistoricalDate) {
+        if (!authPassword) {
+          throw new ForbiddenException(
+            'Se requiere autorizacion de supervisor para reactivar entregas de otra fecha',
+          );
+        }
+        supervisor = await this.findSupervisorAuthorizerByPassword(
+          authPassword,
+          suc,
+        );
+        if (!supervisor) {
+          throw new ForbiddenException(
+            'Autorización de supervisor inválida para reactivar entrega histórica',
+          );
+        }
+      }
+
       const rows = await this.dataSource.query(
-        'EXEC dbo.sp_cg_reactivar_entrega_opv @SUC=@0, @FCN=@1, @OPV=@2, @TER=@3, @USER=@4',
-        [suc, fcn, opv, ter, actor],
+        'EXEC dbo.sp_cg_reactivar_entrega_opv @SUC=@0, @FCN=@1, @OPV=@2, @TER=@3, @USER=@4, @ALLOW_HISTORIC_REACTIVATION=@5',
+        [suc, fcn, opv, ter, actor, isHistoricalDate ? 1 : 0],
       );
       const result = this.firstRow(rows);
+      const syncRows = await this.dataSource.query(
+        'EXEC dbo.sp_cg_sync_entrega_opv_abierta @SUC=@0, @FCN=@1, @OPV=@2, @TIPO_CORTE=@3',
+        [suc, fcn, opv, this.operationTipo()],
+      );
+      const syncResult = this.firstRow(syncRows);
+      const effectiveResult = syncResult ?? result;
+      const movimientoId =
+        this.normalize(result?.MOV_NDOC ?? '') ||
+        this.normalize(effectiveResult?.IDE ?? '');
+
+      if (supervisor) {
+        await this.auditMutation({
+          action: 'CG_REACTIVAR_ENTREGA_OPV_AUTH',
+          entity: 'DAT_CTRL_CTAS',
+          entityId: movimientoId,
+          suc,
+          metadata: {
+            suc,
+            fcn,
+            opv,
+            ide: this.normalize(effectiveResult?.IDE ?? ''),
+            movNdoc: this.normalize(result?.MOV_NDOC ?? ''),
+            requestedBy: {
+              idUsuario: Number(user?.sub ?? 0) || null,
+              username: this.normalize(user?.username ?? ''),
+            },
+            supervisor: {
+              idUsuario: supervisor.idUsuario,
+              username: supervisor.username,
+              roleCode: supervisor.roleCode,
+            },
+            authorizationMode: 'SUPERVISOR_PASSWORD',
+            operation: 'reactivar_entrega_opv',
+          },
+          user,
+          ip,
+          auditUserId: supervisor.idUsuario,
+        });
+      }
 
       await this.auditMutation({
         action: 'CG_REACTIVAR_ENTREGA_OPV',
         entity: 'DAT_FORM_FIN',
-        entityId: this.normalize(result?.IDE ?? ''),
+        entityId: this.normalize(effectiveResult?.IDE ?? ''),
         suc,
         metadata: {
           suc,
           fcn,
           opv,
           ter,
-          result,
+          movNdoc: this.normalize(result?.MOV_NDOC ?? ''),
+          historicalDateAuthorization: isHistoricalDate,
+          authorizedBySupervisorId: supervisor?.idUsuario ?? null,
+          result: effectiveResult,
         },
         user,
         ip,
@@ -172,7 +338,7 @@ export class CajaGeneralService {
 
       return {
         ok: true,
-        result,
+        result: effectiveResult,
       };
     } catch (error) {
       throw this.mapError(error, 'No se pudo reactivar la entrega OPV');
@@ -353,8 +519,62 @@ export class CajaGeneralService {
     );
   }
 
+  private isOperableDate(fcn: string) {
+    const now = new Date();
+    const y = now.getFullYear().toString().padStart(4, '0');
+    const m = (now.getMonth() + 1).toString().padStart(2, '0');
+    const d = now.getDate().toString().padStart(2, '0');
+    return fcn === `${y}-${m}-${d}`;
+  }
+
+  private async findSupervisorAuthorizerByPassword(
+    password: string,
+    suc: string,
+  ): Promise<SupervisorAuthorizer | null> {
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        U.IDUSUARIO,
+        U.USERNAME,
+        U.PASSWORD_HASH,
+        R.CODIGO AS ROLE_CODE,
+        R.NOMBRE AS ROLE_NAME
+      FROM dbo.USUARIO U
+      INNER JOIN dbo.ROL R ON R.IDROL = U.IDROL
+      WHERE U.ESTATUS = 'ACTIVO'
+        AND R.ACTIVO = 1
+        AND UPPER(LTRIM(RTRIM(ISNULL(U.SUC, '')))) = @0
+        AND (
+          UPPER(LTRIM(RTRIM(ISNULL(R.CODIGO, '')))) IN ('SUPERVISOR', 'SUPERPV', 'SUPERVP')
+          OR UPPER(LTRIM(RTRIM(ISNULL(R.NOMBRE, '')))) LIKE '%SUPERVISOR%'
+        )
+      `,
+      [suc],
+    );
+
+    for (const raw of rows ?? []) {
+      const row = raw as Record<string, unknown>;
+      const hash = this.normalize(row.PASSWORD_HASH);
+      if (!hash) continue;
+      const valid = await bcrypt.compare(password, hash);
+      if (!valid) continue;
+
+      const idUsuario = Number(row.IDUSUARIO ?? 0) || 0;
+      if (idUsuario <= 0) continue;
+
+      return {
+        idUsuario,
+        username: this.normalize(row.USERNAME),
+        roleCode: this.normalizeUpper(row.ROLE_CODE),
+      };
+    }
+
+    return null;
+  }
+
   private isAdmin(user: JwtPayload) {
-    return Number(user?.roleId ?? 0) === 1;
+    if (Number(user?.roleId ?? 0) === 1) return true;
+    return this.normalizeUpper(user?.username ?? '') === 'ADMIN';
   }
 
   private normalize(value: unknown) {
@@ -431,9 +651,10 @@ export class CajaGeneralService {
     metadata: unknown;
     user: JwtPayload;
     ip: string | null;
+    auditUserId?: number | null;
   }) {
     await this.audit.log({
-      IDUSUARIO: Number(input.user?.sub ?? 0) || null,
+      IDUSUARIO: input.auditUserId ?? (Number(input.user?.sub ?? 0) || null),
       ACTION: input.action,
       MODULO: 'caja-general',
       ENTIDAD: input.entity,

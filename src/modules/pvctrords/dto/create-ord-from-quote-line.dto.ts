@@ -22,6 +22,14 @@ export class CreateOrdFromQuoteLineDto {
   @Length(1, 255)
   idfol: string;
 
+  @ApiProperty({
+    description: 'ID del renglón en PV_TICKET_LOG sobre el que se creará/actualizará la ORD',
+  })
+  @Transform(({ value }) => toTrimmedString(value))
+  @IsString()
+  @Length(1, 255)
+  ticketId: string;
+
   @ApiProperty()
   @Transform(({ value }) => toTrimmedString(value))
   @IsString()

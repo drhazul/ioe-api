@@ -83,6 +83,8 @@
 - Compatibilidad query cotizaciones (2026-03): `ListPvCtrFolAsvrQueryDto` tolera parametro opcional `_` para clientes legacy que usen cache-buster, evitando `400 property _ should not exist`.
 - `GET /pvctrfolasvr` (2026-03): incluye `RazonSocialReceptor` en la respuesta (join a `FACT_CLIENT_SHP`) para visualizacion de panel en app.
 - `GET /pvctrfolasvr/:idfol` (2026-03): retorna vista de lectura con `RazonSocialReceptor` (join a `FACT_CLIENT_SHP`) y resuelve por `IDFOL` actual o `IDFOLINICIAL` para compatibilidad cuando el folio visible cambia de `CP` a `CA/VF`.
+- Trazabilidad UI cotizaciones (2026-03-10): búsqueda por OPV desde `search` permite búsqueda cruzada entre OPV solo para folios con `AUT='CP'` y `ESTA='PENDIENTE'`.
+- Trazabilidad UI paneles (2026-03-10): cotizaciones/devoluciones/PS ejecutan anulación lógica vía `PATCH /pvctrfolasvr/:idfol` con `ESTA='ANULADO'` (sin `DELETE` físico), habilitada solo para filas en `PENDIENTE`.
 - `pvctrfolform`: `PV_CTR_FOL_FORM` (`IDF`, `IDFOL`, `FORM`, `IMPA`, `IMPP`, `IMPC`, `IMPD`, ...).
 - `pvctrords`: `PV_CTR_ORDS` (`IORD`, `IDFOL`, `ART`, `CTD`, `SUC`, `ESTATUS`, ...).
 - `pvctrordsdet`: `PV_CTR_ORDS_DET` (`IORDP`, `IORD`, `ART`, `JOB`, `ESF`, `CIL`, `EJE`).
@@ -311,6 +313,7 @@
 - trazabilidad UI (app): en pago de devolución, `RQFAC` se consume desde preview/contexto del origen y se mantiene en solo lectura (sin edición manual).
 - trazabilidad UI (app, 2026-03): en `/punto-venta/devoluciones/:idfolDev/pago`, el card de contexto oculta `AUT dev`, `AUT origen`, `Tipo` y `Líneas seleccionadas`; sin cambios de API.
 - trazabilidad UI (app): en pago de devolución no se permite agregar, editar ni eliminar formas desde frontend.
+- trazabilidad UI (app, 2026-03-10): en pago devolución, frontend rehidrata siempre `formas` desde `preview.formasSugeridas` (folio origen) para devolver por mismo concepto en no-efectivo y preservar `aut/ref` para validación/aplicación backend.
 - trazabilidad UI (app): cuando una devolución queda en `PAGADO`, app muestra candado para salida y al presionarlo ejecuta `PATCH /pvctrfolasvr/:idfol` con `ESTA='TRANSMITIR'`.
 - `GET /pv/devoluciones` filtra panel exclusivamente por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` para ambas ramas (`OPV` y `OPVM`); `TRANSMITIR` se conserva para salida operativa, no para listado de panel.
 - trazabilidad UI (app): desde panel, folios de devolución en `PAGADO` abren directo en `/pago` (sin pasar por selección/detalle).

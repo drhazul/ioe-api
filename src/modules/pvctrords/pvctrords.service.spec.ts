@@ -10,6 +10,7 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
 
   const baseDto: CreateOrdFromQuoteLineDto = {
     idfol: 'DF01040220261210',
+    ticketId: '75a760b7-0bc3-4647-be8f-8bd3ab515f47',
     art: 'ART-001',
     descArt: 'Articulo demo',
     ctd: 1,
@@ -35,7 +36,7 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
     const iord = 'DF01131930001';
 
     dataSource.query
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ART: baseDto.art, CTD: baseDto.ctd, ORD: null }])
       .mockResolvedValueOnce([{ IORD: iord }])
       .mockResolvedValueOnce([{ IORD: iord, IDFOL: baseDto.idfol }])
       .mockResolvedValueOnce([
@@ -85,18 +86,20 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
   });
 
   it('rechaza cuando ctd no es 1 o 0.5', async () => {
+    dataSource.query.mockResolvedValueOnce([{ ART: baseDto.art, CTD: 2, ORD: null }]);
     await assertErrorCode(
       () =>
         service.createFromQuoteLine({
           ...baseDto,
-          ctd: 2,
+          ticketId: 'linea-qty-invalida',
         }),
       'INVALID_QTY',
     );
-    expect(dataSource.query).not.toHaveBeenCalled();
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
   });
 
   it('rechaza cuando falta fecha de entrega', async () => {
+    dataSource.query.mockResolvedValueOnce([{ ART: baseDto.art, CTD: baseDto.ctd, ORD: null }]);
     await assertErrorCode(
       () =>
         service.createFromQuoteLine({
@@ -105,10 +108,11 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
         }),
       'FCNM_REQUIRED',
     );
-    expect(dataSource.query).not.toHaveBeenCalled();
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
   });
 
   it('rechaza cuando COMAD esta vacio', async () => {
+    dataSource.query.mockResolvedValueOnce([{ ART: baseDto.art, CTD: baseDto.ctd, ORD: null }]);
     await assertErrorCode(
       () =>
         service.createFromQuoteLine({
@@ -117,12 +121,13 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
         }),
       'COMAD_REQUIRED',
     );
-    expect(dataSource.query).not.toHaveBeenCalled();
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
   });
 
   it('actualiza ORD existente cuando ordExistente > 0', async () => {
     const existingIord = 'DF01131930009';
     dataSource.query
+      .mockResolvedValueOnce([{ ART: baseDto.art, CTD: baseDto.ctd, ORD: existingIord }])
       .mockResolvedValueOnce([{ IORD: existingIord }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ IORD: existingIord, IDFOL: baseDto.idfol }])
@@ -139,7 +144,7 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
     expect(result.updated).toBe(true);
     expect(result.iord).toBe(existingIord);
     expect(result.message).toBe('ORD existente actualizada correctamente');
-    expect(dataSource.query).toHaveBeenCalledTimes(4);
+    expect(dataSource.query).toHaveBeenCalledTimes(5);
   });
 });
 

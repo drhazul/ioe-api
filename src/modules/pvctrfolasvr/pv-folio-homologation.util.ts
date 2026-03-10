@@ -6,6 +6,7 @@ export const ESTADOS_OPERATIVOS = new Set([
   'PENDIENTE',
   'PAGADO',
   'TRANSMITIR',
+  'ANULADO',
 ]);
 
 export function normalizeEstadoOperativo(value: unknown) {
@@ -20,10 +21,11 @@ export function normalizeEstadoOperativo(value: unknown) {
 
   if (estado.startsWith('PAGADO')) return 'PAGADO';
   if (estado.startsWith('TRANSMIT')) return 'TRANSMITIR';
+  if (estado.startsWith('ANULA')) return 'ANULADO';
 
   if (!ESTADOS_OPERATIVOS.has(estado)) {
     throw new BadRequestException(
-      `ESTA inválido: ${estado}. Valores permitidos: PENDIENTE, PAGADO, TRANSMITIR`,
+      `ESTA inválido: ${estado}. Valores permitidos: PENDIENTE, PAGADO, TRANSMITIR, ANULADO`,
     );
   }
 
