@@ -1017,6 +1017,17 @@ BEGIN
       @pIDFOLOLD = @idfolActual,
       @pNOW = @fechaProceso;
 
+    IF @tipotranNorm = 'VF'
+    BEGIN
+      IF OBJECT_ID('dbo.sp_fact_sync_folio_vf') IS NULL
+        THROW 51033, 'No existe dbo.sp_fact_sync_folio_vf. Ejecute sql/sp_fact_sync_folio_vf_create.sql', 1;
+
+      EXEC dbo.sp_fact_sync_folio_vf
+        @IDFOL = @idfolVisibleNuevo,
+        @EVENTO = 'CIERRE_VF',
+        @FORCE = 0;
+    END
+
     IF @startedTran = 1 AND @@TRANCOUNT > 0
       COMMIT TRANSACTION;
 

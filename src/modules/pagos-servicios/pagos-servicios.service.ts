@@ -320,7 +320,11 @@ export class PagosServiciosService {
     }
   }
 
-  async getAdeudosCliente(clientRaw: string, _user: JwtPayload) {
+  async getAdeudosCliente(
+    clientRaw: string,
+    _user: JwtPayload,
+    folioRaw?: string,
+  ) {
     try {
       const clientText = this.normalize(clientRaw);
       if (!/^\d+$/.test(clientText)) {
@@ -331,10 +335,30 @@ export class PagosServiciosService {
         throw new BadRequestException('client debe ser entero positivo');
       }
 
-      const rows = await this.dataSource.query(
-        'EXEC dbo.sp_ps_adeudos_cliente @CLIENT=@0',
-        [clientText],
-      );
+      const folio = this.normalize(folioRaw ?? '');
+      let rows: unknown[] = [];
+      if (folio) {
+        try {
+          rows = await this.dataSource.query(
+            'EXEC dbo.sp_ps_adeudos_cliente @CLIENT=@0, @FOLIO=@1',
+            [clientText, folio],
+          );
+        } catch (error) {
+          if (!this.isStoredProcedureParamError(error)) {
+            throw error;
+          }
+          rows = await this.dataSource.query(
+            'EXEC dbo.sp_ps_adeudos_cliente @CLIENT=@0',
+            [clientText],
+          );
+        }
+      } else {
+        rows = await this.dataSource.query(
+          'EXEC dbo.sp_ps_adeudos_cliente @CLIENT=@0',
+          [clientText],
+        );
+      }
+
       const row = this.firstRow(rows);
       const adeudosRJson = this.pickRowValue(row, [
         'ADEUDOS_R_JSON',
@@ -346,12 +370,34 @@ export class PagosServiciosService {
         'adeudos_res_json',
         'Adeudos_Res_Json',
       ]);
+      let adeudosR = this.parseJsonArray(adeudosRJson);
+      let adeudosRes = this.parseJsonArray(adeudosResJson);
+
+      // Fallback de filtrado local cuando la BD aún no tiene @FOLIO en el SP.
+      if (folio) {
+        const folioNorm = this.normalizeUpper(folio);
+        const byFolio = (item: Record<string, unknown>) => {
+          const folioValue = this.normalizeUpper(
+            item.IDFOL ??
+              item.idfol ??
+              item.IdFol ??
+              item.NDOC ??
+              item.ndoc ??
+              item.ORD ??
+              item.ord ??
+              '',
+          );
+          return folioValue.includes(folioNorm);
+        };
+        adeudosR = adeudosR.filter(byFolio);
+        adeudosRes = adeudosRes.filter(byFolio);
+      }
 
       return {
         ok: true,
         client: clientText,
-        adeudosR: this.parseJsonArray(adeudosRJson),
-        adeudosRes: this.parseJsonArray(adeudosResJson),
+        adeudosR,
+        adeudosRes,
       };
     } catch (error) {
       throw this.mapError(error, 'No se pudieron consultar adeudos de cliente');
@@ -1107,5 +1153,15 @@ export class PagosServiciosService {
       .replace(/^RequestError:\s*/i, '')
       .replace(/\s+\bat line \d+\b/i, '')
       .trim();
+  }
+
+  private isStoredProcedureParamError(error: unknown) {
+    if (!(error instanceof QueryFailedError)) return false;
+    const message = this.extractSqlMessage(error).toUpperCase();
+    return (
+      message.includes('TOO MANY ARGUMENTS SPECIFIED') ||
+      (message.includes('PROCEDURE OR FUNCTION') &&
+        message.includes('ARGUMENT'))
+    );
   }
 }

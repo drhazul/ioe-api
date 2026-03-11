@@ -83,9 +83,10 @@ export class PagosServiciosController {
   @Get('clientes/:client/adeudos')
   getAdeudosCliente(
     @Param('client') client: string,
+    @Query('folio') folio: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.getAdeudosCliente(client, user);
+    return this.service.getAdeudosCliente(client, user, folio);
   }
 
   @Get('clientes/:client/adeudos/:idFol/detalle')

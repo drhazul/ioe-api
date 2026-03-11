@@ -1,4 +1,4 @@
-CREATE OR ALTER PROCEDURE dbo.sp_pv_cotizacion_cerrar
+CREATE   PROCEDURE dbo.sp_pv_cotizacion_cerrar
   @IDFOL NVARCHAR(255),
   @SUC NVARCHAR(255) = NULL,
   @TIPOTRAN NVARCHAR(10),
@@ -823,4 +823,4 @@ BEGIN
     THROW;
   END CATCH
 END;
-GO
+

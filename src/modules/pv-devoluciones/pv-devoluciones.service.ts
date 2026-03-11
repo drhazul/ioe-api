@@ -664,6 +664,13 @@ export class PvDevolucionesService {
       });
 
       await this.applyActArt(queryRunner, context.idfolDev, finalizedAt);
+      if (context.tipotran === 'VF') {
+        await this.executeFactSyncFolioVf(
+          queryRunner,
+          context.idfolOrig,
+          'DEV_VF',
+        );
+      }
       await this.regenerateTicketDevolucion(
         queryRunner,
         context.idfolDev,
@@ -2861,6 +2868,43 @@ export class PvDevolucionesService {
       `,
       params,
     );
+  }
+
+  private async executeFactSyncFolioVf(
+    executor: SqlExecutor,
+    idfol: string,
+    evento: string,
+  ) {
+    const procedureName = 'dbo.sp_fact_sync_folio_vf';
+    const exists = await this.procedureExists(executor, procedureName);
+    if (!exists) {
+      throw new ConflictException(
+        `No existe ${procedureName}. Ejecute el script sql/sp_fact_sync_folio_vf_create.sql`,
+      );
+    }
+
+    await executor.query(
+      `
+      EXEC dbo.sp_fact_sync_folio_vf
+        @IDFOL = @0,
+        @EVENTO = @1,
+        @FORCE = @2
+      `,
+      [idfol, evento, 0],
+    );
+  }
+
+  private async procedureExists(executor: SqlExecutor, procedureName: string) {
+    const rows = await executor.query(
+      `
+      SELECT CASE
+        WHEN OBJECT_ID(@0) IS NULL THEN 0
+        ELSE 1
+      END AS EXISTS_PROC
+      `,
+      [procedureName],
+    );
+    return (this.toInt((rows?.[0] ?? {})['EXISTS_PROC']) ?? 0) === 1;
   }
 
   private async tableExists(executor: SqlExecutor, tableName: string) {

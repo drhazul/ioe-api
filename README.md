@@ -241,6 +241,7 @@ Opcionales:
 - `POST /pvctrfolasvr/auto` (creacion de folio).
 - `PATCH /pvctrfolasvr/:idfol` (asignacion de `CLIEN` al folio creado).
 - Correccion backend (2026-02): `PV_CTR_FOL_ASVR.CLIEN` se mapea como `float` en TypeORM para evitar `500 EPARAM` cuando el cliente excede el rango `int32`.
+- Compatibilidad facturación (2026-03): `FAC_SVR_SHAP.CLIEN` se ajusta a `FLOAT` para alinearlo con `PV_CTR_FOL_ASVR.CLIEN` y permitir IDs grandes (ej. `10460540001`) sin truncamiento/overflow.
 - No hay cambios de contrato API en este ajuste.
 
 ## Edicion de precio PV en detalle de cotizacion
@@ -317,6 +318,8 @@ Opcionales:
 - `PV_CTR_FOL_ASVR`: `ESTA='PAGADO'` al finalizar cierre (`TRANSMITIR` se aplica despues en `PATCH` desde frontend al salir), `IMPT=TOTAL`, `AUT='CA'|'VF'` (y `REQF`/campo equivalente si existe).
 - en `CP -> CA/VF`, `sp_pv_cotizacion_cerrar` genera nuevo `IDFOL` visible, conserva `IDFOLINICIAL` y religa `PV_TICKET_LOG`, `PV_CTR_ORDS` y `REF_DETALLE` al folio final dentro de la misma transacción.
 - `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`): insercion transaccional de formas definitivas (`IDF`, `IDFOL`, `FORM`, `IMPP`, `AUT`, ...). En `CREDITO/DEUDOR` guarda `AUT=IDFOL`. En cualquier forma, `IMPD` persiste el total final de la cotizacion (costo total de articulos segun reglas de cierre).
+- sincronización facturación VF (2026-03): en cierre `tipotran='VF'`, `sp_pv_cotizacion_cerrar` exige e invoca `dbo.sp_fact_sync_folio_vf` dentro de la misma transacción para upsert de cabecera `FAC_SVR_SHAP` y rebuild de detalle `FACT_TICKET_SHP` del folio final.
+- regla `Tipofact` en sincronización VF (2026-03): si el folio tiene alguna forma `CREDITO` en `PV_CTR_FOL_FORM(_SVR)`, se persiste `FAC_SVR_SHAP.Tipofact='CREDITO'`; en caso contrario queda `INDIVIDUAL`.
 - política de fecha de finalización cotización (2026-03): `sp_pv_cotizacion_cerrar` aplica fecha de proceso actual al insertar formas (`FCN`), al actualizar cabecera (`FCNM`) y al generar movimientos contables por `CREDITO/DEUDOR` (`DAT_CTR_DOC`/`DAT_CTRL_CTAS`).
 - `PV_CTR_ORDS`: actualizacion de `ESTATUS=2` para las ordenes del `IDFOL` al cerrar.
 - Tablas para calculo/validacion:
@@ -393,9 +396,11 @@ Opcionales:
 - compatibilidad NDOC devolución (2026-03): al calcular consecutivo `NDOC`, API consulta `NDOC` solo cuando existe en `DAT_CTRL_CTAS`/`DAT_CTR_DOC`; en `DAT_CTRL_CTAS` el insert usa `NDOC` opcional según columnas disponibles para evitar `Invalid column name 'NDOC'`.
 - política de fecha de finalización devolución (2026-03): API reutiliza una fecha actual única del cierre para `FACT_IDFOLDEV` (`FCN/FCNR`), `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, `PV_TICKET_LOG.UPDATED_AT` y movimientos contables asociados.
 - marca ORDs afectadas como anuladas (`PV_CTR_ORDS.ESTATUS=4`).
+- devolución origen VF (2026-03): al finalizar pago de devolución y aplicar `CTDDF`, la API ejecuta `dbo.sp_fact_sync_folio_vf` sobre el folio origen (`IDFOLORIG`) para reflejar devoluciones parciales/totales en `FAC_SVR_SHAP` y `FACT_TICKET_SHP`.
 - folio devolución termina en `ESTA='PAGADO'` y `AUT='DF'/'APDF'`; el envío a `TRANSMITIR` se realiza después mediante `PATCH /pvctrfolasvr/:idfol`.
 - SQL soporte:
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta la tabla staging `PV_DEV_DET_TMP`.
+- `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación por evento VF.
 
 ## Reloj Checador (Asistencia)
 
@@ -507,6 +512,7 @@ Opcionales:
 - Scripts de esquema:
 - `DAT_FORM_schema_alter.sql` (estructura y control de estado para formas de pago)
 - `PV_CTR_ORDS_CLIEN_float.sql` (ajuste de CLIEN a FLOAT para IDs grandes)
+- `FAC_SVR_SHAP_CLIEN_float.sql` (alinea `FAC_SVR_SHAP.CLIEN` a `FLOAT` y backfill desde `PV_CTR_FOL_ASVR`)
 - `PV_DEV_DET_TMP_create.sql` (staging de detalle para devoluciones PV)
 - `USUARIO_forzar_cambio_pass_alter.sql` (agrega bandera `FORZAR_CAMBIO_PASS` para flujo de primer acceso)
 

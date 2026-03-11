@@ -205,6 +205,8 @@
 - el calculo de maximo `NDOC` usa SQL dinamico con `COL_LENGTH` para evitar `Invalid column name 'NDOC'` en esquemas legacy donde la columna no existe en alguna tabla auxiliar.
 - no permite que `sum(formas.impp)` exceda el total del cierre, excepto cuando hay `EFECTIVO` (se permite excedente para cambio).
 - actualiza `PV_CTR_FOL_ASVR` a `ESTA='PAGADO'` al finalizar cierre, `IMPT=TOTAL` y `AUT` con `CA` o `VF` segun `tipotran`.
+- sincronización facturación VF (2026-03): en cierres `VF`, `sp_pv_cotizacion_cerrar` exige e invoca `dbo.sp_fact_sync_folio_vf` dentro de la misma transacción para upsert de `FAC_SVR_SHAP` y rebuild de `FACT_TICKET_SHP`.
+- regla `Tipofact` en sincronización VF (2026-03): si el folio tiene al menos una forma `CREDITO` en `PV_CTR_FOL_FORM(_SVR)`, `FAC_SVR_SHAP.Tipofact='CREDITO'`; en otro caso se conserva `INDIVIDUAL`.
 - política de fecha de finalización (2026-03): en `sp_pv_cotizacion_cerrar`, la fecha de proceso actual se aplica al cierre en `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM` y movimientos contables de `CREDITO/DEUDOR` (`DAT_CTR_DOC`/`DAT_CTRL_CTAS`).
 - al cerrar `CP -> CA/VF`, el SP genera un nuevo `IDFOL` visible con `DAT_FOLIOS_CONSEC`, preserva `IDFOLINICIAL`, actualiza `ORIGEN_AUT` y religa `PV_TICKET_LOG`, `PV_CTR_ORDS` y `REF_DETALLE` al nuevo folio.
 - el cambio a `ESTA='TRANSMITIR'` queda en el flujo de salida de frontend (PATCH al regresar desde pago con estado pagado).
@@ -333,6 +335,7 @@
 - en formas `CREDITO/DEUDOR`, registra abono en `DAT_CTR_DOC` (si existe) y `DAT_CTRL_CTAS` con `CTA='101001002'`, clase `601`, `RTXT='Abono por anulacion cliente ticket <folio origen>'` e `IDFOL=<folio origen>`; `NDOC` se usa cuando existe en esquema.
 - compatibilidad NDOC devolución (2026-03): al generar consecutivo de `NDOC`, API solo consulta `NDOC` en `DAT_CTRL_CTAS`/`DAT_CTR_DOC` cuando la columna existe; en `DAT_CTRL_CTAS` el insert usa `NDOC` opcional según esquema para evitar `Invalid column name 'NDOC'`.
 - política de fecha de finalización devolución (2026-03): al finalizar, API fija una sola fecha de proceso actual y la reutiliza en `FACT_IDFOLDEV` (`FCN/FCNR`), `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, `PV_TICKET_LOG.UPDATED_AT` y movimientos `DAT_CTR_DOC`/`DAT_CTRL_CTAS`.
+- sincronización facturación devolución VF (2026-03): al finalizar una devolución con origen `VF`, la API invoca `dbo.sp_fact_sync_folio_vf` sobre `IDFOLORIG` después de aplicar `CTDDF`, para reflejar devoluciones parciales/totales en `FAC_SVR_SHAP` y `FACT_TICKET_SHP`.
 - anula ORDs afectadas con `PV_CTR_ORDS.ESTATUS=4`.
 - deja folio devolución en `ESTA='PAGADO'` y `AUT='DF'/'APDF'`; el paso a `TRANSMITIR` se realiza posteriormente vía `PATCH /pvctrfolasvr/:idfol` desde frontend.
 
@@ -342,6 +345,7 @@
 - La app usa `GET /factclientshp` para listado y filtra por SUC en frontend.
 - Tras `POST /pvctrfolasvr/auto`, la app asigna cliente al folio via `PATCH /pvctrfolasvr/:idfol` enviando `CLIEN`.
 - Correccion backend (2026-02): `PV_CTR_FOL_ASVR.CLIEN` se mapea como `float` en entidad TypeORM (no `int`) para soportar IDs de cliente > `2,147,483,647` y evitar `EPARAM` en `PATCH /pvctrfolasvr/:idfol`.
+- Compatibilidad facturación (2026-03): `FAC_SVR_SHAP.CLIEN` se ajusta a `FLOAT` para alinearlo con `PV_CTR_FOL_ASVR.CLIEN`; esto permite conservar IDs grandes de cliente (ej. `10460540001`) al sincronizar facturación.
 - Este ajuste no introduce endpoints nuevos ni cambia contratos API existentes.
 
 ## Reloj Checador (asistencia) - implementado (2026-02)
@@ -395,12 +399,16 @@
 - `sp_datart_massive_apply`, `sp_art_masiva_validate_batch`, `sp_art_masiva_commit_batch`.
 - Punto de venta y clientes:
 - `sp_factclientshp_create`, `sp_pvctrfolasvr_create`, `sp_pv_ctr_ords_create_from_quote_line`, `sp_pv_cotizacion_cerrar`.
+- Facturación VF por evento:
+- `sp_fact_sync_folio_vf`.
 - Retiros parciales:
 - `sql/sp_retiros_module_create.sql` (view `VW_PV_FORM_TIPOTRAN_DISTINCT`, FKs/índices y SPs `sp_ret_*`).
 - Scripts de esquema PV:
 - `sql/DAT_FORM_schema_alter.sql` agrega `IDFORM` identity como PK y `ESTADO` para activar/bloquear visibilidad de formas de pago.
 - `sql/PV_CTR_ORDS_CLIEN_float.sql` ajusta `PV_CTR_ORDS.CLIEN` a `FLOAT` para soportar IDs grandes.
+- `sql/FAC_SVR_SHAP_CLIEN_float.sql` alinea `FAC_SVR_SHAP.CLIEN` a `FLOAT` y aplica backfill desde `PV_CTR_FOL_ASVR`.
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta staging de líneas para devoluciones PV.
+- `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación en eventos VF.
 - `sql/USUARIO_forzar_cambio_pass_alter.sql` agrega `FORZAR_CAMBIO_PASS` para controlar cambio obligatorio de contraseña en primer acceso.
 - Estado de cajón OPV:
 - `sql/sp_cajon_estado_resumen.sql` crea/actualiza `dbo.sp_cajon_estado_resumen` e índices de soporte para `PV_CTR_FOL_ASVR`, `PV_CTR_FOL_FORM`, `DAT_RET_CTR_SVR`, `DAT_RET_DET_SVR`.
