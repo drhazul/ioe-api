@@ -338,6 +338,10 @@ export class PvCotizacionesCierreService {
         opv,
         formas,
       });
+      await this.executeMb51Transmission(queryRunner, {
+        idfol: result.idfol,
+        user: opv,
+      });
 
       return result;
     } catch (error) {
@@ -1747,6 +1751,31 @@ export class PvCotizacionesCierreService {
       sumPagos,
       cambio,
     };
+  }
+
+  private async executeMb51Transmission(
+    executor: SqlExecutor,
+    input: {
+      idfol: string;
+      user: string | null;
+    },
+  ) {
+    const procedureName = 'dbo.sp_mb51_transmitir_folio';
+    const exists = await this.procedureExists(executor, procedureName);
+    if (!exists) {
+      throw new ConflictException(
+        `No existe ${procedureName}. Ejecute el script sql/mb51transmicion.sql`,
+      );
+    }
+
+    await executor.query(
+      `
+      EXEC dbo.sp_mb51_transmitir_folio
+        @IDFOL = @0,
+        @USER = @1
+      `,
+      [input.idfol, input.user],
+    );
   }
 
   private mapCloseError(error: unknown) {

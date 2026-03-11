@@ -395,6 +395,7 @@
 - `sp_cont_upload_clear`, `sp_cont_build_det_svr`, `sp_cont_sync_captura_art`, `sp_cont_apply_adjustment`.
 - MB51/MB52:
 - `sp_dat_mb51_search`, `sp_dat_mb52_resumen`.
+- Script operativo MB51 (2026-03): `sql/mb51transmicion.sql` normaliza estados legacy de transmisión (`MB51PROCES`/`TRANSMICION`/`TRANSMISION`) a `TRANSMITIR` en `PV_CTR_FOL_ASVR` para cumplir `CK_PV_CTR_FOL_ASVR_ESTA_HOMOLOGADO`.
 - Catalogo articulos:
 - `sp_datart_massive_apply`, `sp_art_masiva_validate_batch`, `sp_art_masiva_commit_batch`.
 - Punto de venta y clientes:

@@ -722,6 +722,11 @@ export class PvDevolucionesService {
         idfolFinal = nextVisible.idfol;
       }
 
+      await this.executeMb51Transmission(queryRunner, {
+        idfol: idfolFinal,
+        user: opvActor,
+      });
+
       await queryRunner.commitTransaction();
 
       await this.audit.log({
@@ -968,7 +973,7 @@ export class PvDevolucionesService {
 
   private assertDevolucionEditable(context: DevolucionContext) {
     const estado = this.normalizeEstadoOperativoCompat(context.estaDev);
-    if (estado === 'PAGADO' || estado === 'TRANSMITIR') {
+    if (estado === 'PAGADO' || estado === 'MB51PROCES' || estado === 'TRANSMITIR') {
       throw new ConflictException(
         `La devolución ${context.idfolDev} ya no es editable por estado ${estado}`,
       );
@@ -2456,6 +2461,7 @@ export class PvDevolucionesService {
       return 'PENDIENTE';
     }
     if (estado.startsWith('PAGADO')) return 'PAGADO';
+    if (estado.startsWith('MB51')) return 'MB51PROCES';
     if (estado.startsWith('TRANSMIT')) return 'TRANSMITIR';
     return estado;
   }
@@ -2891,6 +2897,31 @@ export class PvDevolucionesService {
         @FORCE = @2
       `,
       [idfol, evento, 0],
+    );
+  }
+
+  private async executeMb51Transmission(
+    executor: SqlExecutor,
+    input: {
+      idfol: string;
+      user: string | null;
+    },
+  ) {
+    const procedureName = 'dbo.sp_mb51_transmitir_folio';
+    const exists = await this.procedureExists(executor, procedureName);
+    if (!exists) {
+      throw new ConflictException(
+        `No existe ${procedureName}. Ejecute el script sql/mb51transmicion.sql`,
+      );
+    }
+
+    await executor.query(
+      `
+      EXEC dbo.sp_mb51_transmitir_folio
+        @IDFOL = @0,
+        @USER = @1
+      `,
+      [input.idfol, input.user],
     );
   }
 

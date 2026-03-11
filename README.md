@@ -496,6 +496,7 @@ Opcionales:
 - MB51/MB52:
 - `sp_dat_mb51_search`
 - `sp_dat_mb52_resumen`
+- Script operativo MB51 (2026-03): `sql/mb51transmicion.sql` normaliza estados legacy de transmisión (`MB51PROCES`/`TRANSMICION`/`TRANSMISION`) a `TRANSMITIR` en `PV_CTR_FOL_ASVR` para evitar conflicto con `CK_PV_CTR_FOL_ASVR_ESTA_HOMOLOGADO`.
 - Articulos (masivos):
 - `sp_datart_massive_apply`
 - `sp_art_masiva_validate_batch`
