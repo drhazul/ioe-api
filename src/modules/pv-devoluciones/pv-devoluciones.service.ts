@@ -664,13 +664,6 @@ export class PvDevolucionesService {
       });
 
       await this.applyActArt(queryRunner, context.idfolDev, finalizedAt);
-      if (context.tipotran === 'VF') {
-        await this.executeFactSyncFolioVf(
-          queryRunner,
-          context.idfolOrig,
-          'DEV_VF',
-        );
-      }
       await this.regenerateTicketDevolucion(
         queryRunner,
         context.idfolDev,
@@ -2873,30 +2866,6 @@ export class PvDevolucionesService {
       )
       `,
       params,
-    );
-  }
-
-  private async executeFactSyncFolioVf(
-    executor: SqlExecutor,
-    idfol: string,
-    evento: string,
-  ) {
-    const procedureName = 'dbo.sp_fact_sync_folio_vf';
-    const exists = await this.procedureExists(executor, procedureName);
-    if (!exists) {
-      throw new ConflictException(
-        `No existe ${procedureName}. Ejecute el script sql/sp_fact_sync_folio_vf_create.sql`,
-      );
-    }
-
-    await executor.query(
-      `
-      EXEC dbo.sp_fact_sync_folio_vf
-        @IDFOL = @0,
-        @EVENTO = @1,
-        @FORCE = @2
-      `,
-      [idfol, evento, 0],
     );
   }
 

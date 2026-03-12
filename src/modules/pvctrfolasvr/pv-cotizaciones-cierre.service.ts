@@ -126,6 +126,7 @@ export class PvCotizacionesCierreService {
     'CREDITO',
     'DEUDOR',
   ]);
+  private static readonly FORMA_CREDITO = 'CREDITO';
   private static readonly NDOC_LOCK_RESOURCE = 'PV_CIERRE_NDOC_602';
 
   private static readonly FORMAS_PERMITIDAS = new Set([
@@ -313,6 +314,7 @@ export class PvCotizacionesCierreService {
         'Debe registrar al menos una forma de pago',
       );
     }
+    this.assertCreditoNoCombinado(formas);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -912,6 +914,19 @@ export class PvCotizacionesCierreService {
     });
   }
 
+  private assertCreditoNoCombinado(formas: FormaNormalizada[]) {
+    const creditoCount = formas.filter(
+      (item) => item.form === PvCotizacionesCierreService.FORMA_CREDITO,
+    ).length;
+    if (!creditoCount) return;
+
+    if (formas.length > 1 || creditoCount > 1) {
+      throw new BadRequestException(
+        'La forma CREDITO no se puede combinar con otras formas de pago',
+      );
+    }
+  }
+
   private async loadExistingForms(
     executor: SqlExecutor,
     idfol: string,
@@ -983,6 +998,7 @@ export class PvCotizacionesCierreService {
         }
       }
     }
+    this.assertCreditoNoCombinado(formas);
 
     if (PvCotizacionesCierreService.FORMAS_NO_EFECTIVO.size > 0) {
       const hasNoEfectivo = formas.some((item) =>

@@ -95,6 +95,7 @@ BEGIN
   DECLARE @formaAut NVARCHAR(255);
   DECLARE @formaAutFinal NVARCHAR(255);
   DECLARE @impc MONEY;
+  DECLARE @formaImpd MONEY;
   DECLARE @cambioPendiente MONEY;
   DECLARE @efectivoCambioAsignado BIT = 0;
   DECLARE @execIdf NVARCHAR(255);
@@ -287,6 +288,10 @@ BEGIN
         THROW 51015, 'Para cierre tipo CA solo se permite una forma de pago', 1;
     END
 
+    IF EXISTS (SELECT 1 FROM @FORMAS WHERE FORM = 'CREDITO')
+      AND (SELECT COUNT(1) FROM @FORMAS) > 1
+      THROW 51034, 'La forma CREDITO no se puede combinar con otras formas de pago', 1;
+
     IF EXISTS (
       SELECT 1
       FROM @FORMAS
@@ -461,6 +466,9 @@ BEGIN
         SET @cambioPendiente = 0;
         SET @efectivoCambioAsignado = 1;
       END
+      SET @formaImpd = ROUND(@formaImpp - @impc, 2);
+      IF @formaImpd < 0
+        SET @formaImpd = 0;
 
       SET @formaAutFinal = CASE
         WHEN @formaForm IN ('CREDITO', 'DEUDOR') THEN @idfolVisibleNuevo
@@ -501,7 +509,7 @@ BEGIN
         @pFORM = @formaForm,
         @pIMPP = @formaImpp,
         @pIMPC = @impc,
-        @pIMPD = @totalFinal,
+        @pIMPD = @formaImpd,
         @pAUT = @formaAutFinal;
 
       IF @formaForm IN ('CREDITO', 'DEUDOR')
@@ -824,3 +832,4 @@ BEGIN
   END CATCH
 END;
 GO
+

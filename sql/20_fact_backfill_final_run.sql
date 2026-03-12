@@ -1,318 +1,222 @@
-SET NOCOUNT ON;
 SET DATEFORMAT dmy;
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
 
-/*
-  Script independiente de backfill final de facturacion.
-  Objetivo:
-  - Transmitir solo folios faltantes o descuadrados en tablas de facturacion.
-  - Evitar duplicados al usar sincronizacion idempotente por folio.
-  - Corregir importes reales y afectaciones por devolucion (CTDDF).
+DECLARE @FechaInicio DATE = '01/01/2026';
 
-  Requiere:
-  - dbo.sp_fact_sync_folio_vf (sincronizacion por folio).
-*/
+-- limpieza de tablas temporales de proceso
+DELETE FROM FACT_NOAGRE;
+DELETE FROM FACT_FORM_MES_TMP;
+DELETE FROM FACT_FORM_SAT_TMP;
+DELETE FROM FACT_FOL_DEV;
+DELETE FROM FACT_DEV;
 
-DECLARE @FechaInicio DATE = '01/11/2024';
-DECLARE @IncluirCA BIT = 0; /* 0 = solo VF | 1 = VF y CA */
-DECLARE @Epsilon MONEY = 0.01;
-
-IF OBJECT_ID('dbo.sp_fact_sync_folio_vf') IS NULL
-  THROW 51080, 'No existe dbo.sp_fact_sync_folio_vf. Ejecuta sql/sp_fact_sync_folio_vf_create.sql antes.', 1;
-
-IF OBJECT_ID('tempdb..#FoliosElegibles') IS NOT NULL DROP TABLE #FoliosElegibles;
-IF OBJECT_ID('tempdb..#Analisis') IS NOT NULL DROP TABLE #Analisis;
-IF OBJECT_ID('tempdb..#Candidatos') IS NOT NULL DROP TABLE #Candidatos;
-IF OBJECT_ID('tempdb..#Resultado') IS NOT NULL DROP TABLE #Resultado;
-IF OBJECT_ID('tempdb..#PurgeNoReqf') IS NOT NULL DROP TABLE #PurgeNoReqf;
-
-/*
-  Limpieza preventiva:
-  Elimina de facturacion folios que NO cumplen REQF IN (-1,1)
-  segun PV_CTR_FOL_ASVR (misma regla principal del proceso).
-*/
-SELECT
-  LTRIM(RTRIM(H.IDFOL)) AS IDFOL
-INTO #PurgeNoReqf
-FROM dbo.FAC_SVR_SHAP H
-INNER JOIN dbo.PV_CTR_FOL_ASVR A
-  ON A.IDFOL = H.IDFOL
-WHERE TRY_CONVERT(DATETIME, A.FCNM) >= @FechaInicio
-  AND TRY_CONVERT(FLOAT, A.CLIEN) IS NOT NULL
-  AND TRY_CONVERT(FLOAT, A.CLIEN) <> 1
-  AND (
-    UPPER(LTRIM(RTRIM(ISNULL(A.AUT, '')))) = 'VF'
-    OR (@IncluirCA = 1 AND UPPER(LTRIM(RTRIM(ISNULL(A.AUT, '')))) = 'CA')
-  )
-  AND (
-    TRY_CONVERT(INT, A.REQF) IS NULL
-    OR TRY_CONVERT(INT, A.REQF) NOT IN (-1, 1)
-  );
-
-CREATE UNIQUE CLUSTERED INDEX IX_PurgeNoReqf_IDFOL ON #PurgeNoReqf(IDFOL);
-
-DELETE T
-FROM dbo.FACT_TICKET_SHP T
-INNER JOIN #PurgeNoReqf P
-  ON P.IDFOL = T.IDFOL;
-
-DECLARE @RowsPurgeDetail INT = @@ROWCOUNT;
-
-DELETE H
-FROM dbo.FAC_SVR_SHAP H
-INNER JOIN #PurgeNoReqf P
-  ON P.IDFOL = H.IDFOL;
-
-DECLARE @RowsPurgeHeader INT = @@ROWCOUNT;
-
-;WITH Folios AS (
-  SELECT
-    LTRIM(RTRIM(A.IDFOL)) AS IDFOL,
-    LTRIM(RTRIM(ISNULL(A.SUC, ''))) AS SUC,
-    UPPER(LTRIM(RTRIM(ISNULL(A.AUT, '')))) AS AUT,
-    CASE WHEN TRY_CONVERT(INT, A.REQF) IN (-1, 1) THEN 1 ELSE 0 END AS REQF_NORM,
-    TRY_CONVERT(DATETIME, A.FCNM) AS FCNM,
-    TRY_CONVERT(FLOAT, A.CLIEN) AS CLIEN
-  FROM dbo.PV_CTR_FOL_ASVR A
-  WHERE TRY_CONVERT(DATETIME, A.FCNM) >= @FechaInicio
-    AND TRY_CONVERT(FLOAT, A.CLIEN) IS NOT NULL
-    AND TRY_CONVERT(FLOAT, A.CLIEN) <> 1
-    AND (
-      UPPER(LTRIM(RTRIM(ISNULL(A.AUT, '')))) = 'VF'
-      OR (@IncluirCA = 1 AND UPPER(LTRIM(RTRIM(ISNULL(A.AUT, '')))) = 'CA')
-    )
-)
-SELECT
-  F.IDFOL,
-  F.SUC,
-  F.AUT,
-  F.REQF_NORM,
-  F.FCNM,
-  F.CLIEN
-INTO #FoliosElegibles
-FROM Folios F
-WHERE F.IDFOL <> ''
-  AND F.SUC <> ''
-  AND F.REQF_NORM = 1;
-
-CREATE UNIQUE CLUSTERED INDEX IX_FoliosElegibles_IDFOL ON #FoliosElegibles(IDFOL);
-
-;WITH BaseImporte AS (
-  SELECT
-    F.IDFOL,
-    ISNULL(S.IVA_INTEGRADO, 1) AS IVA_INTEGRADO,
-    F.REQF_NORM,
-    SUM(
-      CASE
-        WHEN (ISNULL(T.CTD, 0) - ISNULL(T.CTDDF, 0)) > 0
-          THEN (ISNULL(T.CTD, 0) - ISNULL(T.CTDDF, 0)) * ISNULL(T.PVTA, 0)
-        ELSE 0
-      END
-    ) AS BASE_IMPT
-  FROM #FoliosElegibles F
-  LEFT JOIN dbo.DAT_SUC S
-    ON S.SUC = F.SUC
-  LEFT JOIN dbo.PV_TICKET_LOG T
-    ON T.IDFOL = F.IDFOL
-  GROUP BY
-    F.IDFOL,
-    ISNULL(S.IVA_INTEGRADO, 1),
-    F.REQF_NORM
-),
-ImporteEsperado AS (
-  SELECT
-    B.IDFOL,
-    ROUND(
-      CASE
-        WHEN B.IVA_INTEGRADO = -1
-          THEN ISNULL(B.BASE_IMPT, 0)
-        WHEN B.REQF_NORM = 1
-          THEN ISNULL(B.BASE_IMPT, 0) * 1.16
-        ELSE ISNULL(B.BASE_IMPT, 0)
-      END
-    , 2) AS IMPT_REAL
-  FROM BaseImporte B
-),
-DetalleEsperado AS (
-  SELECT
-    F.IDFOL,
-    COUNT_BIG(1) AS DET_REAL_ROWS
-  FROM #FoliosElegibles F
-  INNER JOIN dbo.PV_TICKET_LOG T
-    ON T.IDFOL = F.IDFOL
-  INNER JOIN dbo.DAT_ART D
-    ON D.ART = T.ART
-   AND D.SUC = F.SUC
-  WHERE (ISNULL(T.CTD, 0) - ISNULL(T.CTDDF, 0)) > 0
-  GROUP BY F.IDFOL
-),
-DetalleActual AS (
-  SELECT
-    T.IDFOL,
-    COUNT_BIG(1) AS DET_FACT_ROWS
-  FROM dbo.FACT_TICKET_SHP T
-  WHERE EXISTS (
-    SELECT 1
-    FROM #FoliosElegibles F
-    WHERE F.IDFOL = T.IDFOL
-  )
-  GROUP BY T.IDFOL
-),
-DetalleDuplicado AS (
-  SELECT
-    X.IDFOL,
-    CAST(1 AS BIT) AS HAS_DUP
-  FROM (
-    SELECT
-      T.IDFOL,
-      T.IDD,
-      COUNT_BIG(1) AS CNT
-    FROM dbo.FACT_TICKET_SHP T
-    WHERE EXISTS (
-      SELECT 1
-      FROM #FoliosElegibles F
-      WHERE F.IDFOL = T.IDFOL
-    )
-    GROUP BY
-      T.IDFOL,
-      T.IDD
-  ) X
-  WHERE X.CNT > 1
-  GROUP BY X.IDFOL
-)
-SELECT
-  F.IDFOL,
-  F.AUT,
-  CASE WHEN H.IDFOL IS NULL THEN 1 ELSE 0 END AS FLAG_MISSING_HEADER,
-  CASE WHEN ABS(ISNULL(E.IMPT_REAL, 0) - ISNULL(H.IMPT, 0)) > @Epsilon THEN 1 ELSE 0 END AS FLAG_IMPT_DIFF,
-  CASE
-    WHEN (
-      ISNULL(E.IMPT_REAL, 0) <= @Epsilon
-      AND UPPER(LTRIM(RTRIM(ISNULL(H.ESTATUS, '')))) <> 'VTA DEV'
-    ) OR (
-      ISNULL(E.IMPT_REAL, 0) > @Epsilon
-      AND UPPER(LTRIM(RTRIM(ISNULL(H.ESTATUS, '')))) = 'VTA DEV'
-    )
-    THEN 1 ELSE 0
-  END AS FLAG_STATUS_DIFF,
-  CASE WHEN ISNULL(DE.DET_REAL_ROWS, 0) <> ISNULL(DA.DET_FACT_ROWS, 0) THEN 1 ELSE 0 END AS FLAG_DETAIL_DIFF,
-  ISNULL(DD.HAS_DUP, 0) AS FLAG_DETAIL_DUP,
-  ISNULL(E.IMPT_REAL, 0) AS IMPT_REAL,
-  ISNULL(H.IMPT, 0) AS IMPT_FACT
-INTO #Analisis
-FROM #FoliosElegibles F
-LEFT JOIN ImporteEsperado E
-  ON E.IDFOL = F.IDFOL
-LEFT JOIN dbo.FAC_SVR_SHAP H
-  ON H.IDFOL = F.IDFOL
-LEFT JOIN DetalleEsperado DE
-  ON DE.IDFOL = F.IDFOL
-LEFT JOIN DetalleActual DA
-  ON DA.IDFOL = F.IDFOL
-LEFT JOIN DetalleDuplicado DD
-  ON DD.IDFOL = F.IDFOL;
-
+-- 1) folios faltantes en FAC_SVR_SHAP segun criterio de consulta base
+INSERT INTO FACT_NOAGRE (IDFOL, SUC, FCN)
 SELECT
   A.IDFOL,
-  A.AUT,
-  A.IMPT_REAL,
-  A.IMPT_FACT,
-  LTRIM(STUFF(
-    CASE WHEN A.FLAG_MISSING_HEADER = 1 THEN ',MISSING_HEADER' ELSE '' END +
-    CASE WHEN A.FLAG_IMPT_DIFF = 1 THEN ',IMPT_DIFF' ELSE '' END +
-    CASE WHEN A.FLAG_STATUS_DIFF = 1 THEN ',STATUS_DIFF' ELSE '' END +
-    CASE WHEN A.FLAG_DETAIL_DIFF = 1 THEN ',DETAIL_DIFF' ELSE '' END +
-    CASE WHEN A.FLAG_DETAIL_DUP = 1 THEN ',DETAIL_DUP' ELSE '' END
-  , 1, 1, '')) AS MOTIVO
-INTO #Candidatos
-FROM #Analisis A
-WHERE
-  A.FLAG_MISSING_HEADER = 1
-  OR A.FLAG_IMPT_DIFF = 1
-  OR A.FLAG_STATUS_DIFF = 1
-  OR A.FLAG_DETAIL_DIFF = 1
-  OR A.FLAG_DETAIL_DUP = 1;
+  A.SUC,
+  TRY_CONVERT(DATETIME, A.FCNM) AS FCN
+FROM dbo.PV_CTR_FOL_ASVR A
+LEFT JOIN dbo.FAC_SVR_SHAP F
+  ON F.IDFOL = A.IDFOL
+WHERE TRY_CONVERT(DATETIME, A.FCNM) >= @FechaInicio
+  AND TRY_CONVERT(INT, A.REQF) IN (1, -1)
+  AND F.IDFOL IS NULL
+  AND LTRIM(RTRIM(ISNULL(A.IDFOL, ''))) <> ''
+  AND LTRIM(RTRIM(ISNULL(A.SUC, ''))) <> '';
 
-CREATE UNIQUE CLUSTERED INDEX IX_Candidatos_IDFOL ON #Candidatos(IDFOL);
-
-CREATE TABLE #Resultado (
-  ID INT IDENTITY(1,1) PRIMARY KEY,
-  IDFOL NVARCHAR(255) NOT NULL,
-  ESTATUS NVARCHAR(20) NOT NULL,
-  MOTIVO NVARCHAR(400) NULL,
-  ERROR_MSG NVARCHAR(4000) NULL,
-  FCN DATETIME NOT NULL DEFAULT(GETDATE())
-);
-
-DECLARE
-  @idfol NVARCHAR(255),
-  @motivo NVARCHAR(400),
-  @forceSync BIT;
-
-SET @forceSync = CASE WHEN @IncluirCA = 1 THEN 1 ELSE 0 END;
-
-DECLARE cur_sync CURSOR LOCAL FAST_FORWARD FOR
+-- 2) staging de formas de pago de folios faltantes
+INSERT INTO FACT_FORM_MES_TMP
+(
+  IDF, IDFOL, FCN, FORM, IMPA, IMPP, IMPC, IMPD, AUT, FCNS, M, A
+)
 SELECT
-  C.IDFOL,
-  C.MOTIVO
-FROM #Candidatos C
-ORDER BY C.IDFOL;
+  F.IDF,
+  F.IDFOL,
+  F.FCN,
+  F.FORM,
+  F.IMPA,
+  F.IMPP,
+  F.IMPC,
+  F.IMPD,
+  F.AUT,
+  CONCAT(DAY(F.FCN), MONTH(F.FCN), YEAR(F.FCN)) AS FCNS,
+  MONTH(F.FCN) AS M,
+  YEAR(F.FCN) AS A
+FROM FACT_NOAGRE N
+INNER JOIN dbo.PV_CTR_FOL_FORM F
+  ON F.IDFOL = N.IDFOL;
 
-OPEN cur_sync;
-FETCH NEXT FROM cur_sync INTO @idfol, @motivo;
-
-WHILE @@FETCH_STATUS = 0
-BEGIN
-  BEGIN TRY
-    EXEC dbo.sp_fact_sync_folio_vf
-      @IDFOL = @idfol,
-      @EVENTO = 'BACKFILL_FINAL',
-      @FORCE = @forceSync;
-
-    INSERT INTO #Resultado (IDFOL, ESTATUS, MOTIVO, ERROR_MSG)
-    VALUES (@idfol, 'OK', @motivo, NULL);
-  END TRY
-  BEGIN CATCH
-    INSERT INTO #Resultado (IDFOL, ESTATUS, MOTIVO, ERROR_MSG)
-    VALUES (@idfol, 'ERROR', @motivo, ERROR_MESSAGE());
-  END CATCH;
-
-  FETCH NEXT FROM cur_sync INTO @idfol, @motivo;
-END;
-
-CLOSE cur_sync;
-DEALLOCATE cur_sync;
-
-DECLARE
-  @TotalPurgeFolios INT = (SELECT COUNT(1) FROM #PurgeNoReqf),
-  @TotalElegibles INT = (SELECT COUNT(1) FROM #FoliosElegibles),
-  @TotalCandidatos INT = (SELECT COUNT(1) FROM #Candidatos),
-  @TotalOk INT = (SELECT COUNT(1) FROM #Resultado WHERE ESTATUS = 'OK'),
-  @TotalError INT = (SELECT COUNT(1) FROM #Resultado WHERE ESTATUS = 'ERROR');
-
-IF OBJECT_ID('dbo.CTROL_TRAMISIONES') IS NOT NULL
-BEGIN
-  INSERT INTO dbo.CTROL_TRAMISIONES (FNCT, TIP_TRANS, N_REG)
-  VALUES (GETDATE(), 'FACT_BACKFILL_FINAL', @TotalOk);
-END;
-
-SELECT
-  @FechaInicio AS FECHA_INICIO,
-  @IncluirCA AS INCLUIR_CA,
-  @TotalPurgeFolios AS TOTAL_PURGE_REQF_FOLIOS,
-  @RowsPurgeHeader AS TOTAL_PURGE_REQF_HEADER,
-  @RowsPurgeDetail AS TOTAL_PURGE_REQF_DETAIL,
-  @TotalElegibles AS TOTAL_ELEGIBLES,
-  @TotalCandidatos AS TOTAL_CANDIDATOS,
-  @TotalOk AS TOTAL_OK,
-  @TotalError AS TOTAL_ERROR;
-
+;WITH FormasRank AS (
+  SELECT
+    T.IDFOL,
+    UPPER(LTRIM(RTRIM(ISNULL(T.FORM, '')))) AS FORM,
+    NULLIF(LTRIM(RTRIM(ISNULL(T.AUT, ''))), '') AS AUT,
+    ABS(TRY_CONVERT(MONEY, COALESCE(T.IMPP, T.IMPD, T.IMPA, T.IMPC, 0))) AS IMPMAX,
+    ROW_NUMBER() OVER (
+      PARTITION BY T.IDFOL
+      ORDER BY ABS(TRY_CONVERT(MONEY, COALESCE(T.IMPP, T.IMPD, T.IMPA, T.IMPC, 0))) DESC, T.IDF DESC
+    ) AS RN
+  FROM FACT_FORM_MES_TMP T
+)
+INSERT INTO FACT_FORM_SAT_TMP (IDFOL, NAUT, IMPMAX, ASPEL)
 SELECT
   R.IDFOL,
-  R.ESTATUS,
-  R.MOTIVO,
-  R.ERROR_MSG,
-  R.FCN
-FROM #Resultado R
-ORDER BY
-  CASE WHEN R.ESTATUS = 'ERROR' THEN 0 ELSE 1 END,
-  R.IDFOL;
+  R.AUT AS NAUT,
+  ISNULL(R.IMPMAX, 0) AS IMPMAX,
+  COALESCE(NULLIF(LTRIM(RTRIM(DF.ASPEL)), ''), R.FORM) AS ASPEL
+FROM FormasRank R
+LEFT JOIN dbo.DAT_FORM DF
+  ON UPPER(LTRIM(RTRIM(ISNULL(DF.FORM, '')))) = R.FORM
+WHERE R.RN = 1;
+
+-- 3) importes devueltos por folio faltante (para ajustar IMPT de cabecera)
+;WITH ImporteDevuelto AS (
+  SELECT
+    N.IDFOL,
+    SUM(
+      CASE
+        WHEN ISNULL(S.IVA_INTEGRADO, 1) = -1
+          THEN ISNULL(T.CTDDF, 0) * ISNULL(T.PVTA, 0)
+        ELSE (ISNULL(T.CTDDF, 0) * ISNULL(T.PVTA, 0)) * 1.16
+      END
+    ) AS IMPTD
+  FROM FACT_NOAGRE N
+  INNER JOIN dbo.PV_CTR_FOL_ASVR A
+    ON A.IDFOL = N.IDFOL
+  LEFT JOIN dbo.DAT_SUC S
+    ON S.SUC = A.SUC
+  LEFT JOIN dbo.PV_TICKET_LOG T
+    ON T.IDFOL = N.IDFOL
+  WHERE ISNULL(T.CTDDF, 0) > 0
+  GROUP BY N.IDFOL
+)
+INSERT INTO FACT_FOL_DEV (IDFOLDEV, IMPTD)
+SELECT
+  D.IDFOL,
+  ISNULL(D.IMPTD, 0) AS IMPTD
+FROM ImporteDevuelto D;
+
+-- 4) insercion de detalle de articulos en facturacion para folios faltantes
+DELETE T
+FROM FACT_TICKET_SHP T
+INNER JOIN FACT_NOAGRE N
+  ON N.IDFOL = T.IDFOL;
+
+INSERT INTO FACT_TICKET_SHP
+(
+  IDD, IDFOL, UPC, NoIdentificacion, Descripcion, Cantidad,
+  ValorUnitario, PVTAT, ORD, IDDEV, CTDD, CTDDF,
+  ClaveProdServ, Unidad, ObjetoImp, IvaTasa
+)
+SELECT
+  T.ID AS IDD,
+  T.IDFOL,
+  T.UPC,
+  T.ART AS NoIdentificacion,
+  T.DES AS Descripcion,
+  (ISNULL(T.CTD, 0) - ISNULL(T.CTDDF, 0)) AS Cantidad,
+  CASE
+    WHEN ISNULL(S.IVA_INTEGRADO, 1) = -1 THEN ISNULL(T.PVTA, 0) / 1.16
+    ELSE ISNULL(T.PVTA, 0)
+  END AS ValorUnitario,
+  CASE
+    WHEN ISNULL(S.IVA_INTEGRADO, 1) = -1
+      THEN (ISNULL(T.PVTA, 0) / 1.16) * (ISNULL(T.CTD, 0) - ISNULL(T.CTDDF, 0))
+    ELSE ISNULL(T.PVTA, 0) * (ISNULL(T.CTD, 0) - ISNULL(T.CTDDF, 0))
+  END AS PVTAT,
+  T.ORD,
+  T.IDDEV,
+  T.CTDD,
+  T.CTDDF,
+  A.CLAVESAT AS ClaveProdServ,
+  A.UNIMEDSAT AS Unidad,
+  '2' AS ObjetoImp,
+  '.16' AS IvaTasa
+FROM FACT_NOAGRE N
+INNER JOIN dbo.PV_TICKET_LOG T
+  ON T.IDFOL = N.IDFOL
+LEFT JOIN dbo.DAT_SUC S
+  ON S.SUC = N.SUC
+LEFT JOIN dbo.DAT_ART A
+  ON A.ART = T.ART
+ AND A.SUC = N.SUC
+WHERE (ISNULL(T.CTD, 0) - ISNULL(T.CTDDF, 0)) > 0;
+
+-- 5) insercion de cabecera faltante en FAC_SVR_SHAP
+INSERT INTO FAC_SVR_SHAP
+(
+  SUC, IDFOL, CLIEN, FCN, FCNS, FormaPago, TarjetaUltimos4Digitos,
+  TIPOVTA, REQF, RazonSocialReceptor, RfcReceptor, RfcEmisor, UsoCfdi,
+  Tipofact, ESTATUS, IMPT, MetodoDePago, [MOD]
+)
+SELECT
+  P.SUC,
+  P.IDFOL,
+  P.CLIEN,
+  TRY_CONVERT(DATETIME, P.FCNM) AS FCN,
+  CONCAT(
+    DAY(TRY_CONVERT(DATETIME, P.FCNM)),
+    MONTH(TRY_CONVERT(DATETIME, P.FCNM)),
+    YEAR(TRY_CONVERT(DATETIME, P.FCNM))
+  ) AS FCNS,
+  FS.ASPEL AS FormaPago,
+  FS.NAUT AS TarjetaUltimos4Digitos,
+  P.AUT AS TIPOVTA,
+  TRY_CONVERT(INT, P.REQF) AS REQF,
+  C.RazonSocialReceptor,
+  C.RfcReceptor,
+  C.RfcEmisor,
+  C.UsoCfdi,
+  CASE
+    WHEN EXISTS (
+      SELECT 1
+      FROM dbo.PV_CTR_FOL_FORM F
+      WHERE F.IDFOL = P.IDFOL
+        AND UPPER(LTRIM(RTRIM(ISNULL(F.FORM, '')))) = 'CREDITO'
+    ) THEN 'CREDITO'
+    WHEN UPPER(LTRIM(RTRIM(ISNULL(P.AUT, '')))) = 'VF' THEN 'INDIVIDUAL'
+    ELSE 'CREDITO'
+  END AS Tipofact,
+  CASE
+    WHEN (ISNULL(P.IMPT, 0) - ISNULL(D.IMPTD, 0)) > 0 THEN 'PENDIENTE'
+    ELSE 'VTA DEV'
+  END AS ESTATUS,
+  (ISNULL(P.IMPT, 0) - ISNULL(D.IMPTD, 0)) AS IMPT,
+  CASE
+    WHEN UPPER(LTRIM(RTRIM(ISNULL(P.AUT, '')))) = 'VF' THEN 'PUE'
+    ELSE 'PPD'
+  END AS MetodoDePago,
+  CASE
+    WHEN ISNULL(D.IMPTD, 0) > 0 AND (ISNULL(P.IMPT, 0) - ISNULL(D.IMPTD, 0)) <= 0
+      THEN CONCAT('DEV TOTAL ', CONVERT(VARCHAR(50), ISNULL(P.IMPT, 0)))
+    WHEN ISNULL(D.IMPTD, 0) > 0
+      THEN CONCAT('DEV PARCIAL IMPT ANT ', CONVERT(VARCHAR(50), ISNULL(P.IMPT, 0)))
+    ELSE ''
+  END AS [MOD]
+FROM FACT_NOAGRE N
+INNER JOIN dbo.PV_CTR_FOL_ASVR P
+  ON P.IDFOL = N.IDFOL
+LEFT JOIN FACT_FOL_DEV D
+  ON D.IDFOLDEV = P.IDFOL
+LEFT JOIN FACT_FORM_SAT_TMP FS
+  ON FS.IDFOL = P.IDFOL
+LEFT JOIN dbo.FACT_CLIENT_SHP C
+  ON C.IDC = P.CLIEN;
+
+-- 6) control de transmision de la corrida
+INSERT INTO CTROL_TRAMISIONES (FNCT, TIP_TRANS, N_REG)
+VALUES
+(
+  GETDATE(),
+  'FACT',
+  (SELECT COUNT(*) FROM FACT_NOAGRE)
+);
+
+-- 7) resumen final
+SELECT
+  @FechaInicio AS FECHA_INICIO,
+  (SELECT COUNT(*) FROM FACT_NOAGRE) AS FOLIOS_FALTANTES_PROCESADOS,
+  (SELECT COUNT(*) FROM FACT_TICKET_SHP T INNER JOIN FACT_NOAGRE N ON N.IDFOL = T.IDFOL) AS DETALLES_INSERTADOS,
+  (SELECT COUNT(*) FROM FAC_SVR_SHAP F INNER JOIN FACT_NOAGRE N ON N.IDFOL = F.IDFOL) AS CABECERAS_INSERTADAS;

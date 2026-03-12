@@ -179,9 +179,9 @@
 - trazabilidad UI tecnica: app migro dialogos de seleccion a `RadioGroup` para eliminar warnings deprecated de Flutter 3.32; sin cambio de contrato API.
 - trazabilidad UI adicional: en cierre `CA`, app fuerza `RQFAC=false` y persiste `REQF=0` en `PV_CTR_FOL_ASVR` antes de recalcular preview; no cambia endpoint/payload.
 - trazabilidad API/UI adicional: al cerrar exitosamente, el backend persiste `PV_CTR_FOL_ASVR.ESTA='PAGADO'`; la app muestra pago en modo bloqueado para impresion/salida.
-- trazabilidad UI adicional: al regresar desde pago en estado `PAGADO`, app usa `PATCH /pvctrfolasvr/:idfol` para pasar el folio a `ESTA='TRANSMITIR'` y volver al panel.
+- trazabilidad UI adicional: al regresar desde pago en estado `PAGADO`, app usa `PATCH /pvctrfolasvr/:idfol` para pasar el folio a `ESTA='MB51PROCES'` y volver al panel.
 - trazabilidad UI adicional: desde panel, si `ESTA='PAGADO'`, app abre directo la vista de pago (no detalle).
-- trazabilidad UI adicional: el panel lista `PENDIENTE`, `EDITANDO` y `PAGADO` por `ESTA`, sin filtrar por `AUT`; `TRANSMITIR` sigue existiendo en operación, pero ya no se muestra en panel.
+- trazabilidad UI adicional: el panel lista `PENDIENTE`, `EDITANDO` y `PAGADO` por `ESTA`, sin filtrar por `AUT`; `MB51PROCES` se usa como estado operativo de salida y no se muestra en panel.
 - trazabilidad UI adicional: en `DetalleCotPage` se ocultan en AppBar los campos `IDFOLINICIAL`, `AUT`, `ESTA` y `ORIGEN_AUT`; no cambia contrato API ni payload de cotización.
 - Reglas base del cierre:
 - valida folio en `PV_CTR_FOL_ASVR` y articulos en `PV_TICKET_LOG`.
@@ -197,7 +197,8 @@
 - errores SQL del SP se mapean a `400/409` con mensaje de negocio en lugar de `500` generico.
 - reescribe `PV_CTR_FOL_FORM_SVR` si existe; fallback `PV_CTR_FOL_FORM`.
 - en formas `CREDITO`/`DEUDOR` guarda `AUT=IDFOL` y `IMPP` positivo en la tabla de formas.
-- en cualquier forma (`CA` o `VF`), guarda `IMPD` con el total final de la cotizacion (costo total de articulos segun reglas de IVA/cierre), no con el importe capturado por forma.
+- en cualquier forma (`CA` o `VF`), guarda `IMPD` por forma aplicada (`IMPP-IMPC`; en no-efectivo coincide con `IMPP`).
+- `CREDITO` no se puede combinar con otras formas de pago dentro del mismo cierre.
 - valida `CREDITO` con saldo neto de `DAT_CTRL_CTAS` (`SUM(IMPT)`) filtrando `CTA='101001002'` y `CLIENT`; disponible = `FACT_CLIENT_SHP.L_CRED - MAX(-SUM(IMPT), 0)` (cargos negativos consumen crédito y abonos positivos lo liberan).
 - registra cargo para `CREDITO`/`DEUDOR` en `DAT_CTRL_CTAS` (`CMOV=602`, `CTA='101001002'`, `CLIENT`, `IDFOL`, `NDOC`, `IMPT` negativo).
 - compatibilidad de columnas en cargo `DAT_CTRL_CTAS`: usa `CMOV` o `CLSD` (lo que exista), y llena `FCND`/`RTXT` cuando esas columnas existen.
@@ -205,11 +206,13 @@
 - el calculo de maximo `NDOC` usa SQL dinamico con `COL_LENGTH` para evitar `Invalid column name 'NDOC'` en esquemas legacy donde la columna no existe en alguna tabla auxiliar.
 - no permite que `sum(formas.impp)` exceda el total del cierre, excepto cuando hay `EFECTIVO` (se permite excedente para cambio).
 - actualiza `PV_CTR_FOL_ASVR` a `ESTA='PAGADO'` al finalizar cierre, `IMPT=TOTAL` y `AUT` con `CA` o `VF` segun `tipotran`.
+- al finalizar cierre de cotización, backend ejecuta `dbo.sp_mb51_transmitir_folio` para insertar renglones en `DAT_MB51` y actualizar `DAT_ART.STOCK` por resumen `ART+SUC`; `ESTA` permanece en `PAGADO`.
 - sincronización facturación VF (2026-03): en cierres `VF`, `sp_pv_cotizacion_cerrar` exige e invoca `dbo.sp_fact_sync_folio_vf` dentro de la misma transacción para upsert de `FAC_SVR_SHAP` y rebuild de `FACT_TICKET_SHP`.
+- regla de elegibilidad facturación VF (2026-03): solo se sincronizan folios con `AUT='VF'` y `REQF=1`; cuando no cumple, la sincronización limpia cabecera/detalle en `FAC_SVR_SHAP`/`FACT_TICKET_SHP`.
 - regla `Tipofact` en sincronización VF (2026-03): si el folio tiene al menos una forma `CREDITO` en `PV_CTR_FOL_FORM(_SVR)`, `FAC_SVR_SHAP.Tipofact='CREDITO'`; en otro caso se conserva `INDIVIDUAL`.
 - política de fecha de finalización (2026-03): en `sp_pv_cotizacion_cerrar`, la fecha de proceso actual se aplica al cierre en `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM` y movimientos contables de `CREDITO/DEUDOR` (`DAT_CTR_DOC`/`DAT_CTRL_CTAS`).
 - al cerrar `CP -> CA/VF`, el SP genera un nuevo `IDFOL` visible con `DAT_FOLIOS_CONSEC`, preserva `IDFOLINICIAL`, actualiza `ORIGEN_AUT` y religa `PV_TICKET_LOG`, `PV_CTR_ORDS` y `REF_DETALLE` al nuevo folio.
-- el cambio a `ESTA='TRANSMITIR'` queda en el flujo de salida de frontend (PATCH al regresar desde pago con estado pagado).
+- el cambio a `ESTA='MB51PROCES'` queda en el flujo de salida de frontend (PATCH al regresar desde pago con estado pagado).
 - actualiza `PV_CTR_ORDS.ESTATUS = 2` para las ordenes del `IDFOL` cerrado.
 - rollback completo ante error (sin estados parciales).
 - Endpoint de impresion de cierre (`GET /pv/cotizaciones/:idfol/cierre/print-preview`):
@@ -316,8 +319,8 @@
 - trazabilidad UI (app, 2026-03): en `/punto-venta/devoluciones/:idfolDev/pago`, el card de contexto oculta `AUT dev`, `AUT origen`, `Tipo` y `Líneas seleccionadas`; sin cambios de API.
 - trazabilidad UI (app): en pago de devolución no se permite agregar, editar ni eliminar formas desde frontend.
 - trazabilidad UI (app, 2026-03-10): en pago devolución, frontend rehidrata siempre `formas` desde `preview.formasSugeridas` (folio origen) para devolver por mismo concepto en no-efectivo y preservar `aut/ref` para validación/aplicación backend.
-- trazabilidad UI (app): cuando una devolución queda en `PAGADO`, app muestra candado para salida y al presionarlo ejecuta `PATCH /pvctrfolasvr/:idfol` con `ESTA='TRANSMITIR'`.
-- `GET /pv/devoluciones` filtra panel exclusivamente por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` para ambas ramas (`OPV` y `OPVM`); `TRANSMITIR` se conserva para salida operativa, no para listado de panel.
+- trazabilidad UI (app): cuando una devolución queda en `PAGADO`, app muestra candado para salida y al presionarlo ejecuta `PATCH /pvctrfolasvr/:idfol` con `ESTA='MB51PROCES'`.
+- `GET /pv/devoluciones` filtra panel exclusivamente por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` para ambas ramas (`OPV` y `OPVM`); `MB51PROCES` se conserva para salida operativa, no para listado de panel.
 - trazabilidad UI (app): desde panel, folios de devolución en `PAGADO` abren directo en `/pago` (sin pasar por selección/detalle).
 - trazabilidad UI (app, 2026-03): desde panel, si la devolución no está en `PAGADO` pero ya contiene selección previa (`linesSelected > 0` o alguna línea con `CTDD > 0` en `GET /pv/devoluciones/:idfolDev/detalle`), la navegación abre directo `/detalle`; sin selección previa, abre la vista de selección de artículos.
 - trazabilidad API/UI (app): tras finalizar devolución, la impresión de ticket se ejecuta con botón explícito y flujo 58mm/80mm consumiendo `GET /pv/devoluciones/:idfolDev/print-preview`.
@@ -335,9 +338,10 @@
 - en formas `CREDITO/DEUDOR`, registra abono en `DAT_CTR_DOC` (si existe) y `DAT_CTRL_CTAS` con `CTA='101001002'`, clase `601`, `RTXT='Abono por anulacion cliente ticket <folio origen>'` e `IDFOL=<folio origen>`; `NDOC` se usa cuando existe en esquema.
 - compatibilidad NDOC devolución (2026-03): al generar consecutivo de `NDOC`, API solo consulta `NDOC` en `DAT_CTRL_CTAS`/`DAT_CTR_DOC` cuando la columna existe; en `DAT_CTRL_CTAS` el insert usa `NDOC` opcional según esquema para evitar `Invalid column name 'NDOC'`.
 - política de fecha de finalización devolución (2026-03): al finalizar, API fija una sola fecha de proceso actual y la reutiliza en `FACT_IDFOLDEV` (`FCN/FCNR`), `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, `PV_TICKET_LOG.UPDATED_AT` y movimientos `DAT_CTR_DOC`/`DAT_CTRL_CTAS`.
-- sincronización facturación devolución VF (2026-03): al finalizar una devolución con origen `VF`, la API invoca `dbo.sp_fact_sync_folio_vf` sobre `IDFOLORIG` después de aplicar `CTDDF`, para reflejar devoluciones parciales/totales en `FAC_SVR_SHAP` y `FACT_TICKET_SHP`.
+- sincronización facturación devolución VF (2026-03-11): al finalizar una devolución con origen `VF`, la API ya no invoca `dbo.sp_fact_sync_folio_vf`; el flujo de devoluciones no escribe cabecera/detalle en `FAC_SVR_SHAP` ni `FACT_TICKET_SHP`.
 - anula ORDs afectadas con `PV_CTR_ORDS.ESTATUS=4`.
-- deja folio devolución en `ESTA='PAGADO'` y `AUT='DF'/'APDF'`; el paso a `TRANSMITIR` se realiza posteriormente vía `PATCH /pvctrfolasvr/:idfol` desde frontend.
+- al finalizar pago de devolución, backend ejecuta `dbo.sp_mb51_transmitir_folio` para insertar renglones en `DAT_MB51` y ajustar `DAT_ART.STOCK` por resumen `ART+SUC`; `ESTA` permanece en `PAGADO`.
+- deja folio devolución en `ESTA='PAGADO'` y `AUT='DF'/'APDF'`; el paso a `MB51PROCES` se realiza posteriormente vía `PATCH /pvctrfolasvr/:idfol` desde frontend.
 
 ## Punto de venta: alta de cotizacion desde panel (trazabilidad app)
 
@@ -395,7 +399,7 @@
 - `sp_cont_upload_clear`, `sp_cont_build_det_svr`, `sp_cont_sync_captura_art`, `sp_cont_apply_adjustment`.
 - MB51/MB52:
 - `sp_dat_mb51_search`, `sp_dat_mb52_resumen`.
-- Script operativo MB51 (2026-03): `sql/mb51transmicion.sql` normaliza estados legacy de transmisión (`MB51PROCES`/`TRANSMICION`/`TRANSMISION`) a `TRANSMITIR` en `PV_CTR_FOL_ASVR` para cumplir `CK_PV_CTR_FOL_ASVR_ESTA_HOMOLOGADO`.
+- Script operativo MB51 (2026-03): `sql/mb51transmicion.sql` habilita `MB51PROCES`/`ANULADO` en la homologación de `ESTA`, preserva `TRANSMITIR` para PS, convierte estados legacy/no-PS a `MB51PROCES` y crea/actualiza `dbo.sp_mb51_transmitir_folio` (inserción lineal en `DAT_MB51` con resolución de conflicto de ID y ajuste de `DAT_ART.STOCK` por `ART+SUC`).
 - Catalogo articulos:
 - `sp_datart_massive_apply`, `sp_art_masiva_validate_batch`, `sp_art_masiva_commit_batch`.
 - Punto de venta y clientes:
