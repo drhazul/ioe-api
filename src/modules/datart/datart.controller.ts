@@ -31,6 +31,7 @@ export class DatArtController {
   @Get()
   findAll(
     @Query('suc') suc?: string,
+    @Query('sucExact') sucExact?: string,
     @Query('art') art?: string,
     @Query('upc') upc?: string,
     @Query('des') des?: string,
@@ -49,9 +50,11 @@ export class DatArtController {
     @Query('withTotal') withTotal?: string,
     @Query('view') view?: string,
     @Query('loteId') loteId?: string,
+    @Query('bloqNe') bloqNe?: string,
   ) {
     return this.service.findAll({
       suc,
+      sucExact,
       art,
       upc,
       des,
@@ -70,6 +73,7 @@ export class DatArtController {
       withTotal,
       view,
       loteId,
+      bloqNe,
     });
   }
 

@@ -87,6 +87,7 @@ Opcionales:
 - `/datart`, `/datcatreg`, `/datcatuso`, `/dat-almacen`, `/dat-cmov`
 - Trazabilidad frontend (2026-03): `ioe_app` incorporó impresión de etiquetas en catálogo `DAT_ART` con selección local por renglón/filtrados y vista previa de impresión (PDF `76mm x 56mm`, una etiqueta por artículo), sin endpoints nuevos en API.
 - Regla EAN13 aplicada en app: de `UPC` se toman los 12 dígitos derechos (si excede) y se calcula dígito verificador para render de código de barras.
+- Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` (`SUC = @SUC`) y `bloqNe=-1` (`BLOQ <> -1`) para que la consulta de artículos en `detalle_cot` se resuelva en backend.
 - `/dat-form` (CRUD de catalogo de formas de pago sobre `DAT_FORM`)
 - Inventarios:
 - `/conteos/*`, `/capturas/*`, `/datcontctrl`, `/datdetsvr`, `/datmb51`, `/dat-mb51/search`, `/dat-mb52/resumen`
@@ -520,6 +521,7 @@ Opcionales:
 - `FAC_SVR_SHAP_CLIEN_float.sql` (alinea `FAC_SVR_SHAP.CLIEN` a `FLOAT` y backfill desde `PV_CTR_FOL_ASVR`)
 - `PV_DEV_DET_TMP_create.sql` (staging de detalle para devoluciones PV)
 - `USUARIO_forzar_cambio_pass_alter.sql` (agrega bandera `FORZAR_CAMBIO_PASS` para flujo de primer acceso)
+- `DAT_ART_idx_suc_bloq_detalle_cot_create.sql` (índice `IX_DAT_ART_SUC_BLOQ_DETALLE_COT` para consulta por sucursal con filtro `BLOQ<>-1` en detalle de cotización)
 
 ## Reglas de autorizacion por sucursal (criticas)
 

@@ -9,6 +9,7 @@ import {
   DataSource,
   FindManyOptions,
   Like,
+  Not,
   QueryFailedError,
   QueryRunner,
   Repository,
@@ -92,6 +93,7 @@ export class DatArtService {
 
   async findAll(query?: {
     suc?: string;
+    sucExact?: string;
     art?: string;
     upc?: string;
     des?: string;
@@ -110,6 +112,7 @@ export class DatArtService {
     withTotal?: string;
     view?: string;
     loteId?: string;
+    bloqNe?: string;
   }) {
     const buildLikePattern = (value: string | undefined, maxLen: number) => {
       const trimmed = value?.trim();
@@ -132,8 +135,17 @@ export class DatArtService {
       const num = Number(normalized);
       return Number.isFinite(num) ? num : undefined;
     };
+    const parseBoolean = (value?: string) => {
+      if (!value) return false;
+      const normalized = value.trim().toLowerCase();
+      return normalized === '1' || normalized === 'true' || normalized === 'yes';
+    };
+    const sucExact = parseBoolean(query?.sucExact);
+    const sucNormalized = query?.suc?.trim().toUpperCase();
     const where: any = {};
-    if (query?.suc) where.SUC = buildLike(query.suc, 5);
+    if (sucNormalized) {
+      where.SUC = sucExact ? sucNormalized : buildLike(sucNormalized, 5);
+    }
     if (query?.art) where.ART = buildLike(query.art, 10);
     if (query?.upc) where.UPC = buildLike(query.upc, 15);
     if (query?.des) where.DES = buildLike(query.des, 255);
@@ -155,6 +167,8 @@ export class DatArtService {
     if (cyl !== undefined) where.CYL = cyl;
     const adic = parseNumber(query?.adic);
     if (adic !== undefined) where.ADIC = adic;
+    const bloqNe = parseNumber(query?.bloqNe);
+    if (bloqNe !== undefined) where.BLOQ = Not(bloqNe);
 
     const parseIntParam = (value?: string) => {
       if (value == null) return undefined;
@@ -219,8 +233,12 @@ export class DatArtService {
         .addOrderBy('art.ART', 'ASC')
         .addOrderBy('art.UPC', 'ASC');
 
-      const sucPattern = buildLikePattern(query?.suc, 5);
-      if (sucPattern) qb.andWhere('art.SUC LIKE :sucPattern', { sucPattern });
+      if (sucNormalized && sucExact) {
+        qb.andWhere('art.SUC = :sucExact', { sucExact: sucNormalized });
+      } else {
+        const sucPattern = buildLikePattern(query?.suc, 5);
+        if (sucPattern) qb.andWhere('art.SUC LIKE :sucPattern', { sucPattern });
+      }
       const artPattern = buildLikePattern(query?.art, 10);
       if (artPattern) qb.andWhere('art.ART LIKE :artPattern', { artPattern });
       const upcPattern = buildLikePattern(query?.upc, 15);
@@ -242,6 +260,9 @@ export class DatArtService {
       if (sph !== undefined) qb.andWhere('art.SPH = :sph', { sph });
       if (cyl !== undefined) qb.andWhere('art.CYL = :cyl', { cyl });
       if (adic !== undefined) qb.andWhere('art.ADIC = :adic', { adic });
+      if (bloqNe !== undefined) {
+        qb.andWhere('art.BLOQ <> :bloqNe', { bloqNe });
+      }
 
       if (select) {
         qb.select(select.map((column) => `art.${column}`));
