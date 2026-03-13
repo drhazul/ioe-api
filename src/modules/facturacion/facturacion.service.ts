@@ -94,7 +94,7 @@ export class FacturacionService {
 
   private async getFolioData(idFol: string) {
     const cab = await this.dataSource.query(
-      `SELECT TOP 1 IDFOL, SUC, ESTATUS, TIPOFACT, IMPT, AUT, REQF, RfcEmisor, RfcReceptor, RazonSocialReceptor, UsoCfdi, MetodoDePago, FormaPago
+      `SELECT TOP 1 IDFOL, SUC, ESTATUS, TIPOFACT, IMPT, AUT, REQF, RfcEmisor, RfcReceptor, RazonSocialReceptor, UsoCfdi, MetodoDePago, FormaPago, FormaPagoSAT, Exportacion
        FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
       [idFol],
     );
@@ -114,7 +114,7 @@ export class FacturacionService {
     );
 
     const cliente = await this.dataSource.query(
-      `SELECT TOP 1 RFCRECEPTOR, RAZONSOCIALRECEPTOR, EMAILRECEPTOR, USOCFDI, CODIGOPOSTALRECEPTOR, REGIMENFISCALRECEPTOR
+      `SELECT TOP 1 RFCRECEPTOR, RAZONSOCIALRECEPTOR, EMAILRECEPTOR, USOCFDI, CODIGOPOSTALRECEPTOR, REGIMENFISCALRECEPTOR, RegimenFiscalReceptorSAT
        FROM FACT_CLIENT_SHP WHERE RFCRECEPTOR=@0 ORDER BY FCNR DESC`,
       [cab[0].RfcReceptor ?? ''],
     );
@@ -274,15 +274,21 @@ export class FacturacionService {
         rfc: String(h.RfcReceptor ?? c.RFCRECEPTOR ?? ''),
         email: email || null,
         metodo_de_pago: String(h.MetodoDePago ?? 'PUE'),
-        forma_de_pago: String(h.FormaPago ?? '99').split('.')[0],
+        forma_de_pago: String(h.FormaPagoSAT ?? h.FormaPago ?? '99')
+          .split('.')[0]
+          .padStart(2, '0'),
         tarjeta_ultimos_4digitos: 'NA',
         cp: String(c.CODIGOPOSTALRECEPTOR ?? '00000'),
-        regimen: String(c.REGIMENFISCALRECEPTOR ?? '601').split('.')[0],
+        regimen: String(c.RegimenFiscalReceptorSAT ?? c.REGIMENFISCALRECEPTOR ?? '601').split('.')[0],
       },
       factura: {
         version: '4.0',
         fecha: this.toDateYmdHis(new Date()),
         tipo: 'ingreso',
+        Exportacion: String(h.Exportacion ?? '01'),
+        forma_de_pago: String(h.FormaPagoSAT ?? h.FormaPago ?? '99')
+          .split('.')[0]
+          .padStart(2, '0'),
         generacion_automatica: true,
         subtotal,
         impuesto_federal: impuestoFederal,
