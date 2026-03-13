@@ -9,8 +9,22 @@ import { FacturifyClient } from './facturify.client';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+type ListarPendientesInput = {
+  page?: number;
+  pageSize?: number;
+  suc?: string | null;
+  estatus?: string | null;
+  razonSocialReceptor?: string | null;
+  rfcReceptor?: string | null;
+  clien?: string | null;
+  idFol?: string | null;
+  tipoFact?: string | null;
+};
+
 @Injectable()
 export class FacturacionService {
+  private facSvrShapColumnsCache: Set<string> | null = null;
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly facturify: FacturifyClient,
@@ -39,6 +53,169 @@ export class FacturacionService {
     return `${y}-${m}-${d}`;
   }
 
+  private async getFacSvrShapColumns(): Promise<Set<string>> {
+    if (this.facSvrShapColumnsCache) return this.facSvrShapColumnsCache;
+
+    const tableRows = await this.dataSource.query(
+      "SELECT CASE WHEN OBJECT_ID('dbo.FAC_SVR_SHAP','U') IS NULL THEN 0 ELSE 1 END AS HAS_TABLE",
+    );
+    const hasTable = Number((tableRows?.[0] ?? {}).HAS_TABLE ?? 0) === 1;
+    if (!hasTable) {
+      throw new NotFoundException('No existe tabla dbo.FAC_SVR_SHAP');
+    }
+
+    const colsRows = await this.dataSource.query(
+      `SELECT UPPER(name) AS COL
+       FROM sys.columns
+       WHERE object_id = OBJECT_ID('dbo.FAC_SVR_SHAP')`,
+    );
+    const cols = new Set<string>(
+      (colsRows ?? [])
+        .map((row) =>
+          String((row as Record<string, unknown>).COL ?? '')
+            .trim()
+            .toUpperCase(),
+        )
+        .filter((col) => col.length > 0),
+    );
+    this.facSvrShapColumnsCache = cols;
+    return cols;
+  }
+
+  private facColumnExpr(options: {
+    alias: string;
+    columns: Set<string>;
+    primary: string;
+    as?: string;
+    fallbackColumns?: string[];
+    defaultSql?: string;
+  }) {
+    const { alias, columns, primary, as } = options;
+    const outAlias = as || primary;
+    return `${this.facColumnRef({
+      alias,
+      columns,
+      primary,
+      fallbackColumns: options.fallbackColumns,
+      defaultSql: options.defaultSql,
+    })} AS ${outAlias}`;
+  }
+
+  private facColumnRef(options: {
+    alias: string;
+    columns: Set<string>;
+    primary: string;
+    fallbackColumns?: string[];
+    defaultSql?: string;
+  }) {
+    const {
+      alias,
+      columns,
+      primary,
+      fallbackColumns = [],
+      defaultSql = 'NULL',
+    } = options;
+    const candidates = [primary, ...fallbackColumns];
+    for (const candidate of candidates) {
+      if (columns.has(candidate.toUpperCase())) {
+        return `${alias}.${candidate}`;
+      }
+    }
+    return defaultSql;
+  }
+
+  private normalizeTextFilter(value?: string | null) {
+    const text = String(value ?? '')
+      .trim()
+      .toUpperCase();
+    return text.length ? text : null;
+  }
+
+  private normalizedSqlTextExpr(sqlExpr: string) {
+    return `UPPER(LTRIM(RTRIM(ISNULL(CAST(${sqlExpr} AS NVARCHAR(4000)), ''))))`;
+  }
+
+  private async buildPendientesSelectSql() {
+    return `SELECT f.*
+            FROM FAC_SVR_SHAP f`;
+  }
+
+  private async buildHeaderSelectSql() {
+    const columns = await this.getFacSvrShapColumns();
+    const tipoFactExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'TIPOFACT',
+      defaultSql: "CAST('INDIVIDUAL' AS NVARCHAR(40))",
+    });
+    const autExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'AUT',
+      fallbackColumns: ['TIPOVTA'],
+      defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+    });
+    const reqfExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'REQF',
+      fallbackColumns: ['RQFAC'],
+      defaultSql: 'CAST(0 AS INT)',
+    });
+    const rfcEmisorExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'RfcEmisor',
+      defaultSql: 'CAST(NULL AS NVARCHAR(40))',
+    });
+    const rfcReceptorExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'RfcReceptor',
+      defaultSql: 'CAST(NULL AS NVARCHAR(40))',
+    });
+    const razonSocialExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'RazonSocialReceptor',
+      defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+    });
+    const usoCfdiExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'UsoCfdi',
+      defaultSql: 'CAST(NULL AS NVARCHAR(20))',
+    });
+    const metodoPagoExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'MetodoDePago',
+      defaultSql: "CAST('PUE' AS NVARCHAR(20))",
+    });
+    const formaPagoExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'FormaPago',
+      defaultSql: "CAST('99' AS NVARCHAR(20))",
+    });
+    const formaPagoSatExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'FormaPagoSAT',
+      fallbackColumns: ['FormaPago'],
+      defaultSql: "CAST('99' AS NVARCHAR(20))",
+    });
+    const exportacionExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'Exportacion',
+      defaultSql: "CAST('01' AS NVARCHAR(5))",
+    });
+
+    return `SELECT TOP 1 f.IDFOL, f.SUC, f.ESTATUS, ${tipoFactExpr}, f.IMPT, ${autExpr}, ${reqfExpr}, ${rfcEmisorExpr}, ${rfcReceptorExpr}, ${razonSocialExpr}, ${usoCfdiExpr}, ${metodoPagoExpr}, ${formaPagoExpr}, ${formaPagoSatExpr}, ${exportacionExpr}
+            FROM FAC_SVR_SHAP f
+            WHERE f.IDFOL=@0`;
+  }
   private async saveCfdiArtifacts(input: {
     idFol: string;
     xmlBase64?: string | null;
@@ -78,24 +255,119 @@ export class FacturacionService {
     return paths;
   }
 
-  async listarPendientes(suc?: string | null) {
-    const where = suc
-      ? 'WHERE f.ESTATUS = @0 AND f.SUC = @1'
-      : 'WHERE f.ESTATUS = @0';
-    const params = suc ? ['PENDIENTE', suc] : ['PENDIENTE'];
-    return this.dataSource.query(
-      `SELECT TOP 200 f.IDFOL, f.SUC, f.ESTATUS, f.TIPOFACT, f.IMPT, f.AUT, f.REQF, f.FCN
+  async listarPendientes(input: ListarPendientesInput = {}) {
+    const columns = await this.getFacSvrShapColumns();
+    const selectSql = await this.buildPendientesSelectSql();
+    const rawPage = Number(input.page ?? 1);
+    const page =
+      Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+    const rawPageSize = Number(input.pageSize ?? 20);
+    const pageSize = Math.min(
+      Math.max(Number.isFinite(rawPageSize) ? Math.floor(rawPageSize) : 20, 1),
+      200,
+    );
+    const offset = (page - 1) * pageSize;
+
+    const params: unknown[] = [];
+    const addParam = (value: unknown) => {
+      params.push(value);
+      return `@${params.length - 1}`;
+    };
+
+    const statusExpr = this.normalizedSqlTextExpr('f.ESTATUS');
+    const sucExpr = this.normalizedSqlTextExpr('f.SUC');
+    const razonSocialExpr = this.normalizedSqlTextExpr(
+      this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'RazonSocialReceptor',
+        defaultSql: 'NULL',
+      }),
+    );
+    const rfcReceptorExpr = this.normalizedSqlTextExpr(
+      this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'RfcReceptor',
+        defaultSql: 'NULL',
+      }),
+    );
+    const clienExpr = this.normalizedSqlTextExpr(
+      this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'CLIEN',
+        defaultSql: 'NULL',
+      }),
+    );
+    const idFolExpr = this.normalizedSqlTextExpr('f.IDFOL');
+    const tipoFactExpr = this.normalizedSqlTextExpr(
+      this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'TIPOFACT',
+        defaultSql: "CAST('INDIVIDUAL' AS NVARCHAR(40))",
+      }),
+    );
+
+    const where: string[] = [
+      `${statusExpr} IN (${addParam('PENDIENTE')}, ${addParam('CANCELACION PENDIENTE')})`,
+    ];
+
+    const filterEstatus = this.normalizeTextFilter(input.estatus);
+    if (filterEstatus && filterEstatus !== 'TODOS') {
+      where.push(`${statusExpr} = ${addParam(filterEstatus)}`);
+    }
+
+    const addContainsFilter = (sqlExpr: string, rawValue?: string | null) => {
+      const value = this.normalizeTextFilter(rawValue);
+      if (!value) return;
+      where.push(`${sqlExpr} LIKE ${addParam(`%${value}%`)}`);
+    };
+
+    addContainsFilter(sucExpr, input.suc);
+    addContainsFilter(razonSocialExpr, input.razonSocialReceptor);
+    addContainsFilter(rfcReceptorExpr, input.rfcReceptor);
+    addContainsFilter(clienExpr, input.clien);
+    addContainsFilter(idFolExpr, input.idFol);
+    addContainsFilter(tipoFactExpr, input.tipoFact);
+
+    const whereSql = where.length ? `WHERE ${where.join('\n  AND ')}` : '';
+    const offsetParam = `@${params.length}`;
+    const fetchParam = `@${params.length + 1}`;
+
+    const data = await this.dataSource.query(
+      `${selectSql}
+       ${whereSql}
+       ORDER BY FCN DESC, f.IDFOL DESC
+       OFFSET ${offsetParam} ROWS
+       FETCH NEXT ${fetchParam} ROWS ONLY`,
+      [...params, offset, pageSize],
+    );
+
+    const countRows = await this.dataSource.query(
+      `SELECT COUNT(1) AS TOTAL
        FROM FAC_SVR_SHAP f
-       ${where}
-       ORDER BY f.FCN DESC`,
+       ${whereSql}`,
       params,
     );
-  }
+    const total = Number(countRows?.[0]?.TOTAL ?? countRows?.[0]?.total ?? 0);
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
 
+    return {
+      data,
+      total,
+      page,
+      pageSize,
+      totalPages,
+      hasPrevPage: page > 1,
+      hasNextPage: page < totalPages,
+    };
+  }
   private async getFolioData(idFol: string) {
+    const headerSql = await this.buildHeaderSelectSql();
     const cab = await this.dataSource.query(
-      `SELECT TOP 1 IDFOL, SUC, ESTATUS, TIPOFACT, IMPT, AUT, REQF, RfcEmisor, RfcReceptor, RazonSocialReceptor, UsoCfdi, MetodoDePago, FormaPago, FormaPagoSAT, Exportacion
-       FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
+      headerSql,
       [idFol],
     );
     if (!cab.length) {
@@ -587,3 +859,4 @@ export class FacturacionService {
     };
   }
 }
+

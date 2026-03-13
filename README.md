@@ -100,6 +100,11 @@ Opcionales:
 - Nota de integracion UI: el filtro `!= 0` inicia desactivado por defecto en la pantalla de resumen para mostrar todos los registros (comportamiento solo frontend; el usuario puede activarlo manualmente).
 - Punto de venta:
 - `/factclientshp`, `/pvctrfolasvr`, `/pvctrfolform`, `/pvctrords`, `/pvctrordsdet`, `/pvticketlog`, `/refdetalle`
+- `/facturacion/*` (pendientes/validar/emitir/refrescar-estado/reenviar-email/cancelar sobre `FAC_SVR_SHAP` + `FACT_TICKET_SHP`).
+- compatibilidad facturación legacy (2026-03-13): `FacturacionService` detecta columnas de `FAC_SVR_SHAP` y resuelve `AUT` con fallback `TIPOVTA` (o `NULL`), además de fallback para `REQF/RQFAC`, `FormaPagoSAT` y `Exportacion`, evitando `500 Invalid column name 'AUT'`.
+- facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` acepta filtros server-side `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
+- facturación pendientes paginada (2026-03-13): la consulta ordena por `FCN DESC` sobre todo el conjunto y responde `{ data, total, page, pageSize, totalPages, hasPrevPage, hasNextPage }`.
+- facturación pendientes base SQL (2026-03-13): el listado parte de `FAC_SVR_SHAP` con estatus `PENDIENTE`/`CANCELACION PENDIENTE` y orden `FCN DESC`; filtros opcionales se aplican sobre esa consulta base.
 - Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.
 - `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
@@ -519,6 +524,7 @@ Opcionales:
 - `DAT_FORM_schema_alter.sql` (estructura y control de estado para formas de pago)
 - `PV_CTR_ORDS_CLIEN_float.sql` (ajuste de CLIEN a FLOAT para IDs grandes)
 - `FAC_SVR_SHAP_CLIEN_float.sql` (alinea `FAC_SVR_SHAP.CLIEN` a `FLOAT` y backfill desde `PV_CTR_FOL_ASVR`)
+- `2026-03-13_facturacion_aut_compat.sql` (agrega `FAC_SVR_SHAP.AUT` si no existe y hace backfill desde `TIPOVTA` para compatibilidad de consultas legacy de facturación).
 - `PV_DEV_DET_TMP_create.sql` (staging de detalle para devoluciones PV)
 - `USUARIO_forzar_cambio_pass_alter.sql` (agrega bandera `FORZAR_CAMBIO_PASS` para flujo de primer acceso)
 - `DAT_ART_idx_suc_bloq_detalle_cot_create.sql` (índice `IX_DAT_ART_SUC_BLOQ_DETALLE_COT` para consulta por sucursal con filtro `BLOQ<>-1` en detalle de cotización)
@@ -569,3 +575,4 @@ Swagger:
 - `C:\Users\PCDESARROLLO\Proyectos\ioe-api\AGENTS.md`
 - `C:\Users\PCDESARROLLO\Proyectos\ioe-api\README.md`
 - Esta actualizacion es obligatoria para retroalimentacion y trazabilidad cruzada app/api.
+

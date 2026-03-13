@@ -1,10 +1,19 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { FacturacionService } from './facturacion.service';
 import { EmitirFacturaDto } from './dto/emitir-factura.dto';
 import { CancelarFacturaDto } from './dto/cancelar-factura.dto';
 import { ReenviarEmailDto } from './dto/reenviar-email.dto';
+import { ListFacturacionPendientesQueryDto } from './dto/list-facturacion-pendientes-query.dto';
 
 @ApiTags('facturacion')
 @ApiBearerAuth('jwt-auth')
@@ -14,9 +23,18 @@ export class FacturacionController {
   constructor(private readonly service: FacturacionService) {}
 
   @Get('pendientes')
-  pendientes(@Req() req: any) {
-    const suc = req?.user?.suc ?? null;
-    return this.service.listarPendientes(suc);
+  pendientes(@Query() query: ListFacturacionPendientesQueryDto) {
+    return this.service.listarPendientes({
+      page: query.page,
+      pageSize: query.pageSize,
+      suc: query.suc,
+      estatus: query.estatus,
+      razonSocialReceptor: query.razonSocialReceptor,
+      rfcReceptor: query.rfcReceptor,
+      clien: query.clien,
+      idFol: query.idFol,
+      tipoFact: query.tipoFact,
+    });
   }
 
   @Get(':idFol/validar')

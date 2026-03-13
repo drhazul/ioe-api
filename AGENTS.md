@@ -80,6 +80,13 @@
 - `factclientshp`: `FACT_CLIENT_SHP` (`IDC`, `CLIEN_UNI`, `RazonSocialReceptor`, `RfcReceptor`, `UsoCfdi`, `SUC`, ...).
 - Integración UI clientes PV (2026-03): la app puede enviar defaults de alta `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico de selección) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene aceptación con validación de no-vacío/numérica vigente.
 - `pvctrfolasvr`: `PV_CTR_FOL_ASVR` (`IDFOL`, `CLIEN`, `SUC`, `OPV`, `ESTA`, `IMPT`, ...).
+- `facturacion`: endpoints `/facturacion/*` para pendientes/validación/emisión/seguimiento/cancelación sobre `FAC_SVR_SHAP` + `FACT_TICKET_SHP`.
+- compatibilidad facturación legacy (2026-03-13): `FacturacionService` detecta columnas disponibles de `FAC_SVR_SHAP` y resuelve `AUT` con fallback `TIPOVTA` (o `NULL`), además de fallback en `REQF/RQFAC`, `FormaPagoSAT` y `Exportacion` para evitar `500 Invalid column name 'AUT'`.
+- facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` ahora acepta `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
+- facturación pendientes paginada (2026-03-13): el filtrado se aplica server-side sobre todo el universo (`ESTATUS IN ('PENDIENTE','CANCELACION PENDIENTE')`) y ordena por `FCN DESC`.
+- facturación pendientes paginada (2026-03-13): la respuesta incluye `data`, `total`, `page`, `pageSize`, `totalPages`, `hasPrevPage`, `hasNextPage`.
+- facturación pendientes base SQL (2026-03-13): la consulta de listado parte de `SELECT FAC_SVR_SHAP.* FROM FAC_SVR_SHAP WHERE ESTATUS IN ('PENDIENTE','CANCELACION PENDIENTE') ORDER BY FCN DESC`; los filtros opcionales se agregan encima de esa base.
+- facturación pendientes seguridad funcional (2026-03-13): el endpoint no fuerza `SUC` por token; la sucursal se controla mediante el filtro explícito `suc` cuando el usuario la captura.
 - `GET /pvctrfolasvr` (optimizacion 2026-03): soporta query params `suc`, `opv`, `search` para panel de cotizaciones, con filtro SQL por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - Compatibilidad query cotizaciones (2026-03): `ListPvCtrFolAsvrQueryDto` tolera parametro opcional `_` para clientes legacy que usen cache-buster, evitando `400 property _ should not exist`.
 - `GET /pvctrfolasvr` (2026-03): incluye `RazonSocialReceptor` en la respuesta (join a `FACT_CLIENT_SHP`) para visualizacion de panel en app.
@@ -413,6 +420,7 @@
 - `sql/DAT_FORM_schema_alter.sql` agrega `IDFORM` identity como PK y `ESTADO` para activar/bloquear visibilidad de formas de pago.
 - `sql/PV_CTR_ORDS_CLIEN_float.sql` ajusta `PV_CTR_ORDS.CLIEN` a `FLOAT` para soportar IDs grandes.
 - `sql/FAC_SVR_SHAP_CLIEN_float.sql` alinea `FAC_SVR_SHAP.CLIEN` a `FLOAT` y aplica backfill desde `PV_CTR_FOL_ASVR`.
+- `sql/2026-03-13_facturacion_aut_compat.sql` agrega columna `FAC_SVR_SHAP.AUT` si falta y hace backfill desde `TIPOVTA` para compatibilidad con consultas legacy de facturación.
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta staging de líneas para devoluciones PV.
 - `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación en eventos VF.
 - `sql/USUARIO_forzar_cambio_pass_alter.sql` agrega `FORZAR_CAMBIO_PASS` para controlar cambio obligatorio de contraseña en primer acceso.
@@ -512,3 +520,4 @@
 - `C:\Users\PCDESARROLLO\Proyectos\ioe-api\AGENTS.md`
 - `C:\Users\PCDESARROLLO\Proyectos\ioe-api\README.md`
 - No cerrar una tarea sin mantener la trazabilidad de arquitectura y datos sincronizada entre app y api.
+
