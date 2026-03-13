@@ -74,12 +74,19 @@ export class FacturacionService {
       throw new BadRequestException(`Datos fiscales incompletos para folio ${idFol}`);
     }
 
+    const auth = await this.facturify.requestToken();
+
     return {
       ok: true,
-      stage: 'sandbox-ready',
-      message: 'Validación local completa. Integración HTTP Facturify se conecta en siguiente commit.',
+      stage: 'sandbox-auth-ok',
+      message: 'Autenticación Facturify sandbox validada. Pendiente timbrado real en siguiente paso.',
       idFol,
       baseUrl: this.facturify.getBaseUrl(),
+      tokenInfo: {
+        hasToken: Boolean(auth.token),
+        tokenLength: auth.token.length,
+        expiresIn: auth.expiresIn,
+      },
     };
   }
 
