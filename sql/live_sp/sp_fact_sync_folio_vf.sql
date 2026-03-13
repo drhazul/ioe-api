@@ -322,6 +322,11 @@ BEGIN
     IF ISNULL(@formaSat, '') = ''
       SET @formaSat = NULLIF(@formaPrincipal, '');
 
+    IF TRY_CONVERT(INT, @formaSat) IS NOT NULL
+      SET @formaSat = RIGHT('00' + CONVERT(VARCHAR(10), TRY_CONVERT(INT, @formaSat)), 2);
+
+    SET @usoCfdi = UPPER(LTRIM(RTRIM(ISNULL(@usoCfdi, ''))));
+
     SET @tipoFact = CASE WHEN ISNULL(@tieneFormaCredito, 0) = 1 THEN 'CREDITO' ELSE 'INDIVIDUAL' END;
 
     IF OBJECT_ID('dbo.FACT_CLIENT_SHP') IS NOT NULL
@@ -392,6 +397,12 @@ BEGIN
       SET @insertCols += N', [TarjetaUltimos4Digitos]';
       SET @insertVals += N', @pNAUT';
     END;
+    IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'FormaPagoSAT') IS NOT NULL
+    BEGIN
+      SET @setList += CASE WHEN LEN(@setList) > 0 THEN N', ' ELSE N'' END + N'[FormaPagoSAT] = @pFORMASAT';
+      SET @insertCols += N', [FormaPagoSAT]';
+      SET @insertVals += N', @pFORMASAT';
+    END;
     IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'TIPOVTA') IS NOT NULL
     BEGIN
       SET @setList += CASE WHEN LEN(@setList) > 0 THEN N', ' ELSE N'' END + N'[TIPOVTA] = @pTIPOVTA';
@@ -452,6 +463,12 @@ BEGIN
       SET @insertCols += N', [MetodoDePago]';
       SET @insertVals += N', @pMETODO';
     END;
+    IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'Exportacion') IS NOT NULL
+    BEGIN
+      SET @setList += CASE WHEN LEN(@setList) > 0 THEN N', ' ELSE N'' END + N'[Exportacion] = @pEXPORT';
+      SET @insertCols += N', [Exportacion]';
+      SET @insertVals += N', @pEXPORT';
+    END;
     IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'MOD') IS NOT NULL
     BEGIN
       SET @setList += CASE WHEN LEN(@setList) > 0 THEN N', ' ELSE N'' END + N'[MOD] = @pMOD';
@@ -470,13 +487,14 @@ BEGIN
 
         EXEC sys.sp_executesql
           @sql,
-          N'@pIDFOL NVARCHAR(255), @pSUC NVARCHAR(255), @pCLIEN FLOAT, @pFCN DATETIME, @pFCNS NVARCHAR(20), @pFORMA NVARCHAR(80), @pNAUT NVARCHAR(255), @pTIPOVTA NVARCHAR(20), @pREQF INT, @pRAZON NVARCHAR(255), @pRFCR NVARCHAR(40), @pRFCE NVARCHAR(40), @pUSOCFDI NVARCHAR(40), @pTIPOFACT NVARCHAR(40), @pESTATUS NVARCHAR(40), @pIMPT MONEY, @pMETODO NVARCHAR(20), @pMOD NVARCHAR(255)',
+          N'@pIDFOL NVARCHAR(255), @pSUC NVARCHAR(255), @pCLIEN FLOAT, @pFCN DATETIME, @pFCNS NVARCHAR(20), @pFORMA NVARCHAR(80), @pFORMASAT NVARCHAR(2), @pNAUT NVARCHAR(255), @pTIPOVTA NVARCHAR(20), @pREQF INT, @pRAZON NVARCHAR(255), @pRFCR NVARCHAR(40), @pRFCE NVARCHAR(40), @pUSOCFDI NVARCHAR(40), @pTIPOFACT NVARCHAR(40), @pESTATUS NVARCHAR(40), @pIMPT MONEY, @pMETODO NVARCHAR(20), @pEXPORT NVARCHAR(5), @pMOD NVARCHAR(255)',
           @pIDFOL = @idfolActual,
           @pSUC = @suc,
           @pCLIEN = @clienFac,
           @pFCN = @fechaProceso,
           @pFCNS = @fcns,
           @pFORMA = @formaSat,
+          @pFORMASAT = @formaSat,
           @pNAUT = @formaAut,
           @pTIPOVTA = 'VF',
           @pREQF = @reqf,
@@ -488,6 +506,7 @@ BEGIN
           @pESTATUS = @estatusFinal,
           @pIMPT = @totalFinal,
           @pMETODO = @metodoPago,
+          @pEXPORT = '01',
           @pMOD = @modFinal;
       END
     END
@@ -499,13 +518,14 @@ BEGIN
 
       EXEC sys.sp_executesql
         @sql,
-        N'@pIDFOL NVARCHAR(255), @pSUC NVARCHAR(255), @pCLIEN FLOAT, @pFCN DATETIME, @pFCNS NVARCHAR(20), @pFORMA NVARCHAR(80), @pNAUT NVARCHAR(255), @pTIPOVTA NVARCHAR(20), @pREQF INT, @pRAZON NVARCHAR(255), @pRFCR NVARCHAR(40), @pRFCE NVARCHAR(40), @pUSOCFDI NVARCHAR(40), @pTIPOFACT NVARCHAR(40), @pESTATUS NVARCHAR(40), @pIMPT MONEY, @pMETODO NVARCHAR(20), @pMOD NVARCHAR(255)',
+        N'@pIDFOL NVARCHAR(255), @pSUC NVARCHAR(255), @pCLIEN FLOAT, @pFCN DATETIME, @pFCNS NVARCHAR(20), @pFORMA NVARCHAR(80), @pFORMASAT NVARCHAR(2), @pNAUT NVARCHAR(255), @pTIPOVTA NVARCHAR(20), @pREQF INT, @pRAZON NVARCHAR(255), @pRFCR NVARCHAR(40), @pRFCE NVARCHAR(40), @pUSOCFDI NVARCHAR(40), @pTIPOFACT NVARCHAR(40), @pESTATUS NVARCHAR(40), @pIMPT MONEY, @pMETODO NVARCHAR(20), @pEXPORT NVARCHAR(5), @pMOD NVARCHAR(255)',
         @pIDFOL = @idfolActual,
         @pSUC = @suc,
         @pCLIEN = @clienFac,
         @pFCN = @fechaProceso,
         @pFCNS = @fcns,
         @pFORMA = @formaSat,
+        @pFORMASAT = @formaSat,
         @pNAUT = @formaAut,
         @pTIPOVTA = 'VF',
         @pREQF = @reqf,
@@ -517,6 +537,7 @@ BEGIN
         @pESTATUS = @estatusFinal,
         @pIMPT = @totalFinal,
         @pMETODO = @metodoPago,
+        @pEXPORT = '01',
         @pMOD = @modFinal;
     END;
 
