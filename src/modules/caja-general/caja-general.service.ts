@@ -3,10 +3,12 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { DataSource, QueryFailedError } from 'typeorm';
+import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { UsrModSucEntity } from '../usr-mod-suc/usr-mod-suc.entity';
 import { CajaGeneralFormaDetalleQueryDto } from './dto/caja-general-forma-detalle-query.dto';
 import { CajaGeneralGlobalQueryDto } from './dto/caja-general-global-query.dto';
 import { CajaGeneralOpvQueryDto } from './dto/caja-general-opv-query.dto';
@@ -21,9 +23,17 @@ type SupervisorAuthorizer = {
 
 @Injectable()
 export class CajaGeneralService {
+  private static readonly CAJA_GENERAL_MODULE_CODES = [
+    'DAT_FORM_ENTR_OPV',
+    'DAT_RES_ENTRE_CAJ',
+    'PV_ENTREGA_CG',
+  ] as const;
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    @InjectRepository(UsrModSucEntity)
+    private readonly usrModSucRepo: Repository<UsrModSucEntity>,
   ) {}
 
   async getResumenOpv(query: CajaGeneralOpvQueryDto, user: JwtPayload) {
@@ -33,7 +43,7 @@ export class CajaGeneralService {
       const fcn = this.normalizeDate(query.fcn);
       const tipo = this.normalizeTipo(query.tipo);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       await this.dataSource.query(
         'EXEC dbo.sp_cg_sync_entrega_opv_abierta @SUC=@0, @FCN=@1, @OPV=@2, @TIPO_CORTE=@3',
@@ -107,7 +117,7 @@ export class CajaGeneralService {
         throw new BadRequestException('form es obligatorio');
       }
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       const rows = await this.dataSource.query(
         `
@@ -193,7 +203,7 @@ export class CajaGeneralService {
       const fcn = this.normalizeDate(query.fcn);
       const tipo = this.normalizeTipo(query.tipo);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_cg_opv_pendiente_transacciones @SUC=@0, @FCN=@1, @OPV=@2, @TIPO_CORTE=@3',
@@ -233,7 +243,7 @@ export class CajaGeneralService {
       const ter = this.normalize(dto.ter ?? '') || null;
       const actor = this.resolveActor(dto.user, user);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       const entregas =
         dto.entregas?.map((item) => ({
@@ -289,7 +299,7 @@ export class CajaGeneralService {
       const authPassword = this.normalize(dto.authPassword ?? '');
       const isHistoricalDate = !this.isOperableDate(fcn);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       let supervisor: SupervisorAuthorizer | null = null;
       if (isHistoricalDate) {
@@ -388,7 +398,7 @@ export class CajaGeneralService {
       const fcn = this.normalizeDate(query.fcn);
       const tipo = this.normalizeTipo(query.tipo);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_cg_resumen_global_dia @SUC=@0, @FCN=@1, @TIPO_CORTE=@2',
@@ -420,7 +430,7 @@ export class CajaGeneralService {
       const fcn = this.normalizeDate(query.fcn);
       const tipo = this.normalizeTipo(query.tipo);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_cg_reporte_entrega_opv @SUC=@0, @FCN=@1, @OPV=@2, @TIPO_CORTE=@3',
@@ -452,7 +462,7 @@ export class CajaGeneralService {
       const fcn = this.normalizeDate(query.fcn);
       const tipo = this.normalizeTipo(query.tipo);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_cg_reporte_entrega_global @SUC=@0, @FCN=@1, @TIPO_CORTE=@2',
@@ -483,7 +493,7 @@ export class CajaGeneralService {
       const suc = this.normalizeUpper(query.suc);
       const fcn = this.normalizeDate(query.fcn);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       const [formsGlobalRows, formsVfRows, formsCaRows, detalleRows] =
         await Promise.all([
@@ -517,6 +527,7 @@ export class CajaGeneralService {
                 END,
               '')))) AS ORIGEN_AUT,
               f.IDFOL AS IDFOL,
+              ISNULL(a.REQF, 0) AS REQF,
               UPPER(LTRIM(RTRIM(ISNULL(
                 CASE
                   WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL
@@ -565,7 +576,7 @@ export class CajaGeneralService {
       const fcn = this.normalizeDate(query.fcn);
       const tipo = this.normalizeTipo(query.tipo);
 
-      this.assertSucursalAccess(suc, user);
+      await this.assertSucursalAccess(suc, user);
 
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_cg_opv_pendientes @SUC=@0, @FCN=@1, @TIPO_CORTE=@2',
@@ -584,19 +595,69 @@ export class CajaGeneralService {
     }
   }
 
-  private assertSucursalAccess(suc: string, user: JwtPayload) {
+  private async assertSucursalAccess(suc: string, user: JwtPayload) {
     if (this.isAdmin(user)) return;
+
     const actorSuc = this.normalizeUpper(user?.suc ?? '');
-    if (!actorSuc) {
+    if (actorSuc === suc) return;
+
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (!username && !actorSuc) {
       throw new BadRequestException(
         'Usuario sin sucursal para operar caja general',
       );
     }
-    if (actorSuc !== suc) {
-      throw new ForbiddenException(
-        'No autorizado para operar otra sucursal en caja general',
-      );
+
+    const authorizedSucs = await this.resolveAuthorizedSucsForCajaGeneral(
+      username,
+      actorSuc,
+    );
+    if (authorizedSucs.includes(suc)) return;
+
+    throw new ForbiddenException(
+      'No autorizado para operar otra sucursal en caja general',
+    );
+  }
+
+  private async resolveAuthorizedSucsForCajaGeneral(
+    username: string,
+    fallbackSuc: string,
+  ) {
+    if (!username) {
+      return fallbackSuc ? [fallbackSuc] : [];
     }
+
+    const rows = await this.usrModSucRepo
+      .createQueryBuilder('ums')
+      .select("UPPER(LTRIM(RTRIM(ISNULL(ums.SUC, ''))))", 'SUC')
+      .where("UPPER(LTRIM(RTRIM(ISNULL(ums.USUARIO, '')))) = :username", {
+        username,
+      })
+      .andWhere('ums.ACTIVO = :activo', { activo: true })
+      .andWhere("UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, '')))) IN (:...modulos)", {
+        modulos: [...CajaGeneralService.CAJA_GENERAL_MODULE_CODES],
+      })
+      .orderBy("UPPER(LTRIM(RTRIM(ISNULL(ums.SUC, ''))))", 'ASC')
+      .getRawMany<{ SUC?: string }>();
+
+    const sucs = this.normalizeUniqueSucs(
+      (rows ?? []).map((row) => this.normalizeUpper(row?.SUC ?? '')),
+    );
+    if (sucs.length) return sucs;
+
+    return fallbackSuc ? [fallbackSuc] : [];
+  }
+
+  private normalizeUniqueSucs(values: string[]) {
+    const output: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of values ?? []) {
+      const value = this.normalizeUpper(raw);
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      output.push(value);
+    }
+    return output;
   }
 
   private normalizeDate(raw: string) {
@@ -799,3 +860,4 @@ export class CajaGeneralService {
     return new BadRequestException(fallback);
   }
 }
+

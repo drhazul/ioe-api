@@ -505,6 +505,22 @@
 - Trazabilidad UI (frontend): el progreso de exportacion se muestra en modal de app; no introduce endpoints nuevos ni cambios de payload.
 - Trazabilidad UI (frontend): el filtro visual `!= 0` inicia desactivado por defecto en los tres niveles de la pantalla de resumen para mostrar todos los registros; el usuario puede activarlo manualmente (sin cambios de contrato API).
 
+## Regla transversal: autorizacion por sucursal con USR_MOD_SUC
+
+- Para cualquier modulo multi-sucursal, si existen filas activas en `USR_MOD_SUC` para `USUARIO + MODULO`, esas filas definen las sucursales permitidas para usuarios no-admin.
+- Si el usuario tiene sucursales vinculadas en `USR_MOD_SUC`, debe poder consultar y procesar informacion en todas esas sucursales vinculadas (no solo `user.suc` del JWT).
+- Admin (roleId `1`) mantiene bypass por rol.
+- Compatibilidad legacy: cuando no existan filas activas en `USR_MOD_SUC` para ese modulo, se permite fallback a `user.suc`.
+- Esta validacion debe ejecutarse en backend tanto en lectura como en escritura; el frontend solo refleja la seleccion permitida.
+
+## Caja General: autorizacion por sucursal
+
+- En `caja-general`, la autorizacion no-admin debe resolverse por `USR_MOD_SUC` para modulos `DAT_FORM_ENTR_OPV`, `DAT_RES_ENTRE_CAJ` y `PV_ENTREGA_CG`.
+- `CajaGeneralService.assertSucursalAccess` debe permitir operar cualquier `SUC` autorizada para esos modulos y rechazar sucursales fuera de esa interseccion.
+- Si el usuario no tiene filas activas para esos modulos, aplica fallback legacy a `user.suc`.
+- Exportacion Excel global (`GET /caja-general/global/excel`): la hoja `DETALLE TRANSACCIONES` debe incluir `REQF` proveniente de `PV_CTR_FOL_ASVR.REQF` en la consulta de detalle y conservar el valor original (`-1/0/1`), sin normalizarlo a booleano.
+- Trazabilidad UI (ioe_app): los importes exportados en `RESUMEN DIA` y `DETALLE TRANSACCIONES` se escriben como numericos con formato moneda en Excel; no cambia contrato del endpoint.
+
 ## Buenas practicas
 
 - Controllers delgados; logica en services.

@@ -534,6 +534,11 @@ Opcionales:
 - Inventarios (`DAT_JAA_ALM`): validar `USR_MOD_SUC` para usuarios no-admin.
 - Control de cuentas/catalogo cuentas: validar `USR_MOD_SUC` para
   `DAT_CONS_CTAS`, `DAT_CTRL_CTAS`, `DAT_CTRL_CUENTAS`.
+- Caja general: validar `USR_MOD_SUC` para `DAT_FORM_ENTR_OPV`, `DAT_RES_ENTRE_CAJ` y `PV_ENTREGA_CG`.
+- Regla transversal: si un usuario no-admin tiene filas activas en `USR_MOD_SUC` para el modulo consultado, esas sucursales son las autorizadas para leer/procesar informacion (no solo `user.suc` del JWT).
+- Compatibilidad legacy: si no existen filas activas en `USR_MOD_SUC` para el modulo, se permite fallback a `user.suc`.
+- Exportacion Excel caja general (`GET /caja-general/global/excel`): en `DETALLE TRANSACCIONES` se incluye `REQF` desde `PV_CTR_FOL_ASVR.REQF`, conservando el valor original (`-1/0/1`).
+- Trazabilidad UI (ioe_app): en la exportacion Excel de caja general, los importes de `RESUMEN DIA` y `DETALLE TRANSACCIONES` se exportan como numericos con formato moneda (sin cambio de contrato API).
 - `admin` (roleId `1`) mantiene bypass por rol.
 - Frontend no es control de seguridad: validacion efectiva se hace en API.
 

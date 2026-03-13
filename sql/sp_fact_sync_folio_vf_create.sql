@@ -26,6 +26,7 @@ BEGIN
   DECLARE @facClienType SYSNAME = NULL;
   DECLARE @reqfRaw INT = 0;
   DECLARE @reqf INT = 0;
+  DECLARE @syncEligible BIT = 0;
   DECLARE @folioFecha DATETIME = NULL;
   DECLARE @fechaProceso DATETIME = GETDATE();
   DECLARE @fcns NVARCHAR(20);
@@ -144,20 +145,34 @@ BEGIN
     IF @suc = ''
       THROW 51046, 'El folio no tiene SUC para sincronización de facturación', 1;
 
-    IF @aut <> 'VF' AND @FORCE = 0
+    SET @reqf = CASE WHEN ISNULL(@reqfRaw, 0) = 1 THEN 1 ELSE 0 END;
+    SET @syncEligible = CASE WHEN @aut = 'VF' AND @reqf = 1 THEN 1 ELSE 0 END;
+
+    IF @syncEligible = 0 AND @FORCE = 0
     BEGIN
+      IF COL_LENGTH('dbo.FACT_TICKET_SHP', 'IDFOL') IS NOT NULL
+      BEGIN
+        DELETE FROM dbo.FACT_TICKET_SHP
+        WHERE IDFOL = @idfolActual;
+      END;
+
+      IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'IDFOL') IS NOT NULL
+      BEGIN
+        DELETE FROM dbo.FAC_SVR_SHAP
+        WHERE IDFOL = @idfolActual;
+      END;
+
       IF @startedTran = 1 AND @@TRANCOUNT > 0
         COMMIT TRANSACTION;
 
       SELECT
         @idfolActual AS IDFOL,
         @aut AS AUT,
+        @reqf AS REQF,
         CAST(0 AS BIT) AS SYNC_APPLIED,
         @eventoNorm AS EVENTO;
       RETURN;
     END;
-
-    SET @reqf = CASE WHEN ISNULL(@reqfRaw, 0) IN (1, -1) THEN 1 ELSE 0 END;
     SET @clienFac = @clien;
     SET @fechaProceso = ISNULL(@folioFecha, GETDATE());
     SET @fcns = CONCAT(DAY(@fechaProceso), MONTH(@fechaProceso), YEAR(@fechaProceso));

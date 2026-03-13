@@ -223,7 +223,7 @@ export class PvCtrFolAsvrService {
       FPGO: dto.FPGO ?? null,
       IMPP: dto.IMPP ?? null,
       AUT: aut,
-      REQF: dto.REQF ?? null,
+      REQF: this.normalizeReqf(dto.REQF),
       FCNM: dto.FCNM ? new Date(dto.FCNM) : null,
       OPVM: dto.OPVM ?? null,
       MOD: dto.MOD ?? null,
@@ -308,7 +308,7 @@ export class PvCtrFolAsvrService {
     if (dto.FPGO !== undefined) partial.FPGO = dto.FPGO ?? null;
     if (dto.IMPP !== undefined) partial.IMPP = dto.IMPP ?? null;
     if (dto.AUT !== undefined) partial.AUT = normalizeAut(dto.AUT);
-    if (dto.REQF !== undefined) partial.REQF = dto.REQF ?? null;
+    if (dto.REQF !== undefined) partial.REQF = this.normalizeReqf(dto.REQF);
     if (dto.FCNM !== undefined)
       partial.FCNM = dto.FCNM ? new Date(dto.FCNM) : null;
     if (dto.OPVM !== undefined) partial.OPVM = dto.OPVM ?? null;
@@ -356,6 +356,11 @@ export class PvCtrFolAsvrService {
 
   private normalizeText(value: string) {
     return String(value ?? '').trim();
+  }
+
+  private normalizeReqf(value: number | null | undefined): number | null {
+    if (value == null) return null;
+    return Number(value) === 1 ? 1 : 0;
   }
 
   private normalizeUpper(value: string) {
