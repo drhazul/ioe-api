@@ -24,6 +24,17 @@ export class FacturifyClient {
     return this.config.get<string>('FACTURIFY_API_SECRET') || '';
   }
 
+  private getStampPath() {
+    return this.config.get<string>('FACTURIFY_STAMP_PATH') || '/api/v1/invoice';
+  }
+
+  private getCancelPath() {
+    return (
+      this.config.get<string>('FACTURIFY_CANCEL_PATH') ||
+      '/api/v1/invoice/cancel'
+    );
+  }
+
   hasCredentials() {
     return Boolean(this.getApiKey() && this.getApiSecret());
   }
@@ -67,6 +78,58 @@ export class FacturifyClient {
     return {
       token,
       expiresIn: Number(payload?.jwt?.expires_in ?? 0),
+    };
+  }
+
+  async stampInvoice(payload: Record<string, unknown>) {
+    const auth = await this.requestToken();
+    const resp = await fetch(`${this.getBaseUrl()}${this.getStampPath()}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const raw = await resp.text();
+    let data: any = raw;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // keep raw text
+    }
+
+    return {
+      ok: resp.ok,
+      status: resp.status,
+      data,
+    };
+  }
+
+  async cancelInvoice(payload: Record<string, unknown>) {
+    const auth = await this.requestToken();
+    const resp = await fetch(`${this.getBaseUrl()}${this.getCancelPath()}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const raw = await resp.text();
+    let data: any = raw;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // keep raw text
+    }
+
+    return {
+      ok: resp.ok,
+      status: resp.status,
+      data,
     };
   }
 }
