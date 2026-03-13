@@ -251,7 +251,9 @@ export class FacturacionService {
       valor_unitario: Number(d.ValorUnitario ?? d.PVTAT ?? 0),
       total: Number(d.PVTAT ?? 0),
       exento_de_impuestos: false,
-      objeto_imp: String(d.ObjetoImp ?? '02').split('.')[0],
+      objeto_imp: String(d.ObjetoImp ?? '02')
+        .split('.')[0]
+        .padStart(2, '0'),
     }));
 
     const subtotal = conceptos.reduce(
