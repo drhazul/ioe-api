@@ -53,7 +53,7 @@
 - `datart`: `DAT_ART` (`SUC`, `ART`, `UPC`, `DES`, `TIPO`, `PVTA`, `CTOP`, `DEPA`, `SUBD`, `CLAS`, `SCLA`, `SCLA2`, ...).
 - Trazabilidad app (2026-03): `ioe_app` agregó impresión de etiquetas en `datart_page.dart` (selección local por renglón/filtrados + impresión masiva), usando endpoints existentes de `datart` sin cambios de contrato API.
 - Regla EAN13 en app: para `UPC` mayor a 12 dígitos, frontend usa los 12 dígitos derechos para calcular dígito verificador y renderizar código de barras en etiqueta `76mm x 56mm` (una página por artículo).
-- Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` para resolver `SUC = @SUC` y `bloqNe=-1` para aplicar `BLOQ <> -1` desde SQL/TypeORM; `ioe_app` usa estos parámetros en `detalle_cot`.
+- Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` para resolver `SUC = @SUC` y `bloqNe=-1` para aplicar visibilidad `BLOQ IS NULL OR BLOQ <> -1` desde SQL/TypeORM; `ioe_app` usa estos parámetros en `detalle_cot`.
 - `datcatreg`: `DAT_CAT_REG` (`C_REGIMENFISCAL`, `DESCRIPCION`).
 - `datcatuso`: `DAT_CAT_USO` (`USOCFDI`, `DESCRIPCION`).
 - `dat-almacen`: `DAT_ALMACEN` (`ALMACEN`, `DESCRIPCION`, `ACTIVO`, `FCNR`).

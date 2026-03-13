@@ -9,9 +9,9 @@ import {
   DataSource,
   FindManyOptions,
   Like,
-  Not,
   QueryFailedError,
   QueryRunner,
+  Raw,
   Repository,
 } from 'typeorm';
 import * as XLSX from 'xlsx';
@@ -168,7 +168,12 @@ export class DatArtService {
     const adic = parseNumber(query?.adic);
     if (adic !== undefined) where.ADIC = adic;
     const bloqNe = parseNumber(query?.bloqNe);
-    if (bloqNe !== undefined) where.BLOQ = Not(bloqNe);
+    if (bloqNe !== undefined) {
+      where.BLOQ = Raw(
+        (alias) => `(${alias} IS NULL OR ${alias} <> :bloqNe)`,
+        { bloqNe },
+      );
+    }
 
     const parseIntParam = (value?: string) => {
       if (value == null) return undefined;
@@ -261,7 +266,64 @@ export class DatArtService {
       if (cyl !== undefined) qb.andWhere('art.CYL = :cyl', { cyl });
       if (adic !== undefined) qb.andWhere('art.ADIC = :adic', { adic });
       if (bloqNe !== undefined) {
-        qb.andWhere('art.BLOQ <> :bloqNe', { bloqNe });
+        qb.andWhere('(art.BLOQ IS NULL OR art.BLOQ <> :bloqNe)', { bloqNe });
+      }
+
+      if (select) {
+        qb.select(select.map((column) => `art.${column}`));
+      }
+      if (limit !== undefined) qb.take(limit);
+      if (skip !== undefined) qb.skip(skip);
+
+      if (withTotal) {
+        const [items, total] = await qb.getManyAndCount();
+        return {
+          items,
+          total,
+          page: page ?? 1,
+          limit: limit ?? items.length,
+        };
+      }
+
+      return qb.getMany();
+    }
+
+    if (sucExact || bloqNe !== undefined) {
+      const qb = this.repo
+        .createQueryBuilder('art')
+        .orderBy('art.SUC', 'ASC')
+        .addOrderBy('art.ART', 'ASC')
+        .addOrderBy('art.UPC', 'ASC');
+
+      if (sucNormalized && sucExact) {
+        qb.andWhere('art.SUC = :sucExact', { sucExact: sucNormalized });
+      } else {
+        const sucPattern = buildLikePattern(query?.suc, 5);
+        if (sucPattern) qb.andWhere('art.SUC LIKE :sucPattern', { sucPattern });
+      }
+      const artPattern = buildLikePattern(query?.art, 10);
+      if (artPattern) qb.andWhere('art.ART LIKE :artPattern', { artPattern });
+      const upcPattern = buildLikePattern(query?.upc, 15);
+      if (upcPattern) qb.andWhere('art.UPC LIKE :upcPattern', { upcPattern });
+      const desPattern = buildLikePattern(query?.des, 255);
+      if (desPattern) qb.andWhere('art.DES LIKE :desPattern', { desPattern });
+      const tipoPattern = buildLikePattern(query?.tipo, 255);
+      if (tipoPattern)
+        qb.andWhere('art.TIPO LIKE :tipoPattern', { tipoPattern });
+      const modeloPattern = buildLikePattern(query?.modelo, 255);
+      if (modeloPattern)
+        qb.andWhere('art.MODELO LIKE :modeloPattern', { modeloPattern });
+
+      if (depa !== undefined) qb.andWhere('art.DEPA = :depa', { depa });
+      if (subd !== undefined) qb.andWhere('art.SUBD = :subd', { subd });
+      if (clas !== undefined) qb.andWhere('art.CLAS = :clas', { clas });
+      if (scla !== undefined) qb.andWhere('art.SCLA = :scla', { scla });
+      if (scla2 !== undefined) qb.andWhere('art.SCLA2 = :scla2', { scla2 });
+      if (sph !== undefined) qb.andWhere('art.SPH = :sph', { sph });
+      if (cyl !== undefined) qb.andWhere('art.CYL = :cyl', { cyl });
+      if (adic !== undefined) qb.andWhere('art.ADIC = :adic', { adic });
+      if (bloqNe !== undefined) {
+        qb.andWhere('(art.BLOQ IS NULL OR art.BLOQ <> :bloqNe)', { bloqNe });
       }
 
       if (select) {

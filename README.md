@@ -87,7 +87,7 @@ Opcionales:
 - `/datart`, `/datcatreg`, `/datcatuso`, `/dat-almacen`, `/dat-cmov`
 - Trazabilidad frontend (2026-03): `ioe_app` incorporó impresión de etiquetas en catálogo `DAT_ART` con selección local por renglón/filtrados y vista previa de impresión (PDF `76mm x 56mm`, una etiqueta por artículo), sin endpoints nuevos en API.
 - Regla EAN13 aplicada en app: de `UPC` se toman los 12 dígitos derechos (si excede) y se calcula dígito verificador para render de código de barras.
-- Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` (`SUC = @SUC`) y `bloqNe=-1` (`BLOQ <> -1`) para que la consulta de artículos en `detalle_cot` se resuelva en backend.
+- Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` (`SUC = @SUC`) y `bloqNe=-1` para resolver visibilidad con `BLOQ IS NULL OR BLOQ <> -1` en backend (compatibilidad con datos legacy en `NULL`).
 - `/dat-form` (CRUD de catalogo de formas de pago sobre `DAT_FORM`)
 - Inventarios:
 - `/conteos/*`, `/capturas/*`, `/datcontctrl`, `/datdetsvr`, `/datmb51`, `/dat-mb51/search`, `/dat-mb52/resumen`
