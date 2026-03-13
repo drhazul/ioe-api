@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { FacturacionService } from './facturacion.service';
 import { EmitirFacturaDto } from './dto/emitir-factura.dto';
 import { CancelarFacturaDto } from './dto/cancelar-factura.dto';
+import { ReenviarEmailDto } from './dto/reenviar-email.dto';
 
 @ApiTags('facturacion')
 @ApiBearerAuth('jwt-auth')
@@ -26,6 +27,11 @@ export class FacturacionController {
   @Post(':idFol/emitir')
   emitir(@Param('idFol') idFol: string, @Body() _dto: EmitirFacturaDto) {
     return this.service.emitir(idFol);
+  }
+
+  @Post(':idFol/reenviar-email')
+  reenviarEmail(@Param('idFol') idFol: string, @Body() dto: ReenviarEmailDto) {
+    return this.service.reenviarCorreo(idFol, dto.email);
   }
 
   @Post(':idFol/cancelar')

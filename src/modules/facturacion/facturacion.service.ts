@@ -23,6 +23,14 @@ export class FacturacionService {
     );
   }
 
+  private getAutoEmailOnSuccess() {
+    return (
+      (this.config.get<string>('FACTURIFY_AUTO_EMAIL_ON_SUCCESS') || 'true')
+        .toLowerCase()
+        .trim() === 'true'
+    );
+  }
+
   private dayFolder() {
     const now = new Date();
     const y = now.getFullYear();
@@ -161,6 +169,32 @@ export class FacturacionService {
       sucursal: full.sucursal,
       conceptos: full.detail.length,
     };
+  }
+
+  private async reenviarCorreoByUuid(
+    uuid: string,
+    email: string,
+    idFol: string,
+  ) {
+    const emailRes = await this.facturify.sendInvoiceEmail({
+      cfdi_uuid: uuid,
+      email,
+    });
+
+    await this.dataSource.query(
+      `UPDATE FAC_SVR_SHAP
+          SET CFDI_ERROR_MSG=@2
+        WHERE IDFOL=@0`,
+      [
+        idFol,
+        email,
+        emailRes.ok
+          ? null
+          : `EMAIL_FAIL: ${JSON.stringify(emailRes.data).slice(0, 850)}`,
+      ],
+    );
+
+    return emailRes;
   }
 
   private toFacturifyPayload(full: {
@@ -306,13 +340,61 @@ export class FacturacionService {
       ],
     );
 
+    let emailRes: any = null;
+    const emailTarget = String(full.cliente?.EMAILRECEPTOR ?? '').trim();
+    if (timbrado.ok && uuid && this.getAutoEmailOnSuccess() && emailTarget) {
+      emailRes = await this.reenviarCorreoByUuid(uuid, emailTarget, idFol);
+    }
+
     return {
       ok: timbrado.ok,
       status: timbrado.status,
       idFol,
       uuid,
       storage,
+      email: emailRes
+        ? { ok: emailRes.ok, status: emailRes.status, target: emailTarget }
+        : null,
       facturify: timbrado.data,
+    };
+  }
+
+  async reenviarCorreo(idFol: string, email?: string) {
+    const rows = await this.dataSource.query(
+      `SELECT TOP 1 CFDI_UUID, RfcReceptor FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
+      [idFol],
+    );
+    const uuid = rows?.[0]?.CFDI_UUID;
+    if (!uuid) {
+      throw new BadRequestException(
+        `Folio ${idFol} no tiene CFDI_UUID para envío de correo`,
+      );
+    }
+
+    let targetEmail = (email || '').trim();
+    if (!targetEmail) {
+      const cliente = await this.dataSource.query(
+        `SELECT TOP 1 EMAILRECEPTOR FROM FACT_CLIENT_SHP WHERE RFCRECEPTOR=@0 ORDER BY FCNR DESC`,
+        [rows?.[0]?.RfcReceptor ?? ''],
+      );
+      targetEmail = String(cliente?.[0]?.EMAILRECEPTOR ?? '').trim();
+    }
+
+    if (!targetEmail) {
+      throw new BadRequestException(
+        `No se encontró email destino para el folio ${idFol}`,
+      );
+    }
+
+    const emailRes = await this.reenviarCorreoByUuid(uuid, targetEmail, idFol);
+
+    return {
+      ok: emailRes.ok,
+      status: emailRes.status,
+      idFol,
+      uuid,
+      targetEmail,
+      facturify: emailRes.data,
     };
   }
 

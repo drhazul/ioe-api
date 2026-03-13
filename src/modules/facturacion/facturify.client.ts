@@ -35,6 +35,13 @@ export class FacturifyClient {
     );
   }
 
+  private getEmailPath() {
+    return (
+      this.config.get<string>('FACTURIFY_EMAIL_PATH') ||
+      '/api/v1/invoice/email'
+    );
+  }
+
   hasCredentials() {
     return Boolean(this.getApiKey() && this.getApiSecret());
   }
@@ -110,6 +117,32 @@ export class FacturifyClient {
   async cancelInvoice(payload: Record<string, unknown>) {
     const auth = await this.requestToken();
     const resp = await fetch(`${this.getBaseUrl()}${this.getCancelPath()}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const raw = await resp.text();
+    let data: any = raw;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // keep raw text
+    }
+
+    return {
+      ok: resp.ok,
+      status: resp.status,
+      data,
+    };
+  }
+
+  async sendInvoiceEmail(payload: Record<string, unknown>) {
+    const auth = await this.requestToken();
+    const resp = await fetch(`${this.getBaseUrl()}${this.getEmailPath()}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
