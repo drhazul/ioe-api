@@ -59,6 +59,7 @@ import { RetirosModule } from './modules/retiros/retiros.module';
 import { FormasPagoCambiosModule } from './modules/formas-pago-cambios/formas-pago-cambios.module';
 import { CajonEstadoModule } from './modules/cajon-estado/cajon-estado.module';
 import { CajaGeneralModule } from './modules/caja-general/caja-general.module';
+import { FacturacionModule } from './modules/facturacion/facturacion.module';
 
 @Module({
   imports: [
@@ -120,6 +121,7 @@ import { CajaGeneralModule } from './modules/caja-general/caja-general.module';
     FormasPagoCambiosModule,
     CajonEstadoModule,
     CajaGeneralModule,
+    FacturacionModule,
   ],
   providers: [
     {
