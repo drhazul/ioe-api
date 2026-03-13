@@ -539,30 +539,47 @@ BEGIN
   DECLARE @art FLOAT = 0;
   DECLARE @difCalc MONEY = 0;
 
-  ;WITH Folios AS (
+  ;WITH FoliosBase AS (
     SELECT
       a.IDFOL,
-      UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT
-    FROM dbo.PV_CTR_FOL_ASVR a
-    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
-      AND a.FCNM >= @dtIni
-      AND a.FCNM < @dtFin
-      AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA')
-      AND UPPER(LTRIM(RTRIM(ISNULL(
+      UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT,
+      UPPER(LTRIM(RTRIM(ISNULL(
+        CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.ORIGEN_AUT, ''))), '') IS NOT NULL THEN a.ORIGEN_AUT
+          ELSE a.AUT
+        END,
+      '')))) AS TIPO_REF,
+      UPPER(LTRIM(RTRIM(ISNULL(
         CASE
           WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
           ELSE a.OPV
         END,
-      '')))) = @opvNorm
+      '')))) AS OPV_REF
+    FROM dbo.PV_CTR_FOL_FORM f
+    INNER JOIN dbo.PV_CTR_FOL_ASVR a
+      ON a.IDFOL = f.IDFOL
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+      AND f.FCN >= @dtIni
+      AND f.FCN < @dtFin
+  ),
+  Folios AS (
+    SELECT
+      fb.IDFOL,
+      fb.AUT,
+      fb.TIPO_REF
+    FROM FoliosBase fb
+    WHERE fb.OPV_REF = @opvNorm
+      AND fb.TIPO_REF NOT IN ('CP', 'CPF', 'VA')
       AND (
         @tipoNorm = 'GLOBAL'
-        OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
-        OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+        OR (@tipoNorm = 'CA' AND fb.TIPO_REF = 'CA')
+        OR (@tipoNorm = 'VF' AND fb.TIPO_REF = 'VF')
       )
+    GROUP BY fb.IDFOL, fb.AUT, fb.TIPO_REF
   )
   SELECT
     @trn = COUNT(1),
-    @art = SUM(CASE WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END)
+    @art = SUM(CASE WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END)
   FROM Folios f
   LEFT JOIN dbo.PV_TICKET_LOG t ON t.IDFOL = f.IDFOL;
 
@@ -624,24 +641,39 @@ BEGIN
   IF @opvNorm = ''
     THROW 58031, 'OPV es obligatorio', 1;
 
-  ;WITH Folios AS (
+  ;WITH FoliosBase AS (
     SELECT
-      a.IDFOL
-    FROM dbo.PV_CTR_FOL_ASVR a
-    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
-      AND a.FCNM >= @dtIni
-      AND a.FCNM < @dtFin
-      AND UPPER(LTRIM(RTRIM(ISNULL(
+      a.IDFOL,
+      UPPER(LTRIM(RTRIM(ISNULL(
+        CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.ORIGEN_AUT, ''))), '') IS NOT NULL THEN a.ORIGEN_AUT
+          ELSE a.AUT
+        END,
+      '')))) AS TIPO_REF,
+      UPPER(LTRIM(RTRIM(ISNULL(
         CASE
           WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
           ELSE a.OPV
         END,
-      '')))) = @opvNorm
+      '')))) AS OPV_REF
+    FROM dbo.PV_CTR_FOL_FORM f
+    INNER JOIN dbo.PV_CTR_FOL_ASVR a
+      ON a.IDFOL = f.IDFOL
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+      AND f.FCN >= @dtIni
+      AND f.FCN < @dtFin
+  ),
+  Folios AS (
+    SELECT
+      fb.IDFOL
+    FROM FoliosBase fb
+    WHERE fb.OPV_REF = @opvNorm
       AND (
-        (@tipoNorm = 'GLOBAL' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA'))
-        OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
-        OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+        (@tipoNorm = 'GLOBAL' AND fb.TIPO_REF NOT IN ('CP', 'CPF', 'VA'))
+        OR (@tipoNorm = 'CA' AND fb.TIPO_REF = 'CA')
+        OR (@tipoNorm = 'VF' AND fb.TIPO_REF = 'VF')
       )
+    GROUP BY fb.IDFOL
   ),
   Cobrado AS (
     SELECT
@@ -649,6 +681,8 @@ BEGIN
       SUM(ISNULL(f.IMPD, 0)) AS IMPT
     FROM dbo.PV_CTR_FOL_FORM f
     INNER JOIN Folios fo ON fo.IDFOL = f.IDFOL
+    WHERE f.FCN >= @dtIni
+      AND f.FCN < @dtFin
     GROUP BY dbo.fn_cg_normalize_forma(f.FORM)
   ),
   Retiros AS (
@@ -737,26 +771,43 @@ BEGIN
   IF @opvNorm = ''
     THROW 58041, 'OPV es obligatorio', 1;
 
-  ;WITH Folios AS (
+  ;WITH FoliosBase AS (
     SELECT
-      UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT,
-      ISNULL(a.IMPT, 0) AS IMPT
-    FROM dbo.PV_CTR_FOL_ASVR a
-    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
-      AND a.FCNM >= @dtIni
-      AND a.FCNM < @dtFin
-      AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA')
-      AND UPPER(LTRIM(RTRIM(ISNULL(
+      UPPER(LTRIM(RTRIM(ISNULL(
+        CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.ORIGEN_AUT, ''))), '') IS NOT NULL THEN a.ORIGEN_AUT
+          ELSE a.AUT
+        END,
+      '')))) AS TIPO_REF,
+      ISNULL(a.IMPT, 0) AS IMPT,
+      UPPER(LTRIM(RTRIM(ISNULL(
         CASE
           WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
           ELSE a.OPV
         END,
-      '')))) = @opvNorm
+      '')))) AS OPV_REF,
+      a.IDFOL
+    FROM dbo.PV_CTR_FOL_FORM f
+    INNER JOIN dbo.PV_CTR_FOL_ASVR a
+      ON a.IDFOL = f.IDFOL
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+      AND f.FCN >= @dtIni
+      AND f.FCN < @dtFin
+  ),
+  Folios AS (
+    SELECT
+      fb.TIPO_REF AS AUT,
+      fb.IMPT,
+      fb.IDFOL
+    FROM FoliosBase fb
+    WHERE fb.OPV_REF = @opvNorm
+      AND fb.TIPO_REF NOT IN ('CP', 'CPF', 'VA')
       AND (
         @tipoNorm = 'GLOBAL'
-        OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
-        OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+        OR (@tipoNorm = 'CA' AND fb.TIPO_REF = 'CA')
+        OR (@tipoNorm = 'VF' AND fb.TIPO_REF = 'VF')
       )
+    GROUP BY fb.TIPO_REF, fb.IMPT, fb.IDFOL
   )
   SELECT
     f.AUT,
@@ -799,34 +850,51 @@ BEGIN
   IF @opvNorm = ''
     THROW 58051, 'OPV es obligatorio', 1;
 
-  ;WITH Folios AS (
+  ;WITH FoliosBase AS (
     SELECT
       a.IDFOL,
-      UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT
-    FROM dbo.PV_CTR_FOL_ASVR a
-    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
-      AND a.FCNM >= @dtIni
-      AND a.FCNM < @dtFin
-      AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA')
-      AND UPPER(LTRIM(RTRIM(ISNULL(
+      UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT,
+      UPPER(LTRIM(RTRIM(ISNULL(
+        CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.ORIGEN_AUT, ''))), '') IS NOT NULL THEN a.ORIGEN_AUT
+          ELSE a.AUT
+        END,
+      '')))) AS TIPO_REF,
+      UPPER(LTRIM(RTRIM(ISNULL(
         CASE
           WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
           ELSE a.OPV
         END,
-      '')))) = @opvNorm
+      '')))) AS OPV_REF
+    FROM dbo.PV_CTR_FOL_FORM f
+    INNER JOIN dbo.PV_CTR_FOL_ASVR a
+      ON a.IDFOL = f.IDFOL
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+      AND f.FCN >= @dtIni
+      AND f.FCN < @dtFin
+  ),
+  Folios AS (
+    SELECT
+      fb.IDFOL,
+      fb.AUT,
+      fb.TIPO_REF
+    FROM FoliosBase fb
+    WHERE fb.OPV_REF = @opvNorm
+      AND fb.TIPO_REF NOT IN ('CP', 'CPF', 'VA')
       AND (
         @tipoNorm = 'GLOBAL'
-        OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
-        OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+        OR (@tipoNorm = 'CA' AND fb.TIPO_REF = 'CA')
+        OR (@tipoNorm = 'VF' AND fb.TIPO_REF = 'VF')
       )
+    GROUP BY fb.IDFOL, fb.AUT, fb.TIPO_REF
   )
   SELECT
     ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(d.DDEPA, ''))), ''), 'SIN DEPARTAMENTO') AS DDEPA,
     ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(s.DSUBD, ''))), ''), 'SIN SUBDEPARTAMENTO') AS DSUBD,
-    SUM(CASE WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END) AS VTAPZS,
+    SUM(CASE WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END) AS VTAPZS,
     SUM(
       CASE
-        WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0)))
+        WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0)))
         ELSE ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0))
       END
     ) AS VTAPSOS,
@@ -845,10 +913,10 @@ BEGIN
     ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(d.DDEPA, ''))), ''), 'SIN DEPARTAMENTO'),
     ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(s.DSUBD, ''))), ''), 'SIN SUBDEPARTAMENTO')
   HAVING
-    ABS(SUM(CASE WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END)) > 0.000001
+    ABS(SUM(CASE WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END)) > 0.000001
     OR ABS(SUM(
       CASE
-        WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0)))
+        WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0)))
         ELSE ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0))
       END
     )) > 0.000001
@@ -919,30 +987,47 @@ BEGIN
 
   ;WITH FoliosBase AS (
     SELECT
+      a.IDFOL,
       UPPER(LTRIM(RTRIM(ISNULL(
         CASE
           WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
           ELSE a.OPV
         END,
       '')))) AS OPV,
+      UPPER(LTRIM(RTRIM(ISNULL(
+        CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.ORIGEN_AUT, ''))), '') IS NOT NULL THEN a.ORIGEN_AUT
+          ELSE a.AUT
+        END,
+      '')))) AS TIPO_REF,
       ISNULL(a.IMPT, 0) AS IMPT
-    FROM dbo.PV_CTR_FOL_ASVR a
+    FROM dbo.PV_CTR_FOL_FORM f
+    INNER JOIN dbo.PV_CTR_FOL_ASVR a
+      ON a.IDFOL = f.IDFOL
     WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
-      AND a.FCNM >= @dtIni
-      AND a.FCNM < @dtFin
-      AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA')
+      AND f.FCN >= @dtIni
+      AND f.FCN < @dtFin
+  ),
+  Folios AS (
+    SELECT
+      fb.IDFOL,
+      fb.OPV,
+      fb.IMPT
+    FROM FoliosBase fb
+    WHERE fb.TIPO_REF NOT IN ('CP', 'CPF', 'VA')
       AND (
         @tipoNorm = 'GLOBAL'
-        OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
-        OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+        OR (@tipoNorm = 'CA' AND fb.TIPO_REF = 'CA')
+        OR (@tipoNorm = 'VF' AND fb.TIPO_REF = 'VF')
       )
+    GROUP BY fb.IDFOL, fb.OPV, fb.IMPT
   ),
   Agregado AS (
     SELECT
       fb.OPV,
       COUNT(1) AS TRN,
       SUM(ISNULL(fb.IMPT, 0)) AS TOTAL
-    FROM FoliosBase fb
+    FROM Folios fb
     WHERE NULLIF(LTRIM(RTRIM(ISNULL(fb.OPV, ''))), '') IS NOT NULL
     GROUP BY fb.OPV
   )
@@ -967,6 +1052,91 @@ BEGIN
   ORDER BY ag.OPV;
 END;
 GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_cg_opv_pendiente_transacciones
+  @SUC VARCHAR(25),
+  @FCN DATE,
+  @OPV NVARCHAR(255),
+  @TIPO_CORTE VARCHAR(10) = 'GLOBAL'
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @sucNorm VARCHAR(25) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
+  DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@OPV, ''))));
+  DECLARE @tipoNorm VARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPO_CORTE, 'GLOBAL'))));
+  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
+  DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
+  DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
+
+  IF @tipoNorm NOT IN ('CA', 'VF', 'GLOBAL')
+    SET @tipoNorm = 'GLOBAL';
+
+  IF @sucNorm = ''
+    THROW 58080, 'SUC es obligatorio', 1;
+
+  IF @opvNorm = ''
+    THROW 58081, 'OPV es obligatorio', 1;
+
+  ;WITH FoliosBase AS (
+    SELECT
+      UPPER(LTRIM(RTRIM(ISNULL(
+        CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL THEN a.OPVM
+          ELSE a.OPV
+        END,
+      '')))) AS OPV,
+      a.IDFOL,
+      UPPER(LTRIM(RTRIM(ISNULL(
+        CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.ORIGEN_AUT, ''))), '') IS NOT NULL THEN a.ORIGEN_AUT
+          ELSE a.AUT
+        END,
+      '')))) AS AUT,
+      UPPER(LTRIM(RTRIM(ISNULL(a.ESTA, '')))) AS ESTA,
+      ISNULL(a.IMPT, 0) AS TOTAL,
+      a.FCNM
+    FROM dbo.PV_CTR_FOL_FORM f
+    INNER JOIN dbo.PV_CTR_FOL_ASVR a
+      ON a.IDFOL = f.IDFOL
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+      AND f.FCN >= @dtIni
+      AND f.FCN < @dtFin
+  ),
+  Folios AS (
+    SELECT
+      fb.OPV,
+      fb.IDFOL,
+      fb.AUT,
+      fb.ESTA,
+      fb.TOTAL,
+      fb.FCNM
+    FROM FoliosBase fb
+    WHERE fb.OPV = @opvNorm
+      AND fb.AUT NOT IN ('CP', 'CPF', 'VA')
+      AND (
+        @tipoNorm = 'GLOBAL'
+        OR (@tipoNorm = 'CA' AND fb.AUT = 'CA')
+        OR (@tipoNorm = 'VF' AND fb.AUT = 'VF')
+      )
+    GROUP BY fb.OPV, fb.IDFOL, fb.AUT, fb.ESTA, fb.TOTAL, fb.FCNM
+  )
+  SELECT
+    f.OPV,
+    f.IDFOL,
+    f.AUT,
+    ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(t.[DESC], ''))), ''), f.AUT) AS AUT_DESC,
+    f.ESTA,
+    f.TOTAL,
+    f.FCNM,
+    @tipoNorm AS TIPO_CORTE
+  FROM Folios f
+  LEFT JOIN dbo.PV_TIPO_ESTA t
+    ON UPPER(LTRIM(RTRIM(ISNULL(t.TIPO, '')))) = f.AUT
+  ORDER BY f.FCNM, f.IDFOL;
+END;
+GO
+
 CREATE OR ALTER PROCEDURE dbo.sp_cg_cerrar_entrega_opv
   @SUC VARCHAR(25),
   @FCN DATE,
@@ -1544,21 +1714,38 @@ BEGIN
     @FCN = @fcnDate,
     @TIPO_CORTE = @tipoNorm;
 
-  ;WITH Folios AS (
+  ;WITH FoliosBase AS (
     SELECT
       a.IDFOL,
       UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) AS AUT,
+      UPPER(LTRIM(RTRIM(ISNULL(
+        CASE
+          WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.ORIGEN_AUT, ''))), '') IS NOT NULL THEN a.ORIGEN_AUT
+          ELSE a.AUT
+        END,
+      '')))) AS TIPO_REF,
       ISNULL(a.IMPT, 0) AS IMPT
-    FROM dbo.PV_CTR_FOL_ASVR a
+    FROM dbo.PV_CTR_FOL_FORM f
+    INNER JOIN dbo.PV_CTR_FOL_ASVR a
+      ON a.IDFOL = f.IDFOL
     WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
-      AND a.FCNM >= @dtIni
-      AND a.FCNM < @dtFin
-      AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) NOT IN ('CP', 'CPF', 'VA')
+      AND f.FCN >= @dtIni
+      AND f.FCN < @dtFin
+  ),
+  Folios AS (
+    SELECT
+      fb.IDFOL,
+      fb.AUT,
+      fb.TIPO_REF,
+      fb.IMPT
+    FROM FoliosBase fb
+    WHERE fb.TIPO_REF NOT IN ('CP', 'CPF', 'VA')
       AND (
         @tipoNorm = 'GLOBAL'
-        OR (@tipoNorm = 'CA' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'CA')
-        OR (@tipoNorm = 'VF' AND UPPER(LTRIM(RTRIM(ISNULL(a.AUT, '')))) = 'VF')
+        OR (@tipoNorm = 'CA' AND fb.TIPO_REF = 'CA')
+        OR (@tipoNorm = 'VF' AND fb.TIPO_REF = 'VF')
       )
+    GROUP BY fb.IDFOL, fb.AUT, fb.TIPO_REF, fb.IMPT
   ),
   Cobrado AS (
     SELECT
@@ -1566,6 +1753,8 @@ BEGIN
       SUM(ISNULL(f.IMPD, 0)) AS IMPT
     FROM dbo.PV_CTR_FOL_FORM f
     INNER JOIN Folios fo ON fo.IDFOL = f.IDFOL
+    WHERE f.FCN >= @dtIni
+      AND f.FCN < @dtFin
     GROUP BY dbo.fn_cg_normalize_forma(f.FORM)
   ),
   Retiros AS (
@@ -1582,9 +1771,9 @@ BEGIN
         END,
       ''))))
       FROM dbo.PV_CTR_FOL_ASVR a
+      INNER JOIN Folios fo
+        ON fo.IDFOL = a.IDFOL
       WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
-        AND a.FCNM >= @dtIni
-        AND a.FCNM < @dtFin
     )
       AND r.FCNR >= @dtIni
       AND r.FCNR < @dtFin
@@ -1620,23 +1809,25 @@ BEGIN
   ),
   Transacciones AS (
     SELECT
-      f.AUT,
-      ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(t.[DESC], ''))), ''), f.AUT) AS [DESC],
+      f.TIPO_REF AS AUT,
+      ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(t.[DESC], ''))), ''), f.TIPO_REF) AS [DESC],
       COUNT(1) AS CTA,
       SUM(ISNULL(f.IMPT, 0)) AS TOTAL
     FROM Folios f
     LEFT JOIN dbo.PV_TIPO_ESTA t
-      ON UPPER(LTRIM(RTRIM(ISNULL(t.TIPO, '')))) = f.AUT
-    GROUP BY f.AUT, ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(t.[DESC], ''))), ''), f.AUT)
+      ON UPPER(LTRIM(RTRIM(ISNULL(t.TIPO, '')))) = f.TIPO_REF
+    GROUP BY
+      f.TIPO_REF,
+      ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(t.[DESC], ''))), ''), f.TIPO_REF)
   ),
   Ventas AS (
     SELECT
       ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(d.DDEPA, ''))), ''), 'SIN DEPARTAMENTO') AS DDEPA,
       ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(s.DSUBD, ''))), ''), 'SIN SUBDEPARTAMENTO') AS DSUBD,
-      SUM(CASE WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END) AS VTAPZS,
+      SUM(CASE WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END) AS VTAPZS,
       SUM(
         CASE
-          WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0)))
+          WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0)))
           ELSE ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0))
         END
       ) AS VTAPSOS
@@ -1654,10 +1845,10 @@ BEGIN
       ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(d.DDEPA, ''))), ''), 'SIN DEPARTAMENTO'),
       ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(s.DSUBD, ''))), ''), 'SIN SUBDEPARTAMENTO')
     HAVING
-      ABS(SUM(CASE WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END)) > 0.000001
+      ABS(SUM(CASE WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.CTD, 0)) ELSE ISNULL(t.CTD, 0) END)) > 0.000001
       OR ABS(SUM(
         CASE
-          WHEN f.AUT IN ('DF', 'CD') THEN -ABS(ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0)))
+          WHEN f.TIPO_REF IN ('DF', 'CD') THEN -ABS(ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0)))
           ELSE ISNULL(t.PVTAT, ISNULL(t.CTD, 0) * ISNULL(t.PVTA, 0))
         END
       )) > 0.000001

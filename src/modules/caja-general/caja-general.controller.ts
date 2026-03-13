@@ -75,12 +75,28 @@ export class CajaGeneralController {
     return this.service.getDetalleFormaOpv(query, user);
   }
 
+  @Get('opv/pendiente-transacciones')
+  getPendienteTransaccionesOpv(
+    @Query() query: CajaGeneralOpvQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.getPendienteTransaccionesOpv(query, user);
+  }
+
   @Get('global/reporte')
   getReporteGlobal(
     @Query() query: CajaGeneralGlobalQueryDto,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.getReporteGlobal(query, user);
+  }
+
+  @Get('global/excel')
+  getExcelGlobal(
+    @Query() query: CajaGeneralGlobalQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.getExcelGlobal(query, user);
   }
 
   @Get('opv/pendientes')

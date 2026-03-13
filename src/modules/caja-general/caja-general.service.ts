@@ -31,7 +31,7 @@ export class CajaGeneralService {
       const suc = this.normalizeUpper(query.suc);
       const opv = this.normalizeUpper(query.opv);
       const fcn = this.normalizeDate(query.fcn);
-      const tipo = this.operationTipo();
+      const tipo = this.normalizeTipo(query.tipo);
 
       this.assertSucursalAccess(suc, user);
 
@@ -180,6 +180,43 @@ export class CajaGeneralService {
       };
     } catch (error) {
       throw this.mapError(error, 'No se pudo consultar detalle por forma');
+    }
+  }
+
+  async getPendienteTransaccionesOpv(
+    query: CajaGeneralOpvQueryDto,
+    user: JwtPayload,
+  ) {
+    try {
+      const suc = this.normalizeUpper(query.suc);
+      const opv = this.normalizeUpper(query.opv);
+      const fcn = this.normalizeDate(query.fcn);
+      const tipo = this.normalizeTipo(query.tipo);
+
+      this.assertSucursalAccess(suc, user);
+
+      const rows = await this.dataSource.query(
+        'EXEC dbo.sp_cg_opv_pendiente_transacciones @SUC=@0, @FCN=@1, @OPV=@2, @TIPO_CORTE=@3',
+        [suc, fcn, opv, tipo],
+      );
+
+      return {
+        ok: true,
+        suc,
+        opv,
+        fcn,
+        tipo,
+        total: (rows ?? []).reduce((sum: number, item: any) => {
+          const value = this.toNumber(item?.TOTAL) ?? 0;
+          return sum + value;
+        }, 0),
+        items: rows ?? [],
+      };
+    } catch (error) {
+      throw this.mapError(
+        error,
+        'No se pudo consultar transacciones de OPV pendiente',
+      );
     }
   }
 
@@ -349,7 +386,7 @@ export class CajaGeneralService {
     try {
       const suc = this.normalizeUpper(query.suc);
       const fcn = this.normalizeDate(query.fcn);
-      const tipo = this.operationTipo();
+      const tipo = this.normalizeTipo(query.tipo);
 
       this.assertSucursalAccess(suc, user);
 
@@ -441,11 +478,92 @@ export class CajaGeneralService {
     }
   }
 
+  async getExcelGlobal(query: CajaGeneralGlobalQueryDto, user: JwtPayload) {
+    try {
+      const suc = this.normalizeUpper(query.suc);
+      const fcn = this.normalizeDate(query.fcn);
+
+      this.assertSucursalAccess(suc, user);
+
+      const [formsGlobalRows, formsVfRows, formsCaRows, detalleRows] =
+        await Promise.all([
+          this.dataSource.query(
+            'EXEC dbo.sp_cg_reporte_entrega_global @SUC=@0, @FCN=@1, @TIPO_CORTE=@2',
+            [suc, fcn, 'GLOBAL'],
+          ),
+          this.dataSource.query(
+            'EXEC dbo.sp_cg_reporte_entrega_global @SUC=@0, @FCN=@1, @TIPO_CORTE=@2',
+            [suc, fcn, 'VF'],
+          ),
+          this.dataSource.query(
+            'EXEC dbo.sp_cg_reporte_entrega_global @SUC=@0, @FCN=@1, @TIPO_CORTE=@2',
+            [suc, fcn, 'CA'],
+          ),
+          this.dataSource.query(
+            `
+            DECLARE @sucNorm VARCHAR(25) = UPPER(LTRIM(RTRIM(ISNULL(@0, ''))));
+            DECLARE @fcnDate DATE = CONVERT(DATE, @1);
+            DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
+            DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
+
+            SELECT
+              UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) AS SUC,
+              CONVERT(DATE, f.FCN) AS FCN,
+              UPPER(LTRIM(RTRIM(ISNULL(
+                CASE
+                  WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.ORIGEN_AUT, ''))), '') IS NOT NULL
+                    THEN a.ORIGEN_AUT
+                  ELSE a.AUT
+                END,
+              '')))) AS ORIGEN_AUT,
+              f.IDFOL AS IDFOL,
+              UPPER(LTRIM(RTRIM(ISNULL(
+                CASE
+                  WHEN NULLIF(LTRIM(RTRIM(ISNULL(a.OPVM, ''))), '') IS NOT NULL
+                    THEN a.OPVM
+                  ELSE a.OPV
+                END,
+              '')))) AS OPVM,
+              a.CLIEN AS CLIEN,
+              c.RazonSocialReceptor AS RazonSocialReceptor,
+              dbo.fn_cg_normalize_forma(f.FORM) AS FORM,
+              ISNULL(f.IMPD, 0) AS IMPD,
+              ISNULL(f.AUT, '') AS AUT
+            FROM dbo.PV_CTR_FOL_FORM f
+            INNER JOIN dbo.PV_CTR_FOL_ASVR a ON a.IDFOL = f.IDFOL
+            INNER JOIN dbo.FACT_CLIENT_SHP c ON c.IDC = a.CLIEN
+            WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
+              AND f.FCN >= @dtIni
+              AND f.FCN < @dtFin
+            ORDER BY f.IDFOL, dbo.fn_cg_normalize_forma(f.FORM), ISNULL(f.AUT, '')
+            `,
+            [suc, fcn],
+          ),
+        ]);
+
+      const formsGlobalRow = this.firstRow(formsGlobalRows);
+      const formsVfRow = this.firstRow(formsVfRows);
+      const formsCaRow = this.firstRow(formsCaRows);
+
+      return {
+        ok: true,
+        suc,
+        fcn,
+        formsGlobal: this.parseJsonArray(formsGlobalRow?.FORMAS_JSON),
+        formsVf: this.parseJsonArray(formsVfRow?.FORMAS_JSON),
+        formsCa: this.parseJsonArray(formsCaRow?.FORMAS_JSON),
+        detalleTransacciones: detalleRows ?? [],
+      };
+    } catch (error) {
+      throw this.mapError(error, 'No se pudo generar exportacion global Excel');
+    }
+  }
+
   async getOpvPendientes(query: CajaGeneralGlobalQueryDto, user: JwtPayload) {
     try {
       const suc = this.normalizeUpper(query.suc);
       const fcn = this.normalizeDate(query.fcn);
-      const tipo = this.operationTipo();
+      const tipo = this.normalizeTipo(query.tipo);
 
       this.assertSucursalAccess(suc, user);
 
