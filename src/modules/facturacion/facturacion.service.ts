@@ -284,6 +284,36 @@ export class FacturacionService {
     };
   }
 
+  private shouldRetryFacturify(timbrado: { status: number; data: any }) {
+    if (Number(timbrado?.status) !== 500) return false;
+    const code = Number(timbrado?.data?.code ?? 0);
+    return code === 121;
+  }
+
+  private async stampWithRetry(
+    payload: Record<string, unknown>,
+    maxAttempts = 3,
+    baseDelayMs = 1200,
+  ) {
+    let last: any = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const res = await this.facturify.stampInvoice(payload);
+      last = {
+        ...res,
+        attempt,
+      };
+      if (!this.shouldRetryFacturify(res)) {
+        return last;
+      }
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, baseDelayMs * attempt),
+        );
+      }
+    }
+    return last;
+  }
+
   async emitir(idFol: string) {
     this.facturify.assertCredentials();
     const validacion = await this.validarFolio(idFol);
@@ -305,7 +335,7 @@ export class FacturacionService {
         `No se encontró vendor.uuid en Facturify para RFC emisor del folio ${idFol}`,
       );
     }
-    const timbrado = await this.facturify.stampInvoice(payload);
+    const timbrado = await this.stampWithRetry(payload, 3, 1200);
 
     const data: any = timbrado.data || {};
     const factura = data?.data || data;
@@ -323,6 +353,10 @@ export class FacturacionService {
       metadata: {
         request: payload,
         response: timbrado,
+        retry: {
+          attempted: Number(timbrado?.attempt ?? 1),
+          reason: this.shouldRetryFacturify(timbrado) ? '500/121' : 'none',
+        },
       },
     });
 
