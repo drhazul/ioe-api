@@ -20,16 +20,16 @@ export class FacturacionController {
 
   @Get(':idFol/validar')
   validar(@Param('idFol') idFol: string) {
-    return this.service.validarFolio(Number(idFol));
+    return this.service.validarFolio(idFol);
   }
 
   @Post(':idFol/emitir')
   emitir(@Param('idFol') idFol: string, @Body() _dto: EmitirFacturaDto) {
-    return this.service.emitir(Number(idFol));
+    return this.service.emitir(idFol);
   }
 
   @Post(':idFol/cancelar')
   cancelar(@Param('idFol') idFol: string, @Body() dto: CancelarFacturaDto) {
-    return this.service.cancelar(Number(idFol), dto.motivo);
+    return this.service.cancelar(idFol, dto.motivo);
   }
 }

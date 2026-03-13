@@ -12,7 +12,7 @@ export class FacturifyClient {
   getBaseUrl() {
     return (
       this.config.get<string>('FACTURIFY_BASE_URL') ||
-      'https://api-sandbox.facturify.com'
+      'https://api.facturify.com'
     );
   }
 

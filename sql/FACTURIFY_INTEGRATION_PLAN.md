@@ -7,9 +7,10 @@
 - Cancelación manual (placeholder): `POST /facturacion/:idFol/cancelar`
 
 ## Variables requeridas
-- `FACTURIFY_BASE_URL=https://api-sandbox.facturify.com`
+- `FACTURIFY_BASE_URL=https://api.facturify.com`
 - `FACTURIFY_API_KEY=...`
 - `FACTURIFY_API_SECRET=...`
+- `CFDI_STORAGE_BASE_PATH=/mnt/respaldoCFDI` (montaje local del recurso `\\192.168.10.234\ArchivosUsuarios\respaldoCFDI`)
 
 ## Siguientes pasos
 1. Integrar `POST /api/v1/auth` para token.
