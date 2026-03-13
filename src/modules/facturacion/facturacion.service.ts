@@ -441,18 +441,54 @@ export class FacturacionService {
       };
     }
 
-    const remote = await this.facturify.getInvoiceByUuid(String(uuid));
+    let remote = await this.facturify.getInvoiceByUuid(String(uuid));
+
+    // Fallback: some accounts return 500/121 on direct uuid lookup.
+    if (!remote.ok && Number(remote.status) === 500) {
+      const list = await this.facturify.listFacturas({
+        search: String(uuid),
+      });
+      if (list.ok) {
+        const listRows = list?.data?.data || [];
+        const hit = (Array.isArray(listRows) ? listRows : []).find((x: any) => {
+          const u = String(x?.cfdi_uuid || x?.uuid || '').toUpperCase();
+          return u === String(uuid).toUpperCase();
+        });
+        if (hit) {
+          remote = {
+            ok: true,
+            status: 200,
+            data: { data: hit, source: 'listFacturasFallback' },
+          } as any;
+        }
+      }
+    }
 
     if (remote.ok) {
       const data = remote?.data?.data || {};
       const hasCfdi = Boolean(data?.cfdi_uuid || data?.uuid);
+      const anyStatus = String(
+        data?.status || data?.estatus || data?.cfdi_status || data?.cancel_status || '',
+      ).toUpperCase();
+      const canceled =
+        anyStatus.includes('CANCEL') ||
+        anyStatus.includes('CANCELADO') ||
+        anyStatus.includes('VIGENTE CANCELADO');
+
+      const nextEstatus = canceled ? 'PENDIENTE' : hasCfdi ? 'FACTURADO' : 'PENDIENTE';
+      const nextCfdiStatus = canceled ? 'CANCELADO' : hasCfdi ? 'TIMBRADO' : 'PENDIENTE';
+      const nextCancelStatus = canceled
+        ? 'CANCELADO_CONFIRMADO'
+        : rows[0].CFDI_CANCEL_STATUS || null;
+
       await this.dataSource.query(
         `UPDATE FAC_SVR_SHAP
            SET CFDI_STATUS=@1,
-               ESTATUS=@2,
+               CFDI_CANCEL_STATUS=@2,
+               ESTATUS=@3,
                CFDI_ERROR_MSG=NULL
          WHERE IDFOL=@0`,
-        [idFol, hasCfdi ? 'TIMBRADO' : 'PENDIENTE', hasCfdi ? 'FACTURADO' : 'PENDIENTE'],
+        [idFol, nextCfdiStatus, nextCancelStatus, nextEstatus],
       );
     }
 
@@ -530,12 +566,14 @@ export class FacturacionService {
     await this.dataSource.query(
       `UPDATE FAC_SVR_SHAP
          SET CFDI_CANCEL_STATUS=@1,
-             CFDI_F_CANCELACION=CASE WHEN @1='CANCELADO' THEN GETDATE() ELSE CFDI_F_CANCELACION END,
-             CFDI_ERROR_MSG=@2
+             ESTATUS=@2,
+             CFDI_F_CANCELACION=CASE WHEN @1='CANCELACION_PENDIENTE' THEN GETDATE() ELSE CFDI_F_CANCELACION END,
+             CFDI_ERROR_MSG=@3
        WHERE IDFOL=@0`,
       [
         idFol,
-        cancelRes.ok ? 'CANCELADO' : 'ERROR',
+        cancelRes.ok ? 'CANCELACION_PENDIENTE' : 'ERROR',
+        cancelRes.ok ? 'CANCELACION PENDIENTE' : 'FACTURADO',
         cancelRes.ok ? null : JSON.stringify(cancelRes.data).slice(0, 900),
       ],
     );

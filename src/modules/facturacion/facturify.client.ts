@@ -193,6 +193,46 @@ export class FacturifyClient {
     };
   }
 
+  async listFacturas(params?: {
+    page?: number;
+    limit?: number;
+    from?: string;
+    to?: string;
+    search?: string;
+  }) {
+    const auth = await this.requestToken();
+    const page = params?.page ?? 1;
+    const limit = params?.limit ?? 50;
+    const from = params?.from ?? '2018-01-01';
+    const to =
+      params?.to ?? new Date().toISOString().slice(0, 10);
+    const search = encodeURIComponent(params?.search ?? '');
+
+    const url = `${this.getBaseUrl()}/api/v1/factura/?page=${page}&limit=${limit}&orderBy=created_at&sort=DESC&from=${from}&to=${to}&search=${search}&invoiceType&invoiceSource&download=&empresa_session_rfc=&include=documentos_relacionados`;
+
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        'cache-control': 'no-cache',
+      },
+    });
+
+    const raw = await resp.text();
+    let data: any = raw;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // keep raw text
+    }
+
+    return {
+      ok: resp.ok,
+      status: resp.status,
+      data,
+    };
+  }
+
   async sendInvoiceEmail(payload: Record<string, unknown>) {
     const auth = await this.requestToken();
     const resp = await fetch(`${this.getBaseUrl()}${this.getEmailPath()}`, {
