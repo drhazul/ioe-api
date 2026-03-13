@@ -25,7 +25,7 @@ export class FacturifyClient {
   }
 
   private getStampPath() {
-    return this.config.get<string>('FACTURIFY_STAMP_PATH') || '/api/v1/invoice';
+    return this.config.get<string>('FACTURIFY_STAMP_PATH') || '/api/v1/factura';
   }
 
   private getCancelPath() {

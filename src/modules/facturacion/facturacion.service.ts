@@ -213,18 +213,20 @@ export class FacturacionService {
     return Number(digits.slice(-8));
   }
 
-  private async resolveVendor(rfcEmisor: string) {
+  private async resolveEmisor(rfcEmisor: string) {
     const empresas = await this.facturify.listEmpresas();
     if (!empresas.ok) return null;
     const list = empresas?.data?.data || [];
     const match = (Array.isArray(list) ? list : []).find(
-      (e: any) => String(e?.rfc || '').toUpperCase() === String(rfcEmisor || '').toUpperCase(),
+      (e: any) =>
+        String(e?.rfc || '').toUpperCase() ===
+        String(rfcEmisor || '').toUpperCase(),
     );
     if (!match) return null;
     return {
       uuid: match.uuid,
-      name: match.razon_social,
-      tax_id: match.rfc,
+      razon_social: match.razon_social,
+      rfc: match.rfc,
     };
   }
 
@@ -239,47 +241,57 @@ export class FacturacionService {
     const s = full.sucursal || {};
 
     const rfcEmisor = String(h.RfcEmisor ?? s.RFC ?? '').trim();
-    const vendor = await this.resolveVendor(rfcEmisor);
+    const emisor = await this.resolveEmisor(rfcEmisor);
 
-    const items = (full.detail || []).map((d) => ({
-      sku: String(d.NoIdentificacion ?? d.IDD ?? ''),
-      description: String(d.Descripcion ?? 'CONCEPTO'),
-      quantity: Number(d.Cantidad ?? 1),
-      price: Number(d.ValorUnitario ?? d.PVTAT ?? 0),
-      amount: Number(d.PVTAT ?? 0),
-      tax_federal: Number(d.IvaTasa ?? 0.16),
-      tax_type: '002',
-      sat_key: String(d.ClaveProdServ ?? '01010101').split('.')[0],
-      unit_key: String(d.Unidad ?? 'H87'),
+    const conceptos = (full.detail || []).map((d) => ({
+      clave_producto_servicio: String(d.ClaveProdServ ?? '01010101').split('.')[0],
+      clave_unidad_de_medida: String(d.Unidad ?? 'H87'),
+      cantidad: Number(d.Cantidad ?? 1),
+      descripcion: String(d.Descripcion ?? 'CONCEPTO'),
+      valor_unitario: Number(d.ValorUnitario ?? d.PVTAT ?? 0),
+      total: Number(d.PVTAT ?? 0),
+      exento_de_impuestos: false,
+      objeto_imp: String(d.ObjetoImp ?? '02').split('.')[0],
     }));
 
+    const subtotal = conceptos.reduce(
+      (a: number, x: any) => a + Number(x.total ?? 0),
+      0,
+    );
+    const impuestoFederal = Number((subtotal * 0.16).toFixed(2));
+    const total = Number((subtotal + impuestoFederal).toFixed(2));
+
+    const email = String(c.EMAILRECEPTOR ?? '').trim();
+
     return {
-      vendor: {
-        uuid: String(vendor?.uuid ?? ''),
-        name: String(vendor?.name ?? s.NOMBRE_SUC ?? 'EMISOR IOE'),
-        tax_id: String(vendor?.tax_id ?? rfcEmisor),
+      emisor: {
+        uuid: String(emisor?.uuid ?? ''),
       },
-      customer: {
-        name: String(
+      receptor: {
+        razon_social: String(
           h.RazonSocialReceptor ?? c.RAZONSOCIALRECEPTOR ?? 'PUBLICO EN GENERAL',
         ),
-        tax_id: String(h.RfcReceptor ?? c.RFCRECEPTOR ?? ''),
-        email: String(c.EMAILRECEPTOR ?? '').trim() || undefined,
-        cfdi_usage: String(h.UsoCfdi ?? c.USOCFDI ?? 'G01'),
-        regime: String(c.REGIMENFISCALRECEPTOR ?? '601').split('.')[0],
-        postal_code: String(c.CODIGOPOSTALRECEPTOR ?? '00000'),
+        rfc: String(h.RfcReceptor ?? c.RFCRECEPTOR ?? ''),
+        email: email || null,
+        metodo_de_pago: String(h.MetodoDePago ?? 'PUE'),
+        forma_de_pago: String(h.FormaPago ?? '99').split('.')[0],
+        tarjeta_ultimos_4digitos: 'NA',
+        cp: String(c.CODIGOPOSTALRECEPTOR ?? '00000'),
+        regimen: String(c.REGIMENFISCALRECEPTOR ?? '601').split('.')[0],
       },
-      service: {
-        date: this.toDateYmdHis(new Date()),
-        payment_type: String(h.FormaPago ?? '99').split('.')[0],
-        payment_method: String(h.MetodoDePago ?? 'PUE'),
-        currency: 'MXN',
-        tipo_de_cambio: 1,
-        tax_federal: 0.16,
-        type: 'I',
+      factura: {
         version: '4.0',
+        fecha: this.toDateYmdHis(new Date()),
+        tipo: 'ingreso',
+        generacion_automatica: true,
+        subtotal,
+        impuesto_federal: impuestoFederal,
+        total,
+        conceptos,
+        serie: 'IOE-I',
         folio: this.toNumericFolio(String(h.IDFOL ?? '1')),
-        items,
+        send_pdf_and_xml_by_mail: Boolean(email),
+        emails_send: email || undefined,
       },
     };
   }
@@ -330,9 +342,9 @@ export class FacturacionService {
 
     const full = await this.getFolioData(idFol);
     const payload = await this.toFacturifyPayload(full);
-    if (!payload?.vendor?.uuid) {
+    if (!payload?.emisor?.uuid) {
       throw new BadRequestException(
-        `No se encontró vendor.uuid en Facturify para RFC emisor del folio ${idFol}`,
+        `No se encontró emisor.uuid en Facturify para RFC emisor del folio ${idFol}`,
       );
     }
     const timbrado = await this.stampWithRetry(payload, 3, 1200);
