@@ -197,7 +197,38 @@ export class FacturacionService {
     return emailRes;
   }
 
-  private toFacturifyPayload(full: {
+  private toDateYmdHis(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const ss = String(date.getSeconds()).padStart(2, '0');
+    return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+  }
+
+  private toNumericFolio(idFol: string) {
+    const digits = (idFol || '').replace(/\D/g, '');
+    if (!digits) return 1;
+    return Number(digits.slice(-8));
+  }
+
+  private async resolveVendor(rfcEmisor: string) {
+    const empresas = await this.facturify.listEmpresas();
+    if (!empresas.ok) return null;
+    const list = empresas?.data?.data || [];
+    const match = (Array.isArray(list) ? list : []).find(
+      (e: any) => String(e?.rfc || '').toUpperCase() === String(rfcEmisor || '').toUpperCase(),
+    );
+    if (!match) return null;
+    return {
+      uuid: match.uuid,
+      name: match.razon_social,
+      tax_id: match.rfc,
+    };
+  }
+
+  private async toFacturifyPayload(full: {
     header: any;
     detail: any[];
     sucursal: any;
@@ -207,75 +238,49 @@ export class FacturacionService {
     const c = full.cliente || {};
     const s = full.sucursal || {};
 
-    const conceptos = (full.detail || []).map((d) => {
-      const base = Number(d.PVTAT ?? 0);
-      const tasa = Number(d.IvaTasa ?? 0.16);
-      const impIva = Number((base * tasa).toFixed(2));
-      return {
-        clave_prod_serv: String(d.ClaveProdServ ?? '01010101'),
-        no_identificacion: String(d.NoIdentificacion ?? d.IDD ?? ''),
-        cantidad: Number(d.Cantidad ?? 1),
-        clave_unidad: String(d.Unidad ?? 'H87'),
-        descripcion: String(d.Descripcion ?? 'CONCEPTO'),
-        valor_unitario: Number(d.ValorUnitario ?? base),
-        importe: base,
-        descuento: Number(d.Descuento ?? 0),
-        objeto_imp: String(d.ObjetoImp ?? '02'),
-        impuestos: {
-          traslados: [
-            {
-              base,
-              impuesto: '002',
-              tipo_factor: 'Tasa',
-              tasa_o_cuota: Number(tasa.toFixed(6)),
-              importe: impIva,
-            },
-          ],
-        },
-      };
-    });
+    const rfcEmisor = String(h.RfcEmisor ?? s.RFC ?? '').trim();
+    const vendor = await this.resolveVendor(rfcEmisor);
 
-    const subtotal = conceptos.reduce(
-      (a: number, x: any) => a + Number(x.importe ?? 0),
-      0,
-    );
-    const totalIva = conceptos.reduce(
-      (a: number, x: any) =>
-        a + Number(x?.impuestos?.traslados?.[0]?.importe ?? 0),
-      0,
-    );
-    const total = Number((subtotal + totalIva).toFixed(2));
+    const items = (full.detail || []).map((d) => ({
+      sku: String(d.NoIdentificacion ?? d.IDD ?? ''),
+      description: String(d.Descripcion ?? 'CONCEPTO'),
+      quantity: Number(d.Cantidad ?? 1),
+      price: Number(d.ValorUnitario ?? d.PVTAT ?? 0),
+      amount: Number(d.PVTAT ?? 0),
+      tax_federal: Number(d.IvaTasa ?? 0.16),
+      tax_type: '002',
+      sat_key: String(d.ClaveProdServ ?? '01010101').split('.')[0],
+      unit_key: String(d.Unidad ?? 'H87'),
+    }));
 
     return {
-      factura: {
-        serie: 'IOE',
-        folio: String(h.IDFOL),
-        fecha: new Date().toISOString(),
-        forma_pago: String(h.FormaPago ?? '99'),
-        subtotal: Number(subtotal.toFixed(2)),
-        descuento: 0,
-        moneda: 'MXN',
-        tipo_de_comprobante: 'I',
-        metodo_pago: String(h.MetodoDePago ?? 'PUE'),
-        lugar_expedicion: String(c.CODIGOPOSTALRECEPTOR ?? '00000'),
-        exportacion: '01',
-        total,
+      vendor: {
+        uuid: String(vendor?.uuid ?? ''),
+        name: String(vendor?.name ?? s.NOMBRE_SUC ?? 'EMISOR IOE'),
+        tax_id: String(vendor?.tax_id ?? rfcEmisor),
       },
-      emisor: {
-        rfc: String(h.RfcEmisor ?? s.RFC ?? ''),
-        nombre: String(s.NOMBRE_SUC ?? 'EMISOR IOE'),
-        regimen_fiscal: '601',
-      },
-      receptor: {
-        rfc: String(h.RfcReceptor ?? c.RFCRECEPTOR ?? ''),
-        nombre: String(
+      customer: {
+        name: String(
           h.RazonSocialReceptor ?? c.RAZONSOCIALRECEPTOR ?? 'PUBLICO EN GENERAL',
         ),
-        domicilio_fiscal_receptor: String(c.CODIGOPOSTALRECEPTOR ?? '00000'),
-        regimen_fiscal_receptor: String(c.REGIMENFISCALRECEPTOR ?? '601'),
-        uso_cfdi: String(h.UsoCfdi ?? c.USOCFDI ?? 'G01'),
+        tax_id: String(h.RfcReceptor ?? c.RFCRECEPTOR ?? ''),
+        email: String(c.EMAILRECEPTOR ?? '').trim() || undefined,
+        cfdi_usage: String(h.UsoCfdi ?? c.USOCFDI ?? 'G01'),
+        regime: String(c.REGIMENFISCALRECEPTOR ?? '601').split('.')[0],
+        postal_code: String(c.CODIGOPOSTALRECEPTOR ?? '00000'),
       },
-      conceptos,
+      service: {
+        date: this.toDateYmdHis(new Date()),
+        payment_type: String(h.FormaPago ?? '99').split('.')[0],
+        payment_method: String(h.MetodoDePago ?? 'PUE'),
+        currency: 'MXN',
+        tipo_de_cambio: 1,
+        tax_federal: 0.16,
+        type: 'I',
+        version: '4.0',
+        folio: this.toNumericFolio(String(h.IDFOL ?? '1')),
+        items,
+      },
     };
   }
 
@@ -294,7 +299,12 @@ export class FacturacionService {
     }
 
     const full = await this.getFolioData(idFol);
-    const payload = this.toFacturifyPayload(full);
+    const payload = await this.toFacturifyPayload(full);
+    if (!payload?.vendor?.uuid) {
+      throw new BadRequestException(
+        `No se encontró vendor.uuid en Facturify para RFC emisor del folio ${idFol}`,
+      );
+    }
     const timbrado = await this.facturify.stampInvoice(payload);
 
     const data: any = timbrado.data || {};
