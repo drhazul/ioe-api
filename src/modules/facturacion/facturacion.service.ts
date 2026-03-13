@@ -423,6 +423,53 @@ export class FacturacionService {
     };
   }
 
+  async refrescarEstado(idFol: string) {
+    const rows = await this.dataSource.query(
+      `SELECT TOP 1 CFDI_UUID, ESTATUS, CFDI_STATUS, CFDI_CANCEL_STATUS FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
+      [idFol],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException(`Folio ${idFol} no existe`);
+    }
+
+    const uuid = rows[0].CFDI_UUID;
+    if (!uuid) {
+      return {
+        ok: false,
+        message: `Folio ${idFol} aún no tiene CFDI_UUID`,
+        local: rows[0],
+      };
+    }
+
+    const remote = await this.facturify.getInvoiceByUuid(String(uuid));
+
+    if (remote.ok) {
+      const data = remote?.data?.data || {};
+      const hasCfdi = Boolean(data?.cfdi_uuid || data?.uuid);
+      await this.dataSource.query(
+        `UPDATE FAC_SVR_SHAP
+           SET CFDI_STATUS=@1,
+               ESTATUS=@2,
+               CFDI_ERROR_MSG=NULL
+         WHERE IDFOL=@0`,
+        [idFol, hasCfdi ? 'TIMBRADO' : 'PENDIENTE', hasCfdi ? 'FACTURADO' : 'PENDIENTE'],
+      );
+    }
+
+    const after = await this.dataSource.query(
+      `SELECT TOP 1 IDFOL, ESTATUS, CFDI_UUID, CFDI_STATUS, CFDI_CANCEL_STATUS, CFDI_F_TIMBRADO, CFDI_F_CANCELACION
+       FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
+      [idFol],
+    );
+
+    return {
+      ok: remote.ok,
+      status: remote.status,
+      facturify: remote.data,
+      local: after?.[0] || null,
+    };
+  }
+
   async reenviarCorreo(idFol: string, email?: string) {
     const rows = await this.dataSource.query(
       `SELECT TOP 1 CFDI_UUID, RfcReceptor FROM FAC_SVR_SHAP WHERE IDFOL=@0`,

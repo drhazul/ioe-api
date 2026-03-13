@@ -29,6 +29,11 @@ export class FacturacionController {
     return this.service.emitir(idFol);
   }
 
+  @Post(':idFol/refrescar-estado')
+  refrescarEstado(@Param('idFol') idFol: string) {
+    return this.service.refrescarEstado(idFol);
+  }
+
   @Post(':idFol/reenviar-email')
   reenviarEmail(@Param('idFol') idFol: string, @Body() dto: ReenviarEmailDto) {
     return this.service.reenviarCorreo(idFol, dto.email);

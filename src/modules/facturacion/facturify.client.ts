@@ -168,6 +168,31 @@ export class FacturifyClient {
     };
   }
 
+  async getInvoiceByUuid(cfdiUuid: string) {
+    const auth = await this.requestToken();
+    const resp = await fetch(`${this.getBaseUrl()}/api/v1/factura/${cfdiUuid}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        'cache-control': 'no-cache',
+      },
+    });
+
+    const raw = await resp.text();
+    let data: any = raw;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // keep raw text
+    }
+
+    return {
+      ok: resp.ok,
+      status: resp.status,
+      data,
+    };
+  }
+
   async sendInvoiceEmail(payload: Record<string, unknown>) {
     const auth = await this.requestToken();
     const resp = await fetch(`${this.getBaseUrl()}${this.getEmailPath()}`, {
