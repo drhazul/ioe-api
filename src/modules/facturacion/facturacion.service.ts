@@ -799,7 +799,9 @@ export class FacturacionService {
       );
     }
 
-    const userSuc = this.currentUserSuc(user);
+    // Regla FACTURA: para usuarios con permiso de gestión no se fuerza
+    // sucursal por JWT en unificación (admin y no-admin con rol FACTURA).
+    const userSuc: string | null = null;
 
     try {
       await this.ensureStoredProcedure(
@@ -869,7 +871,9 @@ export class FacturacionService {
       );
     }
 
-    const userSuc = this.currentUserSuc(input.user);
+    // Regla FACTURA: para usuarios con permiso de gestión no se fuerza
+    // sucursal por JWT en unificación (admin y no-admin con rol FACTURA).
+    const userSuc: string | null = null;
     const comentario = this.normalizeText(input.comentario);
     const usuario = this.normalizeText(input.user?.username ?? '');
 
@@ -1044,7 +1048,8 @@ export class FacturacionService {
         [grupoId],
       );
 
-      const userSuc = this.currentUserSuc(user);
+      const canWrite = await this.hasFacturacionWriteAccess(user);
+      const userSuc = canWrite ? null : this.currentUserSuc(user);
       if (userSuc) {
         const outsideUserSuc = (folioRows ?? []).some((row: any) => {
           const suc = this.normalizeUpper(row?.__SUC_NORM);

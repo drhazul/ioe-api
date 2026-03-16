@@ -96,6 +96,7 @@
 - trazabilidad UI facturación tipografía (2026-03-15): `ioe_app` incorpora modal de configuración visual para ajustar escala global y fuentes por componente (AppBar, títulos, labels, body, botones y tabla), sin impacto de contrato API.
 - trazabilidad UI facturación columnas (2026-03-15): `ioe_app` habilita ajuste persistente de ancho por columna/separación entre campos (`SharedPreferences`) y separadores arrastrables en encabezado de grilla, sin cambios backend.
 - facturación pendientes seguridad funcional (2026-03-13): el endpoint no fuerza `SUC` por token; la sucursal se controla mediante el filtro explícito `suc` cuando el usuario la captura.
+- unificación facturación sucursal JWT (2026-03-16): `POST /facturacion/unificaciones/preview` y `POST /facturacion/unificaciones` no deben forzar `@SUC` desde `user.suc` para usuarios con permiso de gestión (`FACTURA`/compat), evitando bloqueos falsos por "folios fuera de la sucursal autorizada".
 - `GET /pvctrfolasvr` (optimizacion 2026-03): soporta query params `suc`, `opv`, `search` para panel de cotizaciones, con filtro SQL por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - Compatibilidad query cotizaciones (2026-03): `ListPvCtrFolAsvrQueryDto` tolera parametro opcional `_` para clientes legacy que usen cache-buster, evitando `400 property _ should not exist`.
 - `GET /pvctrfolasvr` (2026-03): incluye `RazonSocialReceptor` en la respuesta (join a `FACT_CLIENT_SHP`) para visualizacion de panel en app.
@@ -529,6 +530,7 @@
 - `FACTURA_VIEW` habilita operaciones de consulta.
 - Admin (rol/nivel administrativo configurado por `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`; incluye usuario `ADMIN`) tiene bypass total front/back para consultar/editar/eliminar en facturación; no requiere alta en enrolamientos ni permisos adicionales.
 - Facturación no se autoriza por `USR_MOD_SUC`; no se debe exigir registro de admin en `USR_MOD_SUC`.
+- En unificación de facturación (`/facturacion/unificaciones/*`), no restringir gestión por `user.suc` del JWT cuando el usuario ya cuenta con permisos de gestión de facturación.
 
 ## Caja General: autorizacion por sucursal
 

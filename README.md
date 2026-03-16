@@ -118,6 +118,7 @@ Opcionales:
 - trazabilidad UI facturación (2026-03-15): el ajuste visual de la grilla (scroll horizontal visible, alineación encabezados/valores y `IMPT` a 2 decimales) se resolvió en `ioe_app` sin cambios de contrato API.
 - trazabilidad UI facturación tipografía (2026-03-15): `ioe_app` usa configuración visual por modal para ajustar escala global y fuentes por componente (AppBar, títulos, labels, body, botones, header/celdas), sin impacto en endpoints.
 - trazabilidad UI facturación columnas (2026-03-15): `ioe_app` agrega ajuste persistente de ancho por columna y separación entre campos (cache local `SharedPreferences`), además de separadores arrastrables en el encabezado; no cambia contrato API.
+- unificación facturación sucursal JWT (2026-03-16): `preview/create` de `/facturacion/unificaciones` ya no fuerzan sucursal desde `user.suc` para usuarios con permisos de gestión (`FACTURA`/compat), evitando falsos bloqueos de "folios fuera de la sucursal autorizada".
 - Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.
 - `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
@@ -562,6 +563,7 @@ Opcionales:
 - `FACTURA_VIEW` habilita operaciones de consulta de facturación.
 - Admin (rol/nivel administrativo configurado por `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`; incluye usuario `ADMIN`) mantiene bypass total front/back para consultar/editar/eliminar; no requiere enrolamiento front ni permiso backend adicional.
 - Facturación no se controla con `USR_MOD_SUC`; no se debe exigir registro de admin en `USR_MOD_SUC` para operar facturación.
+- En unificación de facturación (`/facturacion/unificaciones/*`), la gestión no se debe restringir por `user.suc` del JWT cuando el usuario ya tiene permisos de gestión.
 
 ## Ejecucion
 
