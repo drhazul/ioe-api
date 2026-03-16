@@ -86,6 +86,15 @@
 - facturación pendientes paginada (2026-03-13): el filtrado se aplica server-side sobre todo el universo (`ESTATUS IN ('PENDIENTE','CANCELACION PENDIENTE')`) y ordena por `FCN DESC`.
 - facturación pendientes paginada (2026-03-13): la respuesta incluye `data`, `total`, `page`, `pageSize`, `totalPages`, `hasPrevPage`, `hasNextPage`.
 - facturación pendientes base SQL (2026-03-13): la consulta de listado parte de `SELECT FAC_SVR_SHAP.* FROM FAC_SVR_SHAP WHERE ESTATUS IN ('PENDIENTE','CANCELACION PENDIENTE') ORDER BY FCN DESC`; los filtros opcionales se agregan encima de esa base.
+- facturación pendientes formato IMPT (2026-03-15): el backend redondea `IMPT` a 2 decimales en la respuesta de `GET /facturacion/pendientes` para evitar variaciones por precisión.
+- validación facturación detalle (2026-03-14): `GET /facturacion/:idFol/validar` incorpora `detalleArticulos` (fuente `FACT_TICKET_SHP`) con columnas `IDFOL`, `UPC`, `Descripcion`, `ClaveProdServ`, `Unidad`, `Cantidad`, `ValorUnitario`, `PVTAT`, `Impuesto`, `Total`, además de `totalesDetalle` para UI.
+- validación facturación redondeo (2026-03-14): en `GET /facturacion/:idFol/validar`, la conciliación de importes usa redondeo fijo a 2 decimales para `totales.cabecera`, `totales.detalle` y `totales.diferencia`, evitando ruido por precisiones mayores.
+- almacenamiento CFDI con alternancia (2026-03-15): `FacturacionService.saveCfdiArtifacts` intenta guardado en rutas candidatas (`CFDI_STORAGE_BASE_PATH`, `CFDI_STORAGE_BASE_PATH_ALT`, `CFDI_STORAGE_BASE_PATH_DEV/PROD`, `CFDI_STORAGE_BASE_PATHS` y defaults por SO); ante error en una ruta, prueba la siguiente.
+- conciliación facturación en origen VF (2026-03-15): `sp_fact_sync_folio_vf` recalcula al final `FAC_SVR_SHAP.IMPT` desde `FACT_TICKET_SHP` con suma por renglón `ROUND(PVTAT + ROUND(PVTAT*0.16,2),2)` para evitar descuadres de centavos entre cabecera y detalle.
+- saneamiento histórico facturación (2026-03-15): `sql/2026-03-15_facturacion_reconcile_impt_from_detail.sql` corrige folios existentes (`PENDIENTE`/`CANCELACION PENDIENTE`) ajustando `FAC_SVR_SHAP.IMPT` con base en su detalle.
+- trazabilidad UI facturación (2026-03-15): mejoras visuales de grilla en `ioe_app` (scroll horizontal visible, alineación de encabezados/valores y formato `IMPT` a 2 decimales) no requieren cambios backend.
+- trazabilidad UI facturación tipografía (2026-03-15): `ioe_app` incorpora modal de configuración visual para ajustar escala global y fuentes por componente (AppBar, títulos, labels, body, botones y tabla), sin impacto de contrato API.
+- trazabilidad UI facturación columnas (2026-03-15): `ioe_app` habilita ajuste persistente de ancho por columna/separación entre campos (`SharedPreferences`) y separadores arrastrables en encabezado de grilla, sin cambios backend.
 - facturación pendientes seguridad funcional (2026-03-13): el endpoint no fuerza `SUC` por token; la sucursal se controla mediante el filtro explícito `suc` cuando el usuario la captura.
 - `GET /pvctrfolasvr` (optimizacion 2026-03): soporta query params `suc`, `opv`, `search` para panel de cotizaciones, con filtro SQL por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - Compatibilidad query cotizaciones (2026-03): `ListPvCtrFolAsvrQueryDto` tolera parametro opcional `_` para clientes legacy que usen cache-buster, evitando `400 property _ should not exist`.
@@ -512,6 +521,14 @@
 - Admin (roleId `1`) mantiene bypass por rol.
 - Compatibilidad legacy: cuando no existan filas activas en `USR_MOD_SUC` para ese modulo, se permite fallback a `user.suc`.
 - Esta validacion debe ejecutarse en backend tanto en lectura como en escritura; el frontend solo refleja la seleccion permitida.
+
+## Regla principal FACTURA / FACTURA_VIEW (obligatoria)
+
+- Usar esta regla como base al crear endpoints, rutas y consultas de facturación.
+- `FACTURA` (compat: `FACTURACION`, `PV_FACTURACION`, `FACT_IOE`) habilita operaciones de gestión (editar/emitir/cancelar/reversar).
+- `FACTURA_VIEW` habilita operaciones de consulta.
+- Admin (rol/nivel administrativo configurado por `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`; incluye usuario `ADMIN`) tiene bypass total front/back para consultar/editar/eliminar en facturación; no requiere alta en enrolamientos ni permisos adicionales.
+- Facturación no se autoriza por `USR_MOD_SUC`; no se debe exigir registro de admin en `USR_MOD_SUC`.
 
 ## Caja General: autorizacion por sucursal
 

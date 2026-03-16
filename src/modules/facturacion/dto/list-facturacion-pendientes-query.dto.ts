@@ -14,6 +14,8 @@ const ESTATUS_FACTURACION = [
   'TODOS',
   'PENDIENTE',
   'CANCELACION PENDIENTE',
+  'FACTURADO',
+  'FACTURADO Y CANCELACION PENDIENTE',
 ] as const;
 
 const normalizeText = (value: unknown) => {

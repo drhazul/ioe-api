@@ -72,6 +72,8 @@ BEGIN
   DECLARE @valorUnitExpr NVARCHAR(256);
   DECLARE @importeExpr NVARCHAR(512);
   DECLARE @detailRows INT = 0;
+  DECLARE @subtotalFromDetail MONEY = NULL;
+  DECLARE @totalFromDetail MONEY = NULL;
 
   DECLARE @tramRows INT = 0;
 
@@ -671,6 +673,43 @@ BEGIN
     ELSE
     BEGIN
       SET @detailRows = 0;
+    END;
+
+    IF COL_LENGTH('dbo.FACT_TICKET_SHP', 'PVTAT') IS NOT NULL
+    BEGIN
+      SELECT
+        @subtotalFromDetail = ROUND(SUM(ISNULL(PVTAT, 0)), 2),
+        @totalFromDetail = ROUND(
+          SUM(
+            CASE
+              WHEN @reqf = 1
+                THEN ROUND(ISNULL(PVTAT, 0) + ROUND(ISNULL(PVTAT, 0) * 0.16, 2), 2)
+              ELSE ISNULL(PVTAT, 0)
+            END
+          ),
+          2
+        )
+      FROM dbo.FACT_TICKET_SHP
+      WHERE IDFOL = @idfolActual;
+
+      SET @subtotal = ISNULL(@subtotalFromDetail, 0);
+      SET @totalFinal = ISNULL(@totalFromDetail, 0);
+      SET @iva = ROUND(@totalFinal - @subtotal, 2);
+      SET @estatusFinal = CASE WHEN @totalFinal > @epsilon THEN 'PENDIENTE' ELSE 'VTA DEV' END;
+
+      IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'IMPT') IS NOT NULL
+      BEGIN
+        UPDATE dbo.FAC_SVR_SHAP
+        SET IMPT = @totalFinal
+        WHERE IDFOL = @idfolActual;
+      END;
+
+      IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'ESTATUS') IS NOT NULL
+      BEGIN
+        UPDATE dbo.FAC_SVR_SHAP
+        SET ESTATUS = @estatusFinal
+        WHERE IDFOL = @idfolActual;
+      END;
     END;
 
     IF OBJECT_ID('dbo.CTROL_TRAMISIONES') IS NOT NULL

@@ -29,10 +29,11 @@ export class FacturifyClient {
   }
 
   private getCancelPath() {
-    return (
-      this.config.get<string>('FACTURIFY_CANCEL_PATH') ||
-      '/api/v1/invoice/cancel'
-    );
+    const configured = String(
+      this.config.get<string>('FACTURIFY_CANCEL_PATH') || '',
+    ).trim();
+    if (configured.length) return configured;
+    return '/api/v1/factura/{cfdi_uuid}/cancel/';
   }
 
   private getEmailPath() {
@@ -142,15 +143,51 @@ export class FacturifyClient {
     };
   }
 
+  private buildCancelUrl(cfdiUuid: string) {
+    const baseUrl = this.getBaseUrl().replace(/\/+$/, '');
+    const rawPath = this.getCancelPath().trim();
+    const normalizedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+
+    if (normalizedPath.includes('{cfdi_uuid}')) {
+      const resolved = normalizedPath.replace(
+        '{cfdi_uuid}',
+        encodeURIComponent(cfdiUuid),
+      );
+      return `${baseUrl}${resolved}`;
+    }
+
+    // Compatibilidad con configuración legacy (ruta fija /invoice/cancel).
+    if (/\/api\/v1\/invoice\/cancel\/?$/i.test(normalizedPath)) {
+      return `${baseUrl}/api/v1/factura/${encodeURIComponent(cfdiUuid)}/cancel/`;
+    }
+
+    // Si se configuró una ruta ya dinámica, la usamos tal cual.
+    if (
+      /\/api\/v1\/factura\/[^/]+\/cancel\/?$/i.test(normalizedPath) ||
+      /\/cancel\/?$/i.test(normalizedPath)
+    ) {
+      return `${baseUrl}${normalizedPath}`;
+    }
+
+    return `${baseUrl}${normalizedPath.replace(/\/+$/, '')}/${encodeURIComponent(cfdiUuid)}/cancel/`;
+  }
+
   async cancelInvoice(payload: Record<string, unknown>) {
     const auth = await this.requestToken();
-    const resp = await fetch(`${this.getBaseUrl()}${this.getCancelPath()}`, {
-      method: 'POST',
+    const cfdiUuid = String(payload?.cfdi_uuid ?? '').trim();
+    if (!cfdiUuid) {
+      throw new ServiceUnavailableException(
+        'Facturify cancelación requiere cfdi_uuid',
+      );
+    }
+    const cancelUrl = this.buildCancelUrl(cfdiUuid);
+    const resp = await fetch(cancelUrl, {
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${auth.token}`,
+        'cache-control': 'no-cache',
       },
-      body: JSON.stringify(payload),
     });
 
     const raw = await resp.text();
@@ -230,6 +267,143 @@ export class FacturifyClient {
       ok: resp.ok,
       status: resp.status,
       data,
+    };
+  }
+
+  private buildInvoiceAssetUrl(cfdiUuid: string, asset: 'pdf' | 'xml') {
+    const base = this.getBaseUrl().replace(/\/+$/, '');
+    const uuid = encodeURIComponent(String(cfdiUuid ?? '').trim());
+    const suffix = asset === 'pdf' ? '/pdf/' : '/xml';
+    return `${base}/api/v1/factura/${uuid}${suffix}`;
+  }
+
+  private parseJsonSafe(raw: string) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async getInvoicePdf(cfdiUuid: string) {
+    const auth = await this.requestToken();
+    const url = this.buildInvoiceAssetUrl(cfdiUuid, 'pdf');
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        'cache-control': 'no-cache',
+      },
+    });
+
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    const contentType = String(resp.headers.get('content-type') ?? '').toLowerCase();
+    const rawText = buffer.toString('utf8');
+
+    if (!resp.ok) {
+      return {
+        ok: false,
+        status: resp.status,
+        data: this.parseJsonSafe(rawText) ?? rawText,
+      };
+    }
+
+    if (contentType.includes('application/json')) {
+      const parsed = this.parseJsonSafe(rawText) ?? {};
+      const data = parsed?.data ?? {};
+      const candidates = [
+        parsed?.pdf,
+        parsed?.PDF,
+        data?.pdf,
+        data?.PDF,
+      ];
+      const pdfBase64 = candidates.find(
+        (item) => typeof item === 'string' && item.trim().length > 0,
+      ) as string | undefined;
+      if (pdfBase64) {
+        return {
+          ok: true,
+          status: resp.status,
+          pdfBase64: pdfBase64.trim(),
+          contentType,
+          data: parsed,
+        };
+      }
+      return {
+        ok: false,
+        status: 502,
+        data: parsed,
+      };
+    }
+
+    return {
+      ok: true,
+      status: resp.status,
+      pdfBase64: buffer.toString('base64'),
+      contentType,
+    };
+  }
+
+  async getInvoiceXml(cfdiUuid: string) {
+    const auth = await this.requestToken();
+    const url = this.buildInvoiceAssetUrl(cfdiUuid, 'xml');
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        'cache-control': 'no-cache',
+      },
+    });
+
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    const contentType = String(resp.headers.get('content-type') ?? '').toLowerCase();
+    const rawText = buffer.toString('utf8');
+
+    if (!resp.ok) {
+      return {
+        ok: false,
+        status: resp.status,
+        data: this.parseJsonSafe(rawText) ?? rawText,
+      };
+    }
+
+    if (contentType.includes('application/json')) {
+      const parsed = this.parseJsonSafe(rawText) ?? {};
+      const data = parsed?.data ?? {};
+      const candidates = [
+        parsed?.xml,
+        parsed?.XML,
+        data?.xml,
+        data?.XML,
+      ];
+      const xmlText = candidates.find(
+        (item) => typeof item === 'string' && item.trim().length > 0,
+      ) as string | undefined;
+      if (xmlText) {
+        const normalized = xmlText.trim();
+        const xmlBase64 = normalized.startsWith('<')
+          ? Buffer.from(normalized, 'utf8').toString('base64')
+          : normalized;
+        return {
+          ok: true,
+          status: resp.status,
+          xmlBase64,
+          contentType,
+          data: parsed,
+        };
+      }
+      return {
+        ok: false,
+        status: 502,
+        data: parsed,
+      };
+    }
+
+    return {
+      ok: true,
+      status: resp.status,
+      xmlBase64: buffer.toString('base64'),
+      contentType,
     };
   }
 

@@ -66,6 +66,10 @@ Opcionales:
 - `CORS_ORIGINS`
 - `ADMIN_ROLE_IDS`, `ADMIN_ROLE_ID`, `ADMIN_NIVELES`, `ADMIN_NIVEL`
 - `PV_DEV_ORD_BLOCK_THRESHOLD` (default `5`, regla bloqueante ORD en devoluciones PV)
+- `CFDI_STORAGE_BASE_PATH` (ruta primaria de guardado XML/PDF)
+- `CFDI_STORAGE_BASE_PATH_ALT` (ruta alternativa; útil para UNC en desarrollo, ej. `\\192.168.10.234\ArchivosUsuarios\respaldoCFDI`)
+- `CFDI_STORAGE_BASE_PATH_DEV`, `CFDI_STORAGE_BASE_PATH_PROD` (rutas por entorno)
+- `CFDI_STORAGE_BASE_PATHS` (lista extra separada por `;` o `,` para fallback)
 
 ## Modulos y endpoints principales
 
@@ -105,6 +109,15 @@ Opcionales:
 - facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` acepta filtros server-side `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
 - facturación pendientes paginada (2026-03-13): la consulta ordena por `FCN DESC` sobre todo el conjunto y responde `{ data, total, page, pageSize, totalPages, hasPrevPage, hasNextPage }`.
 - facturación pendientes base SQL (2026-03-13): el listado parte de `FAC_SVR_SHAP` con estatus `PENDIENTE`/`CANCELACION PENDIENTE` y orden `FCN DESC`; filtros opcionales se aplican sobre esa consulta base.
+- facturación pendientes formato IMPT (2026-03-15): `listarPendientes` normaliza `IMPT` a 2 decimales en la respuesta para consistencia de visualización en frontend.
+- validación de facturación con detalle (2026-03-14): `GET /facturacion/:idFol/validar` retorna `detalleArticulos` desde `FACT_TICKET_SHP` (`IDFOL`, `UPC`, `Descripcion`, `ClaveProdServ`, `Unidad`, `Cantidad`, `ValorUnitario`, `PVTAT`, `Impuesto`, `Total`) y `totalesDetalle` para el popup de validación en frontend.
+- validación de importes facturación (2026-03-14): la comparación `cabecera vs detalle` en `GET /facturacion/:idFol/validar` se redondea siempre a 2 decimales (`totales.cabecera`, `totales.detalle`, `totales.diferencia`) para depurar desfases de centavos.
+- almacenamiento CFDI con alternancia (2026-03-15): `saveCfdiArtifacts` intenta guardado en rutas candidatas (`CFDI_STORAGE_BASE_PATH`, `_ALT`, `_DEV/_PROD`, `_PATHS` y defaults por SO). Si falla una ruta, prueba la siguiente antes de devolver error.
+- conciliación de centavos en origen VF (2026-03-15): `sp_fact_sync_folio_vf` recalcula `FAC_SVR_SHAP.IMPT` desde el detalle insertado en `FACT_TICKET_SHP` usando la suma por línea `ROUND(PVTAT + ROUND(PVTAT*0.16,2),2)`; con esto cabecera/detalle quedan alineados desde el cierre.
+- saneamiento histórico facturación (2026-03-15): script `sql/2026-03-15_facturacion_reconcile_impt_from_detail.sql` ajusta `FAC_SVR_SHAP.IMPT` para folios `PENDIENTE`/`CANCELACION PENDIENTE` en base al detalle existente.
+- trazabilidad UI facturación (2026-03-15): el ajuste visual de la grilla (scroll horizontal visible, alineación encabezados/valores y `IMPT` a 2 decimales) se resolvió en `ioe_app` sin cambios de contrato API.
+- trazabilidad UI facturación tipografía (2026-03-15): `ioe_app` usa configuración visual por modal para ajustar escala global y fuentes por componente (AppBar, títulos, labels, body, botones, header/celdas), sin impacto en endpoints.
+- trazabilidad UI facturación columnas (2026-03-15): `ioe_app` agrega ajuste persistente de ancho por columna y separación entre campos (cache local `SharedPreferences`), además de separadores arrastrables en el encabezado; no cambia contrato API.
 - Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.
 - `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
@@ -541,6 +554,14 @@ Opcionales:
 - Trazabilidad UI (ioe_app): en la exportacion Excel de caja general, los importes de `RESUMEN DIA` y `DETALLE TRANSACCIONES` se exportan como numericos con formato moneda (sin cambio de contrato API).
 - `admin` (roleId `1`) mantiene bypass por rol.
 - Frontend no es control de seguridad: validacion efectiva se hace en API.
+
+## Regla principal FACTURA / FACTURA_VIEW (endpoints, rutas y consultas)
+- Toda nueva API/ruta/consulta de facturación debe aplicar esta regla desde su creación.
+- Acceso por módulo front:
+- `FACTURA` (compatibilidad: `FACTURACION`, `PV_FACTURACION`, `FACT_IOE`) habilita operaciones de gestión: emitir, refrescar, reenviar, cancelar, unificar/reversar.
+- `FACTURA_VIEW` habilita operaciones de consulta de facturación.
+- Admin (rol/nivel administrativo configurado por `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`; incluye usuario `ADMIN`) mantiene bypass total front/back para consultar/editar/eliminar; no requiere enrolamiento front ni permiso backend adicional.
+- Facturación no se controla con `USR_MOD_SUC`; no se debe exigir registro de admin en `USR_MOD_SUC` para operar facturación.
 
 ## Ejecucion
 

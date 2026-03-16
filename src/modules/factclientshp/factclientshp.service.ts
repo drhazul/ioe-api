@@ -6,13 +6,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, EntityManager, QueryFailedError, Repository } from 'typeorm';
 import { FactClientShpEntity } from './factclientshp.entity';
 import { CreateFactClientShpDto } from './dto/create-factclientshp.dto';
 import { UpdateFactClientShpDto } from './dto/update-factclientshp.dto';
 
 @Injectable()
 export class FactClientShpService {
+  private facSvrShapColumnsCache: Set<string> | null = null;
+
   constructor(
     @InjectRepository(FactClientShpEntity)
     private readonly repo: Repository<FactClientShpEntity>,
@@ -35,6 +37,82 @@ export class FactClientShpService {
 
   private isAdmin(user?: { roleId?: number } | null) {
     return Number(user?.roleId ?? 0) === 1;
+  }
+
+  private async getFacSvrShapColumns(manager: EntityManager) {
+    if (this.facSvrShapColumnsCache) return this.facSvrShapColumnsCache;
+
+    const tableRows = await manager.query(
+      "SELECT CASE WHEN OBJECT_ID('dbo.FAC_SVR_SHAP','U') IS NULL THEN 0 ELSE 1 END AS HAS_TABLE",
+    );
+    const hasTable = Number((tableRows?.[0] ?? {}).HAS_TABLE ?? 0) === 1;
+    if (!hasTable) {
+      this.facSvrShapColumnsCache = new Set<string>();
+      return this.facSvrShapColumnsCache;
+    }
+
+    const colsRows = await manager.query(
+      `SELECT UPPER(name) AS COL
+       FROM sys.columns
+       WHERE object_id = OBJECT_ID('dbo.FAC_SVR_SHAP')`,
+    );
+
+    this.facSvrShapColumnsCache = new Set<string>(
+      (colsRows ?? [])
+        .map((row: Record<string, unknown>) =>
+          String(row.COL ?? '')
+            .trim()
+            .toUpperCase(),
+        )
+        .filter((value: string) => value.length > 0),
+    );
+    return this.facSvrShapColumnsCache;
+  }
+
+  private async syncPendingFacSvrShapByCliente(
+    manager: EntityManager,
+    cliente: FactClientShpEntity,
+  ) {
+    const columns = await this.getFacSvrShapColumns(manager);
+    if (!columns.size) return;
+
+    const clienColumn = columns.has('CLIEN')
+      ? 'CLIEN'
+      : columns.has('CLIENTE')
+      ? 'CLIENTE'
+      : null;
+    if (!clienColumn) return;
+
+    const setClauses: string[] = [];
+    const params: unknown[] = [cliente.IDC];
+    const addParam = (value: unknown) => {
+      params.push(value);
+      return `@${params.length - 1}`;
+    };
+
+    const addSet = (column: string, value: unknown) => {
+      if (!columns.has(column.toUpperCase())) return;
+      setClauses.push(`${column}=${addParam(value)}`);
+    };
+
+    addSet('RazonSocialReceptor', cliente.RAZONSOCIALRECEPTOR ?? null);
+    addSet('RfcReceptor', cliente.RFCRECEPTOR ?? null);
+    addSet('EmailReceptor', cliente.EMAILRECEPTOR ?? null);
+    addSet('RfcEmisor', cliente.RFCEMISOR ?? null);
+    addSet('UsoCfdi', cliente.USOCFDI ?? null);
+    addSet('CodigoPostalReceptor', cliente.CODIGOPOSTALRECEPTOR ?? null);
+    addSet('RegimenFiscalReceptor', cliente.REGIMENFISCALRECEPTOR ?? null);
+
+    if (!setClauses.length) return;
+
+    const estatusParam = addParam('PENDIENTE');
+    await manager.query(
+      `UPDATE FAC_SVR_SHAP
+         SET ${setClauses.join(', ')}
+       WHERE ${clienColumn}=@0
+         AND UPPER(LTRIM(RTRIM(ISNULL(CAST(ESTATUS AS NVARCHAR(255)), ''))))=${estatusParam}`,
+      params,
+    );
   }
 
   findAll(user?: { roleId?: number; suc?: string | null }) {
@@ -89,7 +167,7 @@ export class FactClientShpService {
     if (!usoCfdi) throw new BadRequestException('UsoCfdi requerido');
 
     const regimenFiscal = this.parseRegimenFiscal(dto.REGIMENFISCALRECEPTOR);
-    if (!Number.isFinite(regimenFiscal)) {
+    if (!Number.isFinite(regimenFiscal) || regimenFiscal <= 0) {
       throw new BadRequestException('RegimenFiscalReceptor inválido');
     }
 
@@ -199,12 +277,20 @@ export class FactClientShpService {
       partial.EMAILRECEPTOR = dto.EMAILRECEPTOR;
     if (dto.RFCEMISOR !== undefined) partial.RFCEMISOR = dto.RFCEMISOR;
     if (dto.OPTICA !== undefined) partial.OPTICA = dto.OPTICA ?? null;
-    if (dto.USOCFDI !== undefined) partial.USOCFDI = dto.USOCFDI;
+    if (dto.USOCFDI !== undefined) {
+      const usoCfdi = this.normalizeUsoCfdi(dto.USOCFDI ?? '');
+      if (!usoCfdi) throw new BadRequestException('UsoCfdi requerido');
+      partial.USOCFDI = usoCfdi;
+    }
     if (dto.CODIGOPOSTALRECEPTOR !== undefined) {
       partial.CODIGOPOSTALRECEPTOR = dto.CODIGOPOSTALRECEPTOR;
     }
     if (dto.REGIMENFISCALRECEPTOR !== undefined) {
-      partial.REGIMENFISCALRECEPTOR = dto.REGIMENFISCALRECEPTOR;
+      const regimenFiscal = this.parseRegimenFiscal(dto.REGIMENFISCALRECEPTOR);
+      if (!Number.isFinite(regimenFiscal) || regimenFiscal <= 0) {
+        throw new BadRequestException('RegimenFiscalReceptor inválido');
+      }
+      partial.REGIMENFISCALRECEPTOR = regimenFiscal;
     }
     if (dto.I_CRED !== undefined) partial.I_CRED = dto.I_CRED ?? null;
     if (dto.VF !== undefined) partial.VF = dto.VF ?? null;
@@ -220,7 +306,17 @@ export class FactClientShpService {
       partial.DESCUENTOAPLI = dto.DESCUENTOAPLI ?? null;
 
     const updated = this.repo.merge(row, partial);
-    return this.repo.save(updated);
+
+    return this.dataSource.transaction(async (manager) => {
+      const trxRepo = manager.getRepository(FactClientShpEntity);
+      const saved = await trxRepo.save(updated);
+      await this.syncPendingFacSvrShapByCliente(manager, saved);
+      const rows = await manager.query(
+        `SELECT TOP 1 * FROM ${this.repo.metadata.tablePath} WHERE IDC = @0`,
+        [saved.IDC],
+      );
+      return rows?.[0] ?? saved;
+    });
   }
 
   async remove(id: number) {

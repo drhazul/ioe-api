@@ -1,12 +1,17 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  InternalServerErrorException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryFailedError } from 'typeorm';
+import type { JwtPayload } from '../auth/jwt.strategy';
 import { FacturifyClient } from './facturify.client';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 type ListarPendientesInput = {
@@ -21,9 +26,48 @@ type ListarPendientesInput = {
   tipoFact?: string | null;
 };
 
+const FACTURIFY_REGIMEN_DESC_FALLBACK: Record<string, string> = {
+  '601': 'General de Ley Personas Morales',
+  '603': 'Personas Morales con Fines no Lucrativos',
+  '605': 'Sueldos y Salarios e Ingresos Asimilados a Salarios',
+  '606': 'Arrendamiento',
+  '607': 'Régimen de Enajenación o Adquisición de Bienes',
+  '608': 'Demás ingresos',
+  '610': 'Residentes en el Extranjero sin Establecimiento Permanente en México',
+  '611': 'Ingresos por Dividendos (socios y accionistas)',
+  '612': 'Personas Físicas con Actividades Empresariales y Profesionales',
+  '614': 'Ingresos por intereses',
+  '615': 'Régimen de los ingresos por obtención de premios',
+  '616': 'Sin obligaciones fiscales',
+  '620': 'Sociedades Cooperativas de Producción que optan por diferir sus ingresos',
+  '621': 'Incorporación Fiscal',
+  '622': 'Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras',
+  '623': 'Opcional para Grupos de Sociedades',
+  '624': 'Coordinados',
+  '625': 'Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas',
+  '626': 'Régimen Simplificado de Confianza',
+};
+
 @Injectable()
 export class FacturacionService {
+  private static readonly FACTURACION_WRITE_MODULE_CODES = [
+    'FACTURA',
+    'FACTURACION',
+    'PV_FACTURACION',
+    'FACT_IOE',
+  ] as const;
+
+  private static readonly FACTURACION_READ_MODULE_CODES = [
+    'FACTURA_VIEW',
+    ...FacturacionService.FACTURACION_WRITE_MODULE_CODES,
+  ] as const;
+
   private facSvrShapColumnsCache: Set<string> | null = null;
+  private factTicketShpColumnsCache: Set<string> | null = null;
+  private factClientShpColumnsCache: Set<string> | null = null;
+  private regimenByCodeCache: Map<string, string> | null = null;
+  private facturacionReadAccessCache = new Map<number, boolean>();
+  private facturacionWriteAccessCache = new Map<number, boolean>();
 
   constructor(
     private readonly dataSource: DataSource,
@@ -31,10 +75,56 @@ export class FacturacionService {
     private readonly config: ConfigService,
   ) {}
 
-  private getStorageBasePath() {
-    return (
-      this.config.get<string>('CFDI_STORAGE_BASE_PATH') || '/mnt/respaldoCFDI'
-    );
+  private getStorageBasePathCandidates() {
+    const env = String(
+      this.config.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? '',
+    )
+      .trim()
+      .toLowerCase();
+    const primary = String(
+      this.config.get<string>('CFDI_STORAGE_BASE_PATH') ?? '',
+    ).trim();
+    const dev = String(
+      this.config.get<string>('CFDI_STORAGE_BASE_PATH_DEV') ?? '',
+    ).trim();
+    const prod = String(
+      this.config.get<string>('CFDI_STORAGE_BASE_PATH_PROD') ?? '',
+    ).trim();
+    const alt = String(
+      this.config.get<string>('CFDI_STORAGE_BASE_PATH_ALT') ?? '',
+    ).trim();
+    const listRaw = String(
+      this.config.get<string>('CFDI_STORAGE_BASE_PATHS') ?? '',
+    ).trim();
+
+    const out: string[] = [];
+    const push = (raw?: string) => {
+      const value = String(raw ?? '').trim();
+      if (!value) return;
+      if (!out.includes(value)) out.push(value);
+    };
+
+    push(primary);
+    if (env === 'development' || env === 'dev' || env === 'local') {
+      push(dev);
+      push(alt);
+    } else {
+      push(prod);
+      push(alt);
+    }
+
+    for (const value of listRaw.split(/[;,]/g)) {
+      push(value);
+    }
+
+    if (process.platform === 'win32') {
+      push('\\\\192.168.10.234\\ArchivosUsuarios\\respaldoCFDI');
+      push('C:\\ArchivosUsuarios\\respaldoCFDI');
+    } else {
+      push('/mnt/respaldoCFDI');
+    }
+
+    return out;
   }
 
   private getAutoEmailOnSuccess() {
@@ -79,6 +169,66 @@ export class FacturacionService {
         .filter((col) => col.length > 0),
     );
     this.facSvrShapColumnsCache = cols;
+    return cols;
+  }
+
+  private async getFactTicketShpColumns(): Promise<Set<string>> {
+    if (this.factTicketShpColumnsCache) return this.factTicketShpColumnsCache;
+
+    const tableRows = await this.dataSource.query(
+      "SELECT CASE WHEN OBJECT_ID('dbo.FACT_TICKET_SHP','U') IS NULL THEN 0 ELSE 1 END AS HAS_TABLE",
+    );
+    const hasTable = Number((tableRows?.[0] ?? {}).HAS_TABLE ?? 0) === 1;
+    if (!hasTable) {
+      throw new NotFoundException('No existe tabla dbo.FACT_TICKET_SHP');
+    }
+
+    const colsRows = await this.dataSource.query(
+      `SELECT UPPER(name) AS COL
+       FROM sys.columns
+       WHERE object_id = OBJECT_ID('dbo.FACT_TICKET_SHP')`,
+    );
+
+    const cols = new Set<string>(
+      (colsRows ?? [])
+        .map((row) =>
+          String((row as Record<string, unknown>).COL ?? '')
+            .trim()
+            .toUpperCase(),
+        )
+        .filter((col) => col.length > 0),
+    );
+    this.factTicketShpColumnsCache = cols;
+    return cols;
+  }
+
+  private async getFactClientShpColumns(): Promise<Set<string>> {
+    if (this.factClientShpColumnsCache) return this.factClientShpColumnsCache;
+
+    const tableRows = await this.dataSource.query(
+      "SELECT CASE WHEN OBJECT_ID('dbo.FACT_CLIENT_SHP','U') IS NULL THEN 0 ELSE 1 END AS HAS_TABLE",
+    );
+    const hasTable = Number((tableRows?.[0] ?? {}).HAS_TABLE ?? 0) === 1;
+    if (!hasTable) {
+      throw new NotFoundException('No existe tabla dbo.FACT_CLIENT_SHP');
+    }
+
+    const colsRows = await this.dataSource.query(
+      `SELECT UPPER(name) AS COL
+       FROM sys.columns
+       WHERE object_id = OBJECT_ID('dbo.FACT_CLIENT_SHP')`,
+    );
+
+    const cols = new Set<string>(
+      (colsRows ?? [])
+        .map((row) =>
+          String((row as Record<string, unknown>).COL ?? '')
+            .trim()
+            .toUpperCase(),
+        )
+        .filter((col) => col.length > 0),
+    );
+    this.factClientShpColumnsCache = cols;
     return cols;
   }
 
@@ -186,6 +336,13 @@ export class FacturacionService {
       primary: 'UsoCfdi',
       defaultSql: 'CAST(NULL AS NVARCHAR(20))',
     });
+    const clienExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'CLIEN',
+      fallbackColumns: ['CLIENTE'],
+      defaultSql: 'CAST(NULL AS FLOAT)',
+    });
     const metodoPagoExpr = this.facColumnExpr({
       alias: 'f',
       columns,
@@ -212,7 +369,7 @@ export class FacturacionService {
       defaultSql: "CAST('01' AS NVARCHAR(5))",
     });
 
-    return `SELECT TOP 1 f.IDFOL, f.SUC, f.ESTATUS, ${tipoFactExpr}, f.IMPT, ${autExpr}, ${reqfExpr}, ${rfcEmisorExpr}, ${rfcReceptorExpr}, ${razonSocialExpr}, ${usoCfdiExpr}, ${metodoPagoExpr}, ${formaPagoExpr}, ${formaPagoSatExpr}, ${exportacionExpr}
+    return `SELECT TOP 1 f.IDFOL, f.SUC, f.ESTATUS, ${tipoFactExpr}, f.IMPT, ${autExpr}, ${reqfExpr}, ${clienExpr}, ${rfcEmisorExpr}, ${rfcReceptorExpr}, ${razonSocialExpr}, ${usoCfdiExpr}, ${metodoPagoExpr}, ${formaPagoExpr}, ${formaPagoSatExpr}, ${exportacionExpr}
             FROM FAC_SVR_SHAP f
             WHERE f.IDFOL=@0`;
   }
@@ -222,41 +379,269 @@ export class FacturacionService {
     pdfBase64?: string | null;
     metadata?: Record<string, unknown>;
   }) {
-    const folder = join(this.getStorageBasePath(), this.dayFolder(), input.idFol);
-    await mkdir(folder, { recursive: true });
+    const attempts: string[] = [];
+    const candidates = this.getStorageBasePathCandidates();
 
-    const paths: Record<string, string | null> = {
-      folder,
-      xml: null,
-      pdf: null,
-      metadata: null,
-    };
+    for (const basePath of candidates) {
+      const folder = join(basePath, this.dayFolder(), input.idFol);
+      const paths: Record<string, string | null> = {
+        folder,
+        xml: null,
+        pdf: null,
+        metadata: null,
+      };
 
-    if (input.xmlBase64) {
-      const xmlPath = join(folder, 'cfdi.xml');
-      await writeFile(xmlPath, Buffer.from(input.xmlBase64, 'base64'));
-      paths.xml = xmlPath;
+      try {
+        await mkdir(folder, { recursive: true });
+
+        if (input.xmlBase64) {
+          const xmlPath = join(folder, 'cfdi.xml');
+          await writeFile(xmlPath, Buffer.from(input.xmlBase64, 'base64'));
+          paths.xml = xmlPath;
+        }
+
+        if (input.pdfBase64) {
+          const pdfPath = join(folder, 'cfdi.pdf');
+          await writeFile(pdfPath, Buffer.from(input.pdfBase64, 'base64'));
+          paths.pdf = pdfPath;
+        }
+
+        const metadataPath = join(folder, 'facturify-response.json');
+        await writeFile(
+          metadataPath,
+          JSON.stringify(input.metadata ?? {}, null, 2),
+          'utf8',
+        );
+        paths.metadata = metadataPath;
+
+        return paths;
+      } catch (error) {
+        const detail =
+          error instanceof Error
+            ? error.message
+            : JSON.stringify(error ?? {}).slice(0, 180);
+        attempts.push(`${basePath} -> ${detail}`);
+      }
     }
 
-    if (input.pdfBase64) {
-      const pdfPath = join(folder, 'cfdi.pdf');
-      await writeFile(pdfPath, Buffer.from(input.pdfBase64, 'base64'));
-      paths.pdf = pdfPath;
-    }
-
-    const metadataPath = join(folder, 'facturify-response.json');
-    await writeFile(
-      metadataPath,
-      JSON.stringify(input.metadata ?? {}, null, 2),
-      'utf8',
+    throw new InternalServerErrorException(
+      `No se pudo guardar XML/PDF/metadata en ninguna ruta configurada. Intentos: ${attempts.join(' | ')}`,
     );
-    paths.metadata = metadataPath;
-
-    return paths;
   }
 
-  async listarPendientes(input: ListarPendientesInput = {}) {
+  private async readFileBase64IfExists(pathValue: unknown) {
+    const filePath = String(pathValue ?? '').trim();
+    if (!filePath) return null;
+    try {
+      await access(filePath, fsConstants.F_OK);
+      const bytes = await readFile(filePath);
+      if (!bytes.length) return null;
+      return bytes.toString('base64');
+    } catch {
+      return null;
+    }
+  }
+
+  async obtenerArtefactos(idFolRaw: string, user?: JwtPayload | null) {
+    const idFol = this.normalizeText(idFolRaw);
+    if (!idFol) {
+      throw new BadRequestException('IDFOL es requerido');
+    }
+    await this.assertFacturacionReadAccess(user, 'consultar artefactos CFDI');
+
     const columns = await this.getFacSvrShapColumns();
+    const sucExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'SUC',
+      defaultSql: "CAST('' AS NVARCHAR(40))",
+    });
+    const uuidExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'CFDI_UUID',
+      defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+    });
+    const xmlPathExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'CFDI_XML_PATH',
+      defaultSql: 'CAST(NULL AS NVARCHAR(500))',
+    });
+    const pdfPathExpr = this.facColumnExpr({
+      alias: 'f',
+      columns,
+      primary: 'CFDI_PDF_PATH',
+      defaultSql: 'CAST(NULL AS NVARCHAR(500))',
+    });
+
+    const rows = await this.dataSource.query(
+      `SELECT TOP 1
+          f.IDFOL,
+          ${sucExpr},
+          ${uuidExpr},
+          ${xmlPathExpr},
+          ${pdfPathExpr}
+       FROM FAC_SVR_SHAP f
+       WHERE UPPER(LTRIM(RTRIM(ISNULL(CAST(f.IDFOL AS NVARCHAR(255)), ''))))=@0`,
+      [this.normalizeUpper(idFol)],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException(`Folio ${idFol} no existe`);
+    }
+
+    const row = (rows[0] ?? {}) as Record<string, unknown>;
+    const rowIdFol = this.normalizeText(row.IDFOL) || idFol;
+    const rowSuc = this.normalizeUpper(row.SUC);
+    const canWrite = await this.hasFacturacionWriteAccess(user);
+    if (!canWrite) {
+      const userSuc = this.normalizeUpper(user?.suc ?? '');
+      if (!userSuc || userSuc === '000' || (rowSuc && rowSuc !== userSuc)) {
+        throw new ForbiddenException(
+          `No autorizado para consultar artefactos del folio ${rowIdFol}`,
+        );
+      }
+    }
+
+    const uuid = this.normalizeText(row.CFDI_UUID);
+    let xmlPath = this.normalizeText(row.CFDI_XML_PATH) || null;
+    let pdfPath = this.normalizeText(row.CFDI_PDF_PATH) || null;
+    let xmlBase64 = await this.readFileBase64IfExists(xmlPath);
+    let pdfBase64 = await this.readFileBase64IfExists(pdfPath);
+
+    let downloadedPdf = false;
+    let downloadedXml = false;
+    const downloadErrors: string[] = [];
+
+    if ((!pdfBase64 || !xmlBase64) && uuid) {
+      this.facturify.assertCredentials();
+
+      let fetchedPdfBase64 = pdfBase64;
+      let fetchedXmlBase64 = xmlBase64;
+
+      if (!fetchedPdfBase64) {
+        const pdfRemote = await this.facturify.getInvoicePdf(uuid);
+        const candidate = this.normalizeText(
+          (pdfRemote as Record<string, unknown>).pdfBase64,
+        );
+        if (pdfRemote.ok && candidate) {
+          fetchedPdfBase64 = candidate;
+          downloadedPdf = true;
+        } else if (!pdfRemote.ok) {
+          const detail = this.normalizeText(
+            (pdfRemote as Record<string, unknown>).data,
+          );
+          downloadErrors.push(
+            detail || `No se pudo descargar PDF (status ${pdfRemote.status})`,
+          );
+        }
+      }
+
+      if (!fetchedXmlBase64) {
+        const xmlRemote = await this.facturify.getInvoiceXml(uuid);
+        const candidate = this.normalizeText(
+          (xmlRemote as Record<string, unknown>).xmlBase64,
+        );
+        if (xmlRemote.ok && candidate) {
+          fetchedXmlBase64 = candidate;
+          downloadedXml = true;
+        } else if (!xmlRemote.ok) {
+          const detail = this.normalizeText(
+            (xmlRemote as Record<string, unknown>).data,
+          );
+          downloadErrors.push(
+            detail || `No se pudo descargar XML (status ${xmlRemote.status})`,
+          );
+        }
+      }
+
+      if (fetchedPdfBase64 || fetchedXmlBase64) {
+        const storage = await this.saveCfdiArtifacts({
+          idFol: rowIdFol,
+          xmlBase64: fetchedXmlBase64 ?? null,
+          pdfBase64: fetchedPdfBase64 ?? null,
+          metadata: {
+            source: 'facturify_artifact_fetch',
+            idFol: rowIdFol,
+            uuid,
+            downloadedPdf,
+            downloadedXml,
+          },
+        });
+
+        if (storage.xml) xmlPath = storage.xml;
+        if (storage.pdf) pdfPath = storage.pdf;
+        xmlBase64 = fetchedXmlBase64;
+        pdfBase64 = fetchedPdfBase64;
+
+        const setSql: string[] = [];
+        const params: unknown[] = [rowIdFol];
+        const addParam = (value: unknown) => {
+          params.push(value);
+          return `@${params.length - 1}`;
+        };
+
+        if (columns.has('CFDI_XML_PATH') && xmlPath) {
+          setSql.push(`CFDI_XML_PATH=${addParam(xmlPath)}`);
+        }
+        if (columns.has('CFDI_PDF_PATH') && pdfPath) {
+          setSql.push(`CFDI_PDF_PATH=${addParam(pdfPath)}`);
+        }
+
+        if (setSql.length) {
+          await this.dataSource.query(
+            `UPDATE FAC_SVR_SHAP
+               SET ${setSql.join(', ')}
+             WHERE IDFOL=@0`,
+            params,
+          );
+        }
+      }
+    }
+
+    if (!pdfBase64 && !xmlBase64) {
+      throw new NotFoundException(
+        `No hay PDF/XML local para ${rowIdFol} y no fue posible descargarlo`,
+      );
+    }
+
+    return {
+      ok: true,
+      idFol: rowIdFol,
+      uuid: uuid || null,
+      storage: {
+        xml: xmlPath,
+        pdf: pdfPath,
+      },
+      downloaded: {
+        pdf: downloadedPdf,
+        xml: downloadedXml,
+      },
+      downloadErrors,
+      pdfBase64: pdfBase64 ?? null,
+      xmlBase64: xmlBase64 ?? null,
+    };
+  }
+
+  async listarPendientes(
+    input: ListarPendientesInput = {},
+    user?: JwtPayload | null,
+  ) {
+    await this.assertFacturacionReadAccess(user, 'consultar facturación');
+    const columns = await this.getFacSvrShapColumns();
+    const canWrite = await this.hasFacturacionWriteAccess(user);
+    const forcedUserSuc = canWrite ? null : this.normalizeUpper(user?.suc ?? '');
+    if (!canWrite && (!forcedUserSuc || forcedUserSuc === '000')) {
+      return {
+        data: [],
+        total: 0,
+        page: 1,
+        pageSize: Math.min(Math.max(Number(input.pageSize ?? 20) || 20, 1), 200),
+        totalPages: 0,
+        hasPrevPage: false,
+        hasNextPage: false,
+      };
+    }
     const selectSql = await this.buildPendientesSelectSql();
     const rawPage = Number(input.page ?? 1);
     const page =
@@ -310,13 +695,20 @@ export class FacturacionService {
       }),
     );
 
-    const where: string[] = [
-      `${statusExpr} IN (${addParam('PENDIENTE')}, ${addParam('CANCELACION PENDIENTE')})`,
-    ];
-
     const filterEstatus = this.normalizeTextFilter(input.estatus);
-    if (filterEstatus && filterEstatus !== 'TODOS') {
+    const where: string[] = [];
+    if (filterEstatus === 'FACTURADO') {
+      where.push(`${statusExpr} = ${addParam('FACTURADO')}`);
+    } else if (filterEstatus === 'FACTURADO Y CANCELACION PENDIENTE') {
+      where.push(
+        `${statusExpr} IN (${addParam('FACTURADO')}, ${addParam('CANCELACION PENDIENTE')})`,
+      );
+    } else if (filterEstatus && filterEstatus !== 'TODOS') {
       where.push(`${statusExpr} = ${addParam(filterEstatus)}`);
+    } else {
+      where.push(
+        `${statusExpr} IN (${addParam('PENDIENTE')}, ${addParam('CANCELACION PENDIENTE')})`,
+      );
     }
 
     const addContainsFilter = (sqlExpr: string, rawValue?: string | null) => {
@@ -325,7 +717,11 @@ export class FacturacionService {
       where.push(`${sqlExpr} LIKE ${addParam(`%${value}%`)}`);
     };
 
-    addContainsFilter(sucExpr, input.suc);
+    if (!canWrite && forcedUserSuc) {
+      where.push(`${sucExpr} = ${addParam(forcedUserSuc)}`);
+    } else {
+      addContainsFilter(sucExpr, input.suc);
+    }
     addContainsFilter(razonSocialExpr, input.razonSocialReceptor);
     addContainsFilter(rfcReceptorExpr, input.rfcReceptor);
     addContainsFilter(clienExpr, input.clien);
@@ -335,15 +731,44 @@ export class FacturacionService {
     const whereSql = where.length ? `WHERE ${where.join('\n  AND ')}` : '';
     const offsetParam = `@${params.length}`;
     const fetchParam = `@${params.length + 1}`;
+    const orderDateExpr =
+      filterEstatus === 'PENDIENTE'
+        ? this.facColumnRef({
+            alias: 'f',
+            columns,
+            primary: 'FCN',
+            fallbackColumns: ['FCNF'],
+            defaultSql: 'f.FCN',
+          })
+        : this.facColumnRef({
+            alias: 'f',
+            columns,
+            primary: 'FCNF',
+            fallbackColumns: ['FCN'],
+            defaultSql: 'f.FCN',
+          });
 
     const data = await this.dataSource.query(
       `${selectSql}
        ${whereSql}
-       ORDER BY FCN DESC, f.IDFOL DESC
+       ORDER BY ${orderDateExpr} DESC, f.IDFOL DESC
        OFFSET ${offsetParam} ROWS
        FETCH NEXT ${fetchParam} ROWS ONLY`,
       [...params, offset, pageSize],
     );
+
+    for (const row of data ?? []) {
+      const imptValue = Number(
+        (row as Record<string, unknown>).IMPT ??
+          (row as Record<string, unknown>).impt ??
+          0,
+      );
+      if (Number.isFinite(imptValue)) {
+        const rounded = Number(imptValue.toFixed(2));
+        (row as Record<string, unknown>).IMPT = rounded;
+        (row as Record<string, unknown>).impt = rounded;
+      }
+    }
 
     const countRows = await this.dataSource.query(
       `SELECT COUNT(1) AS TOTAL
@@ -364,6 +789,584 @@ export class FacturacionService {
       hasNextPage: page < totalPages,
     };
   }
+
+  async previewUnificacion(idFols: string[], user?: JwtPayload | null) {
+    await this.assertFacturacionWriteAccess(user, 'previsualizar unificación');
+    const uniqueIdFols = this.uniqueIdFols(idFols);
+    if (uniqueIdFols.length < 2) {
+      throw new BadRequestException(
+        'Se requieren al menos 2 tickets para unificación',
+      );
+    }
+
+    const userSuc = this.currentUserSuc(user);
+
+    try {
+      await this.ensureStoredProcedure(
+        'dbo.sp_fact_unificacion_preview',
+        'sql/sp_fact_unificacion_preview.sql',
+      );
+      const rows = await this.dataSource.query(
+        `${this.sqlServerStrictSetOptionsPrefix()}
+        EXEC dbo.sp_fact_unificacion_preview
+          @IDFOLS_JSON = @0,
+          @SUC = @1`,
+        [JSON.stringify(uniqueIdFols), userSuc],
+      );
+
+      const row = (rows?.[0] ?? {}) as Record<string, unknown>;
+      const bloqueos = this.parseStringArray(
+        this.readRowValue(row, 'BLOQUEOS_JSON'),
+      );
+      const idFolsOut = this.parseStringArray(
+        this.readRowValue(row, 'IDFOLS_JSON'),
+      );
+
+      return {
+        ok: true,
+        valid: this.toBoolValue(this.readRowValue(row, 'VALIDO')),
+        message:
+          this.normalizeText(this.readRowValue(row, 'MENSAJE')) ||
+          'Validación de unificación procesada',
+        cantidad: this.toIntValue(this.readRowValue(row, 'CANTIDAD')) ?? 0,
+        total: this.round2(this.toNumberValue(this.readRowValue(row, 'TOTAL')) ?? 0),
+        clien: this.normalizeText(this.readRowValue(row, 'CLIEN')),
+        formaPago: this.normalizeText(this.readRowValue(row, 'FORMAPAGO')),
+        tipoVta: this.normalizeText(this.readRowValue(row, 'TIPOVTA')),
+        usoCfdi: this.normalizeText(this.readRowValue(row, 'USOCFDI')),
+        rfcEmisor: this.normalizeText(this.readRowValue(row, 'RFCEMISOR')),
+        metodoDePago: this.normalizeText(
+          this.readRowValue(row, 'METODODEPAGO'),
+        ),
+        rfcReceptor: this.normalizeText(this.readRowValue(row, 'RFCRECEPTOR')),
+        razonSocialReceptor: this.normalizeText(
+          this.readRowValue(row, 'RAZONSOCIALRECEPTOR'),
+        ),
+        tipoFact: this.normalizeText(this.readRowValue(row, 'TIPOFACT')),
+        suc: this.normalizeText(this.readRowValue(row, 'SUC')),
+        reqf: this.toIntValue(this.readRowValue(row, 'REQF')) ?? 0,
+        bloqueos,
+        idFols: idFolsOut.length ? idFolsOut : uniqueIdFols,
+      };
+    } catch (error) {
+      throw this.mapUnificacionError(
+        error,
+        'No se pudo ejecutar preview de unificación',
+      );
+    }
+  }
+
+  async crearUnificacion(input: {
+    idFols: string[];
+    comentario?: string;
+    user?: JwtPayload | null;
+  }) {
+    await this.assertFacturacionWriteAccess(input.user, 'crear unificación');
+    const uniqueIdFols = this.uniqueIdFols(input.idFols);
+    if (uniqueIdFols.length < 2) {
+      throw new BadRequestException(
+        'Se requieren al menos 2 tickets para unificación',
+      );
+    }
+
+    const userSuc = this.currentUserSuc(input.user);
+    const comentario = this.normalizeText(input.comentario);
+    const usuario = this.normalizeText(input.user?.username ?? '');
+
+    try {
+      await this.ensureStoredProcedure(
+        'dbo.sp_fact_unificacion_create',
+        'sql/sp_fact_unificacion_create.sql',
+      );
+      const rows = await this.dataSource.query(
+        `${this.sqlServerStrictSetOptionsPrefix()}
+        EXEC dbo.sp_fact_unificacion_create
+          @IDFOLS_JSON = @0,
+          @USUARIO = @1,
+          @COMENTARIO = @2,
+          @SUC = @3`,
+        [
+          JSON.stringify(uniqueIdFols),
+          usuario || null,
+          comentario || null,
+          userSuc,
+        ],
+      );
+
+      const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+      if (!row) {
+        throw new ConflictException(
+          'La unificación no devolvió resultado del SP',
+        );
+      }
+
+      const ticketsOrigen = this.parseStringArray(
+        this.readRowValue(row, 'TICKETS_ORIGEN_JSON'),
+      );
+
+      return {
+        ok: true,
+        grupoId: this.normalizeText(this.readRowValue(row, 'GRUPO_ID')),
+        idFolUnificado: this.normalizeText(
+          this.readRowValue(row, 'IDFOL_UNIFICADO'),
+        ),
+        total: this.round2(this.toNumberValue(this.readRowValue(row, 'TOTAL')) ?? 0),
+        ticketsOrigen:
+          ticketsOrigen.length > 0 ? ticketsOrigen : uniqueIdFols,
+        ticketsOrigenCount:
+          this.toIntValue(this.readRowValue(row, 'TICKETS_ORIGEN')) ??
+          uniqueIdFols.length,
+        estatusFinal:
+          this.normalizeText(this.readRowValue(row, 'ESTATUS_FINAL')) ||
+          'UNIFICADO',
+      };
+    } catch (error) {
+      throw this.mapUnificacionError(
+        error,
+        'No se pudo ejecutar la unificación',
+      );
+    }
+  }
+
+  async reversarUnificacion(input: {
+    grupoId: string;
+    motivo: string;
+    user?: JwtPayload | null;
+  }) {
+    await this.assertFacturacionWriteAccess(input.user, 'reversar unificación');
+    const grupoId = this.normalizeUpper(input.grupoId);
+    const motivo = this.normalizeText(input.motivo);
+    if (!grupoId) {
+      throw new BadRequestException('GRUPMAS es requerido');
+    }
+    if (!motivo) {
+      throw new BadRequestException('El motivo de reversa es obligatorio');
+    }
+
+    const usuario = this.normalizeText(input.user?.username ?? '');
+
+    try {
+      await this.ensureStoredProcedure(
+        'dbo.sp_fact_unificacion_reverse',
+        'sql/sp_fact_unificacion_reverse.sql',
+      );
+      const rows = await this.dataSource.query(
+        `${this.sqlServerStrictSetOptionsPrefix()}
+        EXEC dbo.sp_fact_unificacion_reverse
+          @GRUPMAS = @0,
+          @MOTIVO = @1,
+          @USUARIO = @2`,
+        [grupoId, motivo, usuario || null],
+      );
+
+      const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+      if (!row) {
+        throw new ConflictException('La reversa no devolvió resultado del SP');
+      }
+
+      const ticketsRestaurados = this.parseStringArray(
+        this.readRowValue(row, 'TICKETS_RESTAURADOS_JSON'),
+      );
+
+      return {
+        ok: true,
+        grupoId: this.normalizeText(this.readRowValue(row, 'GRUPO_ID')),
+        folioUnificado: this.normalizeText(
+          this.readRowValue(row, 'FOLIO_UNIFICADO'),
+        ),
+        ticketsRestaurados,
+        ticketsRestauradosCount:
+          this.toIntValue(this.readRowValue(row, 'TICKETS_RESTAURADOS')) ??
+          ticketsRestaurados.length,
+        estatusFinal:
+          this.normalizeText(this.readRowValue(row, 'ESTATUS_FINAL')) ||
+          'ANULADO',
+      };
+    } catch (error) {
+      throw this.mapUnificacionError(
+        error,
+        'No se pudo ejecutar la reversa de unificación',
+      );
+    }
+  }
+
+  async detalleUnificacion(grupoIdRaw: string, user?: JwtPayload | null) {
+    const grupoId = this.normalizeUpper(grupoIdRaw);
+    if (!grupoId) {
+      throw new BadRequestException('GRUPMAS es requerido');
+    }
+    await this.assertFacturacionReadAccess(
+      user,
+      'consultar detalle de unificación',
+    );
+
+    try {
+      const controlRows = await this.dataSource.query(
+        `SELECT TOP 1 GRUPMAS, FCNCREA, NFAC, ESTATUS
+         FROM dbo.FAC_CTRL_GRUP_MASV
+         WHERE UPPER(LTRIM(RTRIM(ISNULL(GRUPMAS, '')))) = @0`,
+        [grupoId],
+      );
+      if (!controlRows?.length) {
+        throw new NotFoundException(`No existe el grupo ${grupoId}`);
+      }
+
+      const columns = await this.getFacSvrShapColumns();
+      const grupExpr = this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'GRUPMASI',
+        defaultSql: "CAST('' AS NVARCHAR(255))",
+      });
+      const sucExpr = this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'SUC',
+        defaultSql: "CAST('' AS NVARCHAR(40))",
+      });
+
+      const whereByGroup = columns.has('GRUPMASI')
+        ? ` OR UPPER(LTRIM(RTRIM(ISNULL(CAST(${grupExpr} AS NVARCHAR(255)), '')))) = @0`
+        : '';
+
+      const folioRows = await this.dataSource.query(
+        `SELECT
+            f.*,
+            UPPER(LTRIM(RTRIM(ISNULL(CAST(f.IDFOL AS NVARCHAR(255)), '')))) AS __IDFOL_NORM,
+            UPPER(LTRIM(RTRIM(ISNULL(CAST(${grupExpr} AS NVARCHAR(255)), '')))) AS __GRUPMASI_NORM,
+            UPPER(LTRIM(RTRIM(ISNULL(CAST(${sucExpr} AS NVARCHAR(40)), '')))) AS __SUC_NORM
+         FROM dbo.FAC_SVR_SHAP f
+         WHERE UPPER(LTRIM(RTRIM(ISNULL(CAST(f.IDFOL AS NVARCHAR(255)), '')))) = @0${whereByGroup}
+         ORDER BY CASE
+             WHEN UPPER(LTRIM(RTRIM(ISNULL(CAST(f.IDFOL AS NVARCHAR(255)), '')))) = @0 THEN 0
+             ELSE 1
+           END, f.IDFOL`,
+        [grupoId],
+      );
+
+      const userSuc = this.currentUserSuc(user);
+      if (userSuc) {
+        const outsideUserSuc = (folioRows ?? []).some((row: any) => {
+          const suc = this.normalizeUpper(row?.__SUC_NORM);
+          return suc.length > 0 && suc !== userSuc;
+        });
+        if (outsideUserSuc) {
+          throw new ForbiddenException(
+            `No autorizado para consultar el grupo ${grupoId}`,
+          );
+        }
+      }
+
+      const unificado = (folioRows ?? []).find(
+        (row: any) => this.normalizeUpper(row?.__IDFOL_NORM) === grupoId,
+      );
+      const origenes = (folioRows ?? []).filter(
+        (row: any) =>
+          this.normalizeUpper(row?.__IDFOL_NORM) !== grupoId &&
+          this.normalizeUpper(row?.__GRUPMASI_NORM) === grupoId,
+      );
+
+      return {
+        ok: true,
+        grupoId,
+        control: controlRows[0],
+        folioUnificado: unificado ?? null,
+        ticketsOrigen: origenes,
+        ticketsOrigenCount: origenes.length,
+      };
+    } catch (error) {
+      throw this.mapUnificacionError(
+        error,
+        'No se pudo consultar el detalle de unificación',
+      );
+    }
+  }
+
+  private currentUserSuc(user?: JwtPayload | null) {
+    if (this.isAdminUser(user)) return null;
+    const suc = this.normalizeUpper(user?.suc ?? '');
+    if (!suc || suc === '000') return null;
+    return suc;
+  }
+
+  private parseIds(...values: Array<string | undefined>) {
+    const out: number[] = [];
+    for (const value of values) {
+      if (!value) continue;
+      for (const part of value.split(',')) {
+        const n = Number(part.trim());
+        if (Number.isFinite(n)) out.push(n);
+      }
+    }
+    return out;
+  }
+
+  private isAdminUser(user?: JwtPayload | null) {
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (username === 'ADMIN') return true;
+
+    const roleId = Number(user?.roleId ?? 0);
+    const nivel = Number(user?.nivel ?? 0);
+
+    const adminRoleIds = this.parseIds(
+      this.config.get<string>('ADMIN_ROLE_IDS'),
+      this.config.get<string>('ADMIN_ROLE_ID'),
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const adminNiveles = this.parseIds(
+      this.config.get<string>('ADMIN_NIVELES'),
+      this.config.get<string>('ADMIN_NIVEL'),
+      process.env.ADMIN_NIVELES,
+      process.env.ADMIN_NIVEL,
+    );
+
+    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [1]).includes(
+      roleId,
+    );
+    const nivelAllowed =
+      adminNiveles.length > 0 && adminNiveles.includes(nivel);
+
+    return roleAllowed || nivelAllowed;
+  }
+
+  private async hasFrontModuleAccessByRole(
+    user: JwtPayload | null | undefined,
+    moduleCodes: readonly string[],
+    cache: Map<number, boolean>,
+  ) {
+    if (this.isAdminUser(user)) return true;
+    const roleId = Number(user?.roleId ?? 0);
+    if (!Number.isFinite(roleId) || roleId <= 0) return false;
+
+    const cached = cache.get(roleId);
+    if (cached !== undefined) return cached;
+
+    const safeCodes = moduleCodes
+      .map((code) => code.replace(/'/g, "''"))
+      .map((code) => `'${code}'`)
+      .join(', ');
+
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT TOP 1 1 AS ALLOW_ACCESS
+         FROM dbo.ROL_GRUPMOD_FRONT rgf
+         WHERE rgf.IDROL=@0
+           AND ISNULL(rgf.ACTIVO, 1)=1
+           AND rgf.IDGRUPMOD_FRONT=0
+         UNION ALL
+         SELECT TOP 1 1 AS ALLOW_ACCESS
+         FROM dbo.ROL_GRUPMOD_FRONT rgf
+         INNER JOIN dbo.GRUPMOD_FRONT_MOD gfm
+           ON gfm.IDGRUPMOD_FRONT = rgf.IDGRUPMOD_FRONT
+         INNER JOIN dbo.MOD_FRONT mf
+           ON mf.IDMOD_FRONT = gfm.IDMOD_FRONT
+         WHERE rgf.IDROL=@0
+           AND ISNULL(rgf.ACTIVO, 1)=1
+           AND ISNULL(mf.ACTIVO, 1)=1
+           AND UPPER(LTRIM(RTRIM(ISNULL(mf.CODIGO, '')))) IN (${safeCodes})`,
+        [roleId],
+      );
+      const allow = (rows?.length ?? 0) > 0;
+      cache.set(roleId, allow);
+      return allow;
+    } catch {
+      cache.set(roleId, false);
+      return false;
+    }
+  }
+
+  private async hasFacturacionReadAccess(user?: JwtPayload | null) {
+    return this.hasFrontModuleAccessByRole(
+      user,
+      FacturacionService.FACTURACION_READ_MODULE_CODES,
+      this.facturacionReadAccessCache,
+    );
+  }
+
+  private async hasFacturacionWriteAccess(user?: JwtPayload | null) {
+    return this.hasFrontModuleAccessByRole(
+      user,
+      FacturacionService.FACTURACION_WRITE_MODULE_CODES,
+      this.facturacionWriteAccessCache,
+    );
+  }
+
+  private async assertFacturacionReadAccess(
+    user?: JwtPayload | null,
+    action = 'consultar facturación',
+  ) {
+    if (!user) return;
+    const allowed = await this.hasFacturacionReadAccess(user);
+    if (allowed) return;
+    throw new ForbiddenException(`Sin permisos para ${action}.`);
+  }
+
+  private async assertFacturacionWriteAccess(
+    user?: JwtPayload | null,
+    action = 'operación de facturación',
+  ) {
+    if (!user) return;
+    const allowed = await this.hasFacturacionWriteAccess(user);
+    if (allowed) return;
+    throw new ForbiddenException(
+      `Sin permisos para ${action}. Usuario en modo consulta.`,
+    );
+  }
+
+  private uniqueIdFols(idFols: string[]) {
+    const out: string[] = [];
+    for (const id of idFols ?? []) {
+      const value = this.normalizeUpper(id);
+      if (!value) continue;
+      if (!out.includes(value)) out.push(value);
+    }
+    return out;
+  }
+
+  private parseStringArray(raw: unknown): string[] {
+    const fromArray = (items: unknown[]) =>
+      items
+        .map((item) => {
+          if (typeof item === 'string') return this.normalizeText(item);
+          if (item && typeof item === 'object') {
+            const row = item as Record<string, unknown>;
+            return (
+              this.normalizeText(row.message) ||
+              this.normalizeText(row.msg) ||
+              this.normalizeText(row.value) ||
+              this.normalizeText(row.text)
+            );
+          }
+          return this.normalizeText(item);
+        })
+        .filter((item) => item.length > 0);
+
+    if (Array.isArray(raw)) {
+      return fromArray(raw);
+    }
+
+    const text = this.normalizeText(raw);
+    if (!text) return [];
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return fromArray(parsed);
+      }
+    } catch {
+      // ignore parse errors and fallback to a single-item list
+    }
+    return [text];
+  }
+
+  private readRowValue(row: Record<string, unknown>, key: string) {
+    const target = key.toUpperCase();
+    for (const [rawKey, value] of Object.entries(row)) {
+      if (rawKey.toUpperCase() === target) {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  private toNumberValue(value: unknown) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private toIntValue(value: unknown) {
+    const parsed = this.toNumberValue(value);
+    if (parsed == null) return null;
+    return Math.trunc(parsed);
+  }
+
+  private toBoolValue(value: unknown) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    const text = this.normalizeUpper(value);
+    return text === '1' || text === 'TRUE' || text === 'SI' || text === 'YES';
+  }
+
+  private normalizeText(value: unknown) {
+    return String(value ?? '').trim();
+  }
+
+  private normalizeUpper(value: unknown) {
+    return this.normalizeText(value).toUpperCase();
+  }
+
+  private round2(value: number) {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private sqlServerStrictSetOptionsPrefix() {
+    return `SET ANSI_NULLS ON;
+SET ANSI_PADDING ON;
+SET ANSI_WARNINGS ON;
+SET ARITHABORT ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET QUOTED_IDENTIFIER ON;
+SET NUMERIC_ROUNDABORT OFF;`;
+  }
+
+  private async ensureStoredProcedure(name: string, scriptPath: string) {
+    const rows = await this.dataSource.query(
+      `SELECT CASE WHEN OBJECT_ID(@0, 'P') IS NULL THEN 0 ELSE 1 END AS HAS_SP`,
+      [name],
+    );
+    const exists = (this.toIntValue(rows?.[0]?.HAS_SP) ?? 0) === 1;
+    if (!exists) {
+      throw new ConflictException(
+        `No existe ${name}. Ejecute ${scriptPath}`,
+      );
+    }
+  }
+
+  private mapUnificacionError(error: unknown, fallbackMessage: string) {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ConflictException ||
+      error instanceof ForbiddenException ||
+      error instanceof NotFoundException
+    ) {
+      return error;
+    }
+
+    if (error instanceof QueryFailedError) {
+      const message = this.extractSqlMessage(error);
+      if (message) {
+        if (message.toUpperCase().includes('NO EXISTE DBO.SP_FACT_UNIFICACION')) {
+          return new ConflictException(message);
+        }
+        return new BadRequestException(message);
+      }
+      return new BadRequestException(fallbackMessage);
+    }
+
+    if (error instanceof Error) {
+      return new InternalServerErrorException(
+        `${fallbackMessage}: ${error.message}`,
+      );
+    }
+
+    return new InternalServerErrorException(fallbackMessage);
+  }
+
+  private extractSqlMessage(error: QueryFailedError) {
+    const errAny = error as any;
+    const driver = errAny?.driverError ?? errAny?.originalError ?? null;
+    const driverMessage = this.normalizeText(driver?.message ?? '');
+    const baseMessage = this.normalizeText(errAny?.message ?? '');
+    const raw = driverMessage || baseMessage;
+    if (!raw) return '';
+
+    return raw
+      .replace(/^QueryFailedError:\s*/i, '')
+      .replace(/^RequestError:\s*/i, '')
+      .replace(/\s+\bat line \d+\b/i, '')
+      .trim();
+  }
+
   private async getFolioData(idFol: string) {
     const headerSql = await this.buildHeaderSelectSql();
     const cab = await this.dataSource.query(
@@ -374,22 +1377,199 @@ export class FacturacionService {
       throw new NotFoundException(`Folio ${idFol} no existe en FAC_SVR_SHAP`);
     }
 
-    const det = await this.dataSource.query(
-      `SELECT IDD, ClaveProdServ, NoIdentificacion, Descripcion, Cantidad, ValorUnitario, PVTAT, Unidad, ObjetoImp, IvaTasa, Descuento
-       FROM FACT_TICKET_SHP WHERE IDFOL=@0`,
+    const detailColumns = await this.getFactTicketShpColumns();
+    const upcExpr = detailColumns.has('UPC')
+      ? 't.UPC'
+      : detailColumns.has('NOIDENTIFICACION')
+        ? 't.NoIdentificacion'
+        : 'CAST(NULL AS NVARCHAR(255))';
+
+    const detailSelectSql = `SELECT
+        t.IDD,
+        t.IDFOL,
+        ${upcExpr} AS UPC,
+        t.ClaveProdServ,
+        t.NoIdentificacion,
+        t.Descripcion,
+        t.Cantidad,
+        t.ValorUnitario,
+        t.PVTAT,
+        CAST(ISNULL(t.PVTAT, 0) * 0.16 AS DECIMAL(18, 2)) AS Impuesto,
+        CAST(ISNULL(t.PVTAT, 0) + (ISNULL(t.PVTAT, 0) * 0.16) AS DECIMAL(18, 2)) AS Total,
+        t.Unidad,
+        t.ObjetoImp,
+        t.IvaTasa,
+        t.Descuento
+     FROM FACT_TICKET_SHP t`;
+
+    let det = await this.dataSource.query(
+      `${detailSelectSql}
+       WHERE t.IDFOL=@0`,
       [idFol],
     );
+
+    // Compatibilidad legado: unificaciones antiguas dejaron detalle con
+    // IDFOL original y FACUNI = folio/grupo unificado.
+    if (!det.length && detailColumns.has('FACUNI')) {
+      det = await this.dataSource.query(
+        `${detailSelectSql}
+         WHERE UPPER(LTRIM(RTRIM(ISNULL(CAST(t.FACUNI AS NVARCHAR(255)), '')))) = UPPER(@0)`,
+        [idFol],
+      );
+    }
 
     const suc = await this.dataSource.query(
       `SELECT TOP 1 SUC, [DESC] AS NOMBRE_SUC, RFC FROM DAT_SUC WHERE SUC=@0`,
       [cab[0].SUC ?? ''],
     );
 
-    const cliente = await this.dataSource.query(
-      `SELECT TOP 1 RFCRECEPTOR, RAZONSOCIALRECEPTOR, EMAILRECEPTOR, USOCFDI, CODIGOPOSTALRECEPTOR, REGIMENFISCALRECEPTOR, RegimenFiscalReceptorSAT
-       FROM FACT_CLIENT_SHP WHERE RFCRECEPTOR=@0 ORDER BY FCNR DESC`,
-      [cab[0].RfcReceptor ?? ''],
-    );
+    const clientColumns = await this.getFactClientShpColumns();
+    const clienteIdRef = this.facColumnRef({
+      alias: 'c',
+      columns: clientColumns,
+      primary: 'IDC',
+      defaultSql: 'NULL',
+    });
+    const clienteRfcReceptorRef = this.facColumnRef({
+      alias: 'c',
+      columns: clientColumns,
+      primary: 'RFCRECEPTOR',
+      fallbackColumns: ['RfcReceptor'],
+      defaultSql: 'NULL',
+    });
+    const clienteFcnRef = this.facColumnRef({
+      alias: 'c',
+      columns: clientColumns,
+      primary: 'FCNR',
+      defaultSql: 'NULL',
+    });
+    const clienteClienUniRef = this.facColumnRef({
+      alias: 'c',
+      columns: clientColumns,
+      primary: 'CLIEN_UNI',
+      defaultSql: 'NULL',
+    });
+    const clienteSucRef = this.facColumnRef({
+      alias: 'c',
+      columns: clientColumns,
+      primary: 'SUC',
+      defaultSql: 'NULL',
+    });
+    const clienteSelectSql = `SELECT TOP 1
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'IDC',
+            defaultSql: 'CAST(NULL AS FLOAT)',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'SUC',
+            defaultSql: 'CAST(NULL AS NVARCHAR(10))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'CLIEN_UNI',
+            defaultSql: 'CAST(NULL AS FLOAT)',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'RFCRECEPTOR',
+            fallbackColumns: ['RfcReceptor'],
+            defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'RAZONSOCIALRECEPTOR',
+            fallbackColumns: ['RazonSocialReceptor'],
+            defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'EMAILRECEPTOR',
+            fallbackColumns: ['EmailReceptor'],
+            defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'USOCFDI',
+            fallbackColumns: ['UsoCfdi'],
+            defaultSql: 'CAST(NULL AS NVARCHAR(50))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'CODIGOPOSTALRECEPTOR',
+            fallbackColumns: ['CodigoPostalReceptor'],
+            defaultSql: 'CAST(NULL AS NVARCHAR(20))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'REGIMENFISCALRECEPTOR',
+            fallbackColumns: ['RegimenFiscalReceptor'],
+            defaultSql: 'CAST(NULL AS FLOAT)',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'RegimenFiscalReceptorSAT',
+            defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'RFCEMISOR',
+            fallbackColumns: ['RfcEmisor'],
+            defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'DOMI',
+            defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'NCEL',
+            defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+          })},
+          ${this.facColumnExpr({
+            alias: 'c',
+            columns: clientColumns,
+            primary: 'OPTICA',
+            defaultSql: 'CAST(NULL AS NVARCHAR(255))',
+          })}
+       FROM FACT_CLIENT_SHP c`;
+
+    const clienHeader = Number(cab[0]?.CLIEN ?? 0);
+    let cliente: any[] = [];
+    if (Number.isFinite(clienHeader) && clienHeader > 0) {
+      cliente = await this.dataSource.query(
+        `${clienteSelectSql} WHERE ${clienteIdRef}=@0`,
+        [clienHeader],
+      );
+      if (!cliente.length) {
+        cliente = await this.dataSource.query(
+          `${clienteSelectSql} WHERE ${clienteClienUniRef}=@0 AND (@1='' OR ${clienteSucRef}=@1) ORDER BY ${clienteFcnRef} DESC`,
+          [clienHeader, String(cab[0].SUC ?? '').trim()],
+        );
+      }
+    }
+
+    if (!cliente.length) {
+      cliente = await this.dataSource.query(
+        `${clienteSelectSql} WHERE ${clienteRfcReceptorRef}=@0 ORDER BY ${clienteFcnRef} DESC`,
+        [cab[0].RfcReceptor ?? ''],
+      );
+    }
 
     return {
       header: cab[0],
@@ -399,9 +1579,11 @@ export class FacturacionService {
     };
   }
 
-  async validarFolio(idFol: string) {
+  async validarFolio(idFol: string, user?: JwtPayload | null) {
+    await this.assertFacturacionReadAccess(user, 'validar factura');
     const full = await this.getFolioData(idFol);
     const header = full.header;
+    const round2 = (value: number) => Number(value.toFixed(2));
 
     if ((header.ESTATUS || '').toUpperCase() !== 'PENDIENTE') {
       throw new BadRequestException(
@@ -409,37 +1591,145 @@ export class FacturacionService {
       );
     }
 
-    const totalDetalle = Number(
-      (full.detail || []).reduce(
+    const detalleArticulos = (full.detail || []).map((row: any) => {
+      const pvtat = Number(row.PVTAT ?? 0);
+      const impuestoCalculado = Number((pvtat * 0.16).toFixed(2));
+      const totalCalculado = Number((pvtat + impuestoCalculado).toFixed(2));
+      return {
+        IDD: row.IDD ?? null,
+        IDFOL: row.IDFOL ?? idFol,
+        UPC: row.UPC ?? row.NoIdentificacion ?? null,
+        Descripcion: row.Descripcion ?? null,
+        ClaveProdServ: row.ClaveProdServ ?? null,
+        Unidad: row.Unidad ?? null,
+        Cantidad: Number(row.Cantidad ?? 0),
+        ValorUnitario: Number(row.ValorUnitario ?? 0),
+        PVTAT: pvtat,
+        Impuesto: Number(row.Impuesto ?? impuestoCalculado),
+        Total: Number(row.Total ?? totalCalculado),
+      };
+    });
+
+    const subtotalDetalle = Number(
+      detalleArticulos.reduce(
         (acc: number, row: any) => acc + Number(row.PVTAT ?? 0),
         0,
       ),
     );
-    const totalCabecera = Number(header.IMPT ?? 0);
-    const diff = Number((totalCabecera - totalDetalle).toFixed(2));
-
-    const satOk = Boolean(
-      (header.RfcReceptor || full.cliente?.RFCRECEPTOR) &&
-        (header.UsoCfdi || full.cliente?.USOCFDI) &&
-        full.cliente?.CODIGOPOSTALRECEPTOR &&
-        (header.RfcEmisor || full.sucursal?.RFC),
+    const impuestoDetalle = Number(
+      detalleArticulos
+        .reduce((acc: number, row: any) => acc + Number(row.Impuesto ?? 0), 0)
+        .toFixed(2),
     );
+    const totalConImpuesto = Number(
+      detalleArticulos
+        .reduce((acc: number, row: any) => acc + Number(row.Total ?? 0), 0)
+        .toFixed(2),
+    );
+    const totalCabeceraRaw = Number(header.IMPT ?? 0);
+    const totalCabecera = round2(totalCabeceraRaw);
+    const totalDetalle = round2(totalConImpuesto);
+    const diff = round2(totalCabecera - totalDetalle);
+
+    const cleanText = (value: unknown) => String(value ?? '').trim();
+    const cleanUpper = (value: unknown) => cleanText(value).toUpperCase();
+    const isPlaceholder = (value: unknown) => {
+      const v = cleanUpper(value);
+      return (
+        !v ||
+        v === '-' ||
+        v === 'SELECCIONAR' ||
+        v === 'COLOCAR' ||
+        v === 'N/A' ||
+        v === 'NULL'
+      );
+    };
+
+    const rfcReceptor = cleanText(
+      header.RfcReceptor ??
+        header.RFCRECEPTOR ??
+        full.cliente?.RFCRECEPTOR ??
+        full.cliente?.RfcReceptor,
+    );
+    const razonSocial = cleanText(
+      header.RazonSocialReceptor ??
+        header.RAZONSOCIALRECEPTOR ??
+        full.cliente?.RAZONSOCIALRECEPTOR ??
+        full.cliente?.RazonSocialReceptor,
+    );
+    const emailReceptor = cleanText(
+      full.cliente?.EMAILRECEPTOR ?? full.cliente?.EmailReceptor,
+    );
+    const usoCfdi = cleanText(
+      header.UsoCfdi ??
+        header.USOCFDI ??
+        full.cliente?.USOCFDI ??
+        full.cliente?.UsoCfdi,
+    );
+    const codigoPostal = cleanText(
+      full.cliente?.CODIGOPOSTALRECEPTOR ?? full.cliente?.CodigoPostalReceptor,
+    );
+    const rfcEmisor = cleanText(
+      header.RfcEmisor ??
+        header.RFCEMISOR ??
+        full.cliente?.RFCEMISOR ??
+        full.cliente?.RfcEmisor ??
+        full.sucursal?.RFC,
+    );
+    const regimenRaw = cleanText(
+      full.cliente?.REGIMENFISCALRECEPTOR ??
+        full.cliente?.RegimenFiscalReceptor,
+    );
+    const regimenCode = this.normalizeRegimenCode(regimenRaw);
+    const regimenOk = !!regimenCode && Number(regimenCode) > 0;
+    const rfcGenerico = cleanUpper(rfcReceptor) === 'XAXX010101000';
+
+    const camposFiscalesFaltantes: string[] = [];
+    if (isPlaceholder(rfcReceptor)) camposFiscalesFaltantes.push('RfcReceptor');
+    if (isPlaceholder(usoCfdi)) camposFiscalesFaltantes.push('UsoCfdi');
+    if (isPlaceholder(codigoPostal)) {
+      camposFiscalesFaltantes.push('CodigoPostalReceptor');
+    }
+    if (isPlaceholder(rfcEmisor)) camposFiscalesFaltantes.push('RfcEmisor');
+    if (!regimenOk) {
+      camposFiscalesFaltantes.push('RegimenFiscalReceptor');
+    }
+    if (rfcGenerico) {
+      if (isPlaceholder(razonSocial)) {
+        camposFiscalesFaltantes.push('RazonSocialReceptor');
+      }
+      if (isPlaceholder(emailReceptor)) {
+        camposFiscalesFaltantes.push('EmailReceptor');
+      }
+    }
+
+    const clienteFiscalCompleto = camposFiscalesFaltantes.length === 0;
 
     return {
       idFol,
       estatus: header.ESTATUS,
+      header,
       totales: {
         cabecera: totalCabecera,
         detalle: totalDetalle,
         diferencia: diff,
+        cabeceraOriginal: totalCabeceraRaw,
       },
       validaciones: {
-        importeCuadra: Math.abs(diff) < 0.01,
-        clienteFiscalCompleto: satOk,
+        importeCuadra: Math.abs(diff) < 0.005,
+        clienteFiscalCompleto,
+        rfcGenerico,
+        camposFiscalesFaltantes: Array.from(new Set(camposFiscalesFaltantes)),
       },
       cliente: full.cliente,
       sucursal: full.sucursal,
       conceptos: full.detail.length,
+      detalleArticulos,
+      totalesDetalle: {
+        subtotal: round2(subtotalDetalle),
+        impuesto: impuestoDetalle,
+        total: totalDetalle,
+      },
     };
   }
 
@@ -502,6 +1792,97 @@ export class FacturacionService {
     };
   }
 
+  private normalizeRegimenCode(value: unknown) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+
+    const exact3 = raw.match(/\b\d{3}\b/);
+    if (exact3?.[0]) return exact3[0];
+
+    if (/^\d+(\.\d+)?$/.test(raw)) {
+      const intPart = raw.split('.')[0].trim();
+      return intPart.padStart(3, '0').slice(-3);
+    }
+    return null;
+  }
+
+  private async getRegimenCatalogByCode() {
+    if (this.regimenByCodeCache) return this.regimenByCodeCache;
+
+    const map = new Map<string, string>();
+    Object.entries(FACTURIFY_REGIMEN_DESC_FALLBACK).forEach(([code, desc]) => {
+      map.set(code, desc);
+    });
+
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT
+            CAST(C_REGIMENFISCAL AS NVARCHAR(10)) AS CODIGO,
+            CAST(DESCRIPCION AS NVARCHAR(255)) AS DESCRIPCION
+         FROM DAT_CAT_REG`,
+      );
+      for (const row of rows ?? []) {
+        const code = this.normalizeRegimenCode(
+          (row as Record<string, unknown>).CODIGO,
+        );
+        const desc = String(
+          (row as Record<string, unknown>).DESCRIPCION ?? '',
+        ).trim();
+        if (!code || !desc) continue;
+        map.set(code, desc);
+      }
+    } catch {
+      // Keep fallback map when DAT_CAT_REG is not available.
+    }
+
+    this.regimenByCodeCache = map;
+    return map;
+  }
+
+  private async resolveReceptorRegimen(cliente: Record<string, unknown>) {
+    const rawNum = String(
+      cliente.REGIMENFISCALRECEPTOR ?? cliente.RegimenFiscalReceptor ?? '',
+    ).trim();
+    const rawSat = String(cliente.RegimenFiscalReceptorSAT ?? '').trim();
+    const satUpper = rawSat.toUpperCase();
+
+    const codeFromNum = this.normalizeRegimenCode(rawNum);
+    if (codeFromNum) {
+      const catalog = await this.getRegimenCatalogByCode();
+      return (
+        catalog.get(codeFromNum) ??
+        FACTURIFY_REGIMEN_DESC_FALLBACK[codeFromNum] ??
+        FACTURIFY_REGIMEN_DESC_FALLBACK['601']
+      );
+    }
+
+    const satIsPlaceholder =
+      !rawSat ||
+      satUpper === 'SELECCIONAR' ||
+      satUpper === 'COLOCAR' ||
+      satUpper === '-';
+    if (!satIsPlaceholder) {
+      const satCodeAndDescription = rawSat.match(/^\s*(\d{3})\s*[-: ]\s*(.+)$/);
+      if (satCodeAndDescription?.[2]) {
+        const desc = satCodeAndDescription[2].trim();
+        if (desc) return desc;
+      }
+
+      const satLooksDescription =
+        rawSat.length > 0 && !/^\d+(\.\d+)?$/.test(rawSat);
+      if (satLooksDescription) return rawSat;
+    }
+
+    const code = this.normalizeRegimenCode(rawSat) ?? '601';
+
+    const catalog = await this.getRegimenCatalogByCode();
+    return (
+      catalog.get(code) ??
+      FACTURIFY_REGIMEN_DESC_FALLBACK[code] ??
+      FACTURIFY_REGIMEN_DESC_FALLBACK['601']
+    );
+  }
+
   private async toFacturifyPayload(full: {
     header: any;
     detail: any[];
@@ -532,10 +1913,38 @@ export class FacturacionService {
       (a: number, x: any) => a + Number(x.total ?? 0),
       0,
     );
-    const impuestoFederal = Number((subtotal * 0.16).toFixed(2));
-    const total = Number((subtotal + impuestoFederal).toFixed(2));
+    const impuestoFederal = Number(
+      conceptos
+        .reduce(
+          (a: number, x: any) =>
+            a + Number((Number(x.total ?? 0) * 0.16).toFixed(2)),
+          0,
+        )
+        .toFixed(2),
+    );
+    const total = Number(
+      conceptos
+        .reduce(
+          (a: number, x: any) =>
+            a +
+            Number(
+              (
+                Number(x.total ?? 0) + Number((Number(x.total ?? 0) * 0.16).toFixed(2))
+              ).toFixed(2),
+            ),
+          0,
+        )
+        .toFixed(2),
+    );
 
     const email = String(c.EMAILRECEPTOR ?? '').trim();
+    const regimen = await this.resolveReceptorRegimen(c);
+    const exportacionRaw = String(
+      h.exportacion ?? h.Exportacion ?? '01',
+    ).trim();
+    const exportacion =
+      exportacionRaw.match(/\d{2}/)?.[0] ??
+      exportacionRaw.split('.')[0].trim().padStart(2, '0');
 
     return {
       emisor: {
@@ -553,13 +1962,14 @@ export class FacturacionService {
           .padStart(2, '0'),
         tarjeta_ultimos_4digitos: 'NA',
         cp: String(c.CODIGOPOSTALRECEPTOR ?? '00000'),
-        regimen: String(c.RegimenFiscalReceptorSAT ?? c.REGIMENFISCALRECEPTOR ?? '601').split('.')[0],
+        regimen,
       },
       factura: {
         version: '4.0',
         fecha: this.toDateYmdHis(new Date()),
         tipo: 'ingreso',
-        Exportacion: String(h.Exportacion ?? '01'),
+        exportacion,
+        Exportacion: exportacion,
         forma_de_pago: String(h.FormaPagoSAT ?? h.FormaPago ?? '99')
           .split('.')[0]
           .padStart(2, '0'),
@@ -606,9 +2016,10 @@ export class FacturacionService {
     return last;
   }
 
-  async emitir(idFol: string) {
+  async emitir(idFol: string, user?: JwtPayload | null) {
+    await this.assertFacturacionWriteAccess(user, 'emitir factura');
     this.facturify.assertCredentials();
-    const validacion = await this.validarFolio(idFol);
+    const validacion = await this.validarFolio(idFol, user);
     if (!validacion.validaciones.importeCuadra) {
       throw new BadRequestException(
         `No cuadra importe cabecera vs detalle para folio ${idFol}`,
@@ -652,6 +2063,11 @@ export class FacturacionService {
       },
     });
 
+    const facColumns = await this.getFacSvrShapColumns();
+    const setFcnfSql = facColumns.has('FCNF')
+      ? `,
+             FCNF=CASE WHEN @3='TIMBRADO' THEN GETDATE() ELSE FCNF END`
+      : '';
     const newStatus = timbrado.ok ? 'FACTURADO' : 'PENDIENTE';
     await this.dataSource.query(
       `UPDATE FAC_SVR_SHAP
@@ -661,7 +2077,7 @@ export class FacturacionService {
              CFDI_XML_PATH=@4,
              CFDI_PDF_PATH=@5,
              CFDI_FACTURIFY_JOB_ID=@6,
-             CFDI_F_TIMBRADO=CASE WHEN @3='TIMBRADO' THEN GETDATE() ELSE CFDI_F_TIMBRADO END,
+             CFDI_F_TIMBRADO=CASE WHEN @3='TIMBRADO' THEN GETDATE() ELSE CFDI_F_TIMBRADO END${setFcnfSql},
              CFDI_ERROR_MSG=@7
        WHERE IDFOL=@0`,
       [
@@ -682,20 +2098,41 @@ export class FacturacionService {
       emailRes = await this.reenviarCorreoByUuid(uuid, emailTarget, idFol);
     }
 
+    const facturifyErrors: string[] = [];
+    const rawErrors = Array.isArray(timbrado?.data?.errors)
+      ? timbrado.data.errors
+      : [];
+    for (const item of rawErrors) {
+      if (!item || typeof item !== 'object') continue;
+      const field = String((item as any).field ?? '').trim();
+      const message = String((item as any).message ?? '').trim();
+      if (!message) continue;
+      facturifyErrors.push(field ? `${field}: ${message}` : message);
+    }
+    const rawFacturifyMessage = String(timbrado?.data?.message ?? '').trim();
+    const emitMessage = timbrado.ok
+      ? `Factura emitida correctamente (${idFol})`
+      : facturifyErrors.length > 0
+      ? `No se pudo emitir: ${facturifyErrors.join(' | ')}`
+      : rawFacturifyMessage || `No se pudo emitir factura para ${idFol}`;
+
     return {
       ok: timbrado.ok,
       status: timbrado.status,
+      message: emitMessage,
       idFol,
       uuid,
       storage,
       email: emailRes
         ? { ok: emailRes.ok, status: emailRes.status, target: emailTarget }
         : null,
+      errors: facturifyErrors,
       facturify: timbrado.data,
     };
   }
 
-  async refrescarEstado(idFol: string) {
+  async refrescarEstado(idFol: string, user?: JwtPayload | null) {
+    await this.assertFacturacionWriteAccess(user, 'refrescar estado CFDI');
     const rows = await this.dataSource.query(
       `SELECT TOP 1 CFDI_UUID, ESTATUS, CFDI_STATUS, CFDI_CANCEL_STATUS FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
       [idFol],
@@ -778,7 +2215,12 @@ export class FacturacionService {
     };
   }
 
-  async reenviarCorreo(idFol: string, email?: string) {
+  async reenviarCorreo(
+    idFol: string,
+    email?: string,
+    user?: JwtPayload | null,
+  ) {
+    await this.assertFacturacionWriteAccess(user, 'reenviar XML/PDF por correo');
     const rows = await this.dataSource.query(
       `SELECT TOP 1 CFDI_UUID, RfcReceptor FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
       [idFol],
@@ -817,7 +2259,8 @@ export class FacturacionService {
     };
   }
 
-  async cancelar(idFol: string, motivo?: string) {
+  async cancelar(idFol: string, motivo?: string, user?: JwtPayload | null) {
+    await this.assertFacturacionWriteAccess(user, 'cancelar CFDI');
     this.facturify.assertCredentials();
     const rows = await this.dataSource.query(
       `SELECT TOP 1 CFDI_UUID FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
@@ -834,6 +2277,15 @@ export class FacturacionService {
       cfdi_uuid: uuid,
       motivo: motivo || '02',
     });
+    const facturifyMessage = String(
+      (cancelRes?.data as Record<string, unknown>)?.message ??
+        (cancelRes?.data as Record<string, unknown>)?.error ??
+        '',
+    ).trim();
+    const message = cancelRes.ok
+      ? facturifyMessage || `Cancelación CFDI enviada para ${idFol}`
+      : facturifyMessage ||
+        `No se pudo cancelar CFDI para ${idFol} (status ${cancelRes.status})`;
 
     await this.dataSource.query(
       `UPDATE FAC_SVR_SHAP
@@ -855,6 +2307,7 @@ export class FacturacionService {
       status: cancelRes.status,
       idFol,
       uuid,
+      message,
       facturify: cancelRes.data,
     };
   }
