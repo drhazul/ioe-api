@@ -12,6 +12,7 @@ import { CreatePvCtrFolAsvrDto } from './dto/create-pvctrfolasvr.dto';
 import { UpdatePvCtrFolAsvrDto } from './dto/update-pvctrfolasvr.dto';
 import { CreatePvCtrFolAsvrAutoDto } from './dto/create-pvctrfolasvr-auto.dto';
 import { ListPvCtrFolAsvrQueryDto } from './dto/list-pvctrfolasvr-query.dto';
+import { ListPvCtrFolAsvrReimpresionQueryDto } from './dto/list-pvctrfolasvr-reimpresion-query.dto';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import {
   inferOrigenAut,
@@ -166,6 +167,100 @@ export class PvCtrFolAsvrService {
       items.map((row) => this.regularizeHistoricalFolioRow(row)),
     );
     return items;
+  }
+
+  async findForReimpresion(query: ListPvCtrFolAsvrReimpresionQueryDto) {
+    const suc = this.normalizeText(query?.suc ?? '');
+    const opv = this.normalizeText(query?.opv ?? '');
+    const search = this.normalizeText(query?.search ?? '');
+    const fcnm = this.normalizeText(query?.fcnm ?? '');
+    const pageSize = Math.min(20, Math.max(1, Number(query?.pageSize ?? 20) || 20));
+    const pageRequested = Math.max(1, Number(query?.page ?? 1) || 1);
+
+    const hasCriteria = fcnm.length > 0 || search.length > 0 || opv.length > 0;
+    if (!hasCriteria) {
+      return {
+        data: [],
+        total: 0,
+        page: pageRequested,
+        pageSize,
+        totalPages: 0,
+      };
+    }
+
+    const params: unknown[] = [];
+    const where: string[] = ["a.ESTA = 'MB51PROCES'"];
+
+    if (suc.length > 0) {
+      where.push(`a.SUC = @${params.length}`);
+      params.push(suc);
+    }
+
+    if (opv.length > 0) {
+      where.push(
+        `(a.OPV = @${params.length} OR a.OPVM = @${params.length})`,
+      );
+      params.push(opv);
+    }
+
+    if (fcnm.length > 0) {
+      const normalizedDate = this.parseSqlDate(fcnm, 'fcnm');
+      where.push(`CAST(a.FCNM AS DATE) = @${params.length}`);
+      params.push(normalizedDate);
+    }
+
+    if (search.length > 0) {
+      where.push(
+        `(a.IDFOL LIKE @${params.length} OR ISNULL(a.IDFOLINICIAL, '') LIKE @${params.length} OR ISNULL(c.RazonSocialReceptor, '') LIKE @${params.length} OR CAST(ISNULL(a.CLIEN, 0) AS NVARCHAR(50)) LIKE @${params.length} OR ISNULL(a.OPV, '') LIKE @${params.length} OR ISNULL(a.OPVM, '') LIKE @${params.length})`,
+      );
+      params.push(`%${search}%`);
+    }
+
+    const totalRows = await this.dataSource.query(
+      `
+      SELECT COUNT(1) AS total
+      FROM dbo.PV_CTR_FOL_ASVR a
+      LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
+      WHERE ${where.join(' AND ')};
+      `,
+      params,
+    );
+    const total = this.toInt(totalRows?.[0]?.total ?? totalRows?.[0]?.TOTAL);
+    const totalPages = total <= 0 ? 0 : Math.ceil(total / pageSize);
+    const page = totalPages > 0 ? Math.min(pageRequested, totalPages) : pageRequested;
+    if (total <= 0) {
+      return {
+        data: [],
+        total: 0,
+        page,
+        pageSize,
+        totalPages,
+      };
+    }
+
+    const offset = (page - 1) * pageSize;
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        a.*,
+        c.RazonSocialReceptor AS RazonSocialReceptor
+      FROM dbo.PV_CTR_FOL_ASVR a
+      LEFT JOIN dbo.FACT_CLIENT_SHP c ON a.CLIEN = c.IDC
+      WHERE ${where.join(' AND ')}
+      ORDER BY a.FCNM DESC
+      OFFSET @${params.length} ROWS
+      FETCH NEXT @${params.length + 1} ROWS ONLY;
+      `,
+      [...params, offset, pageSize],
+    );
+
+    return {
+      data: ((rows ?? []) as Record<string, unknown>[]),
+      total,
+      page,
+      pageSize,
+      totalPages,
+    };
   }
 
   async findOneForRead(idfol: string) {
@@ -365,6 +460,30 @@ export class PvCtrFolAsvrService {
 
   private normalizeUpper(value: string) {
     return this.normalizeText(value).toUpperCase();
+  }
+
+  private parseSqlDate(value: string, fieldName: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new BadRequestException(`${fieldName} invalido`);
+    }
+    const [yy, mm, dd] = value.split('-').map((part) => Number(part));
+    const parsed = new Date(yy, mm - 1, dd);
+    if (
+      parsed.getFullYear() !== yy ||
+      parsed.getMonth() !== mm - 1 ||
+      parsed.getDate() !== dd
+    ) {
+      throw new BadRequestException(`${fieldName} invalido`);
+    }
+    return `${yy.toString().padStart(4, '0')}-${mm.toString().padStart(2, '0')}-${dd.toString().padStart(2, '0')}`;
+  }
+
+  private toInt(value: unknown) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.trunc(value);
+    }
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   private buildCrossScopeSearchWhere(input: {

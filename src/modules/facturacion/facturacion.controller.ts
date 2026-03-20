@@ -16,6 +16,7 @@ import { EmitirFacturaDto } from './dto/emitir-factura.dto';
 import { CancelarFacturaDto } from './dto/cancelar-factura.dto';
 import { ReenviarEmailDto } from './dto/reenviar-email.dto';
 import { ListFacturacionPendientesQueryDto } from './dto/list-facturacion-pendientes-query.dto';
+import { ListFacturacionReqfFoliosQueryDto } from './dto/list-facturacion-reqf-folios-query.dto';
 import { FacturacionUnificacionPreviewDto } from './dto/facturacion-unificacion-preview.dto';
 import { FacturacionUnificacionCreateDto } from './dto/facturacion-unificacion-create.dto';
 import { FacturacionUnificacionReverseDto } from './dto/facturacion-unificacion-reverse.dto';
@@ -43,6 +44,30 @@ export class FacturacionController {
       idFol: query.idFol,
       tipoFact: query.tipoFact,
     }, user);
+  }
+
+  @Get('reqf/folios')
+  foliosReqf(
+    @Query() query: ListFacturacionReqfFoliosQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.listarFoliosReqf(
+      {
+        suc: query.suc,
+        fcnm: query.fcnm,
+        search: query.search,
+        page: query.page,
+      },
+      user,
+    );
+  }
+
+  @Post('reqf/folios/:idFol/marcar')
+  marcarFolioReqf(
+    @Param('idFol') idFol: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.marcarFolioReqf(idFol, user);
   }
 
   @Post('unificaciones/preview')

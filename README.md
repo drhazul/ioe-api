@@ -119,6 +119,7 @@ Opcionales:
 - trazabilidad UI facturación tipografía (2026-03-15): `ioe_app` usa configuración visual por modal para ajustar escala global y fuentes por componente (AppBar, títulos, labels, body, botones, header/celdas), sin impacto en endpoints.
 - trazabilidad UI facturación columnas (2026-03-15): `ioe_app` agrega ajuste persistente de ancho por columna y separación entre campos (cache local `SharedPreferences`), además de separadores arrastrables en el encabezado; no cambia contrato API.
 - unificación facturación sucursal JWT (2026-03-16): `preview/create` de `/facturacion/unificaciones` ya no fuerzan sucursal desde `user.suc` para usuarios con permisos de gestión (`FACTURA`/compat), evitando falsos bloqueos de "folios fuera de la sucursal autorizada".
+- REQF sin facturar (2026-03-16): `GET /facturacion/reqf/folios` requiere `REG_SINREQF` (o gestión `FACTURA`/compat) y filtra no-admin por sucursales autorizadas en `USR_MOD_SUC`; si no hay filas, aplica fallback legado a `user.suc`.
 - Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.
 - `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
@@ -419,12 +420,16 @@ Opcionales:
 - compatibilidad NDOC devolución (2026-03): al calcular consecutivo `NDOC`, API consulta `NDOC` solo cuando existe en `DAT_CTRL_CTAS`/`DAT_CTR_DOC`; en `DAT_CTRL_CTAS` el insert usa `NDOC` opcional según columnas disponibles para evitar `Invalid column name 'NDOC'`.
 - política de fecha de finalización devolución (2026-03): API reutiliza una fecha actual única del cierre para `FACT_IDFOLDEV` (`FCN/FCNR`), `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, `PV_TICKET_LOG.UPDATED_AT` y movimientos contables asociados.
 - marca ORDs afectadas como anuladas (`PV_CTR_ORDS.ESTATUS=4`).
-- devolución origen VF (2026-03-11): al finalizar pago de devolución ya no se ejecuta `dbo.sp_fact_sync_folio_vf` desde el módulo de devoluciones; este flujo no inserta/actualiza `FAC_SVR_SHAP` ni `FACT_TICKET_SHP`.
+- sincronización facturación devolución VF (2026-03-20): al finalizar `POST /pv/devoluciones/:idfolDev/pago/finalizar`, backend ejecuta `dbo.sp_fact_sync_folio_vf` sobre el folio origen para recalcular `FAC_SVR_SHAP/FACT_TICKET_SHP` con base en `CTD-CTDDF`; devolución total deja `ESTATUS='VTA DEV'` e `IMPT=0`, y devolución parcial disminuye `IMPT` en facturación.
+- forma devolución = forma origen (2026-03-20): para devoluciones no `CREDITO/DEUDOR`, backend valida que el pago se cierre en la misma forma del ticket origen (`EFECTIVO`, `TRANSFERENCIA`, `TARJETA`, `CHEQUE`, `DEPOSITO 3RO`); para `CREDITO/DEUDOR` se conserva la política vigente.
+- limpieza preventiva DVF en facturación (2026-03-20): al finalizar devolución, backend depura cualquier registro residual del folio devolución en `FAC_SVR_SHAP` y `FACT_TICKET_SHP` para evitar cabeceras no deseadas ligadas a devolución.
+- respuesta cierre devolución (2026-03-20): el endpoint devuelve bloque `facturacionSync` (`idfol`, `syncApplied`, `estatus`, `impt`, `detailRows`, `evento`) para trazabilidad de sincronización en frontend.
 - transmisión MB51/stock devolución (2026-03): al finalizar pago de devolución, backend ejecuta `dbo.sp_mb51_transmitir_folio` para insertar renglones en `DAT_MB51` y ajustar `DAT_ART.STOCK` por resumen de `ART+SUC`; el estado del folio se mantiene en `PAGADO`.
 - folio devolución termina en `ESTA='PAGADO'` y `AUT='DF'/'APDF'`; el envío a `MB51PROCES` se realiza después mediante `PATCH /pvctrfolasvr/:idfol`.
 - SQL soporte:
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta la tabla staging `PV_DEV_DET_TMP`.
 - `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación por evento VF.
+- `sql/2026-03-20_facturacion_sync_after_devoluciones.sql` depura registros históricos de `IDFOLDEV` en `FAC_SVR_SHAP/FACT_TICKET_SHP` y luego reprocesa folios origen elegibles (`AUT='VF'` + `REQF=1`).
 
 ## Reloj Checador (Asistencia)
 
@@ -562,7 +567,8 @@ Opcionales:
 - `FACTURA` (compatibilidad: `FACTURACION`, `PV_FACTURACION`, `FACT_IOE`) habilita operaciones de gestión: emitir, refrescar, reenviar, cancelar, unificar/reversar.
 - `FACTURA_VIEW` habilita operaciones de consulta de facturación.
 - Admin (rol/nivel administrativo configurado por `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`; incluye usuario `ADMIN`) mantiene bypass total front/back para consultar/editar/eliminar; no requiere enrolamiento front ni permiso backend adicional.
-- Facturación no se controla con `USR_MOD_SUC`; no se debe exigir registro de admin en `USR_MOD_SUC` para operar facturación.
+- Facturación no se controla con `USR_MOD_SUC` en flujo base (`/facturacion`, `/facturacion-view` y unificación); no se debe exigir registro de admin en `USR_MOD_SUC` para operar facturación.
+- Excepción: `REG_SINREQF` sí usa `USR_MOD_SUC` para alcance de sucursales en usuarios no-admin.
 - En unificación de facturación (`/facturacion/unificaciones/*`), la gestión no se debe restringir por `user.suc` del JWT cuando el usuario ya tiene permisos de gestión.
 
 ## Ejecucion

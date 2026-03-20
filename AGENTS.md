@@ -97,6 +97,7 @@
 - trazabilidad UI facturación columnas (2026-03-15): `ioe_app` habilita ajuste persistente de ancho por columna/separación entre campos (`SharedPreferences`) y separadores arrastrables en encabezado de grilla, sin cambios backend.
 - facturación pendientes seguridad funcional (2026-03-13): el endpoint no fuerza `SUC` por token; la sucursal se controla mediante el filtro explícito `suc` cuando el usuario la captura.
 - unificación facturación sucursal JWT (2026-03-16): `POST /facturacion/unificaciones/preview` y `POST /facturacion/unificaciones` no deben forzar `@SUC` desde `user.suc` para usuarios con permiso de gestión (`FACTURA`/compat), evitando bloqueos falsos por "folios fuera de la sucursal autorizada".
+- REQF sin facturar (2026-03-16): `GET /facturacion/reqf/folios` exige módulo `REG_SINREQF` (o gestión `FACTURA`/compat) y aplica alcance de sucursales para no-admin mediante `USR_MOD_SUC` (`MODULO IN ('REG_SINREQF','FACTURA','FACTURACION','PV_FACTURACION','FACT_IOE')`), con fallback legado a `user.suc`.
 - `GET /pvctrfolasvr` (optimizacion 2026-03): soporta query params `suc`, `opv`, `search` para panel de cotizaciones, con filtro SQL por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
 - Compatibilidad query cotizaciones (2026-03): `ListPvCtrFolAsvrQueryDto` tolera parametro opcional `_` para clientes legacy que usen cache-buster, evitando `400 property _ should not exist`.
 - `GET /pvctrfolasvr` (2026-03): incluye `RazonSocialReceptor` en la respuesta (join a `FACT_CLIENT_SHP`) para visualizacion de panel en app.
@@ -356,7 +357,10 @@
 - en formas `CREDITO/DEUDOR`, registra abono en `DAT_CTR_DOC` (si existe) y `DAT_CTRL_CTAS` con `CTA='101001002'`, clase `601`, `RTXT='Abono por anulacion cliente ticket <folio origen>'` e `IDFOL=<folio origen>`; `NDOC` se usa cuando existe en esquema.
 - compatibilidad NDOC devolución (2026-03): al generar consecutivo de `NDOC`, API solo consulta `NDOC` en `DAT_CTRL_CTAS`/`DAT_CTR_DOC` cuando la columna existe; en `DAT_CTRL_CTAS` el insert usa `NDOC` opcional según esquema para evitar `Invalid column name 'NDOC'`.
 - política de fecha de finalización devolución (2026-03): al finalizar, API fija una sola fecha de proceso actual y la reutiliza en `FACT_IDFOLDEV` (`FCN/FCNR`), `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, `PV_TICKET_LOG.UPDATED_AT` y movimientos `DAT_CTR_DOC`/`DAT_CTRL_CTAS`.
-- sincronización facturación devolución VF (2026-03-11): al finalizar una devolución con origen `VF`, la API ya no invoca `dbo.sp_fact_sync_folio_vf`; el flujo de devoluciones no escribe cabecera/detalle en `FAC_SVR_SHAP` ni `FACT_TICKET_SHP`.
+- sincronización facturación devolución VF (2026-03-20): al finalizar `POST /pv/devoluciones/:idfolDev/pago/finalizar`, la API ejecuta `dbo.sp_fact_sync_folio_vf` sobre el folio origen para recalcular `FAC_SVR_SHAP/FACT_TICKET_SHP` con `CTD-CTDDF`; devolución total deja `ESTATUS='VTA DEV'` e `IMPT=0`, y devolución parcial reduce `IMPT` en facturación.
+- forma de pago devolución vs origen (2026-03-20): para devoluciones no `CREDITO/DEUDOR`, backend valida que el pago final use la misma forma del ticket origen; si el origen fue `EFECTIVO` devuelve en `EFECTIVO`, si fue `TRANSFERENCIA` devuelve en `TRANSFERENCIA` (análogo para `TARJETA/CHEQUE/DEPOSITO 3RO`).
+- limpieza preventiva facturación devolución (2026-03-20): durante `POST /pv/devoluciones/:idfolDev/pago/finalizar`, backend depura cualquier registro residual del folio devolución en `FAC_SVR_SHAP` y `FACT_TICKET_SHP` para evitar cabeceras `DVF` no deseadas.
+- respuesta cierre devolución (2026-03-20): el endpoint retorna `facturacionSync` (`idfol`, `syncApplied`, `estatus`, `impt`, `detailRows`, `evento`) para visibilidad operativa en frontend.
 - anula ORDs afectadas con `PV_CTR_ORDS.ESTATUS=4`.
 - al finalizar pago de devolución, backend ejecuta `dbo.sp_mb51_transmitir_folio` para insertar renglones en `DAT_MB51` y ajustar `DAT_ART.STOCK` por resumen `ART+SUC`; `ESTA` permanece en `PAGADO`.
 - deja folio devolución en `ESTA='PAGADO'` y `AUT='DF'/'APDF'`; el paso a `MB51PROCES` se realiza posteriormente vía `PATCH /pvctrfolasvr/:idfol` desde frontend.
@@ -433,6 +437,7 @@
 - `sql/2026-03-13_facturacion_aut_compat.sql` agrega columna `FAC_SVR_SHAP.AUT` si falta y hace backfill desde `TIPOVTA` para compatibilidad con consultas legacy de facturación.
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta staging de líneas para devoluciones PV.
 - `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación en eventos VF.
+- `sql/2026-03-20_facturacion_sync_after_devoluciones.sql` depura históricamente registros de `IDFOLDEV` en `FAC_SVR_SHAP/FACT_TICKET_SHP` y luego reprocesa folios origen elegibles (`AUT='VF'` + `REQF=1`) con `sp_fact_sync_folio_vf`.
 - `sql/USUARIO_forzar_cambio_pass_alter.sql` agrega `FORZAR_CAMBIO_PASS` para controlar cambio obligatorio de contraseña en primer acceso.
 - `sql/DAT_ART_idx_suc_bloq_detalle_cot_create.sql` crea índice `IX_DAT_ART_SUC_BLOQ_DETALLE_COT` para acelerar búsqueda de detalle cotización por `SUC` con filtro `BLOQ<>-1`.
 - Estado de cajón OPV:
@@ -529,7 +534,8 @@
 - `FACTURA` (compat: `FACTURACION`, `PV_FACTURACION`, `FACT_IOE`) habilita operaciones de gestión (editar/emitir/cancelar/reversar).
 - `FACTURA_VIEW` habilita operaciones de consulta.
 - Admin (rol/nivel administrativo configurado por `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`; incluye usuario `ADMIN`) tiene bypass total front/back para consultar/editar/eliminar en facturación; no requiere alta en enrolamientos ni permisos adicionales.
-- Facturación no se autoriza por `USR_MOD_SUC`; no se debe exigir registro de admin en `USR_MOD_SUC`.
+- Facturación no se autoriza por `USR_MOD_SUC` en flujo base (`/facturacion`, `/facturacion-view` y unificación); no se debe exigir registro de admin en `USR_MOD_SUC`.
+- Excepción controlada: el módulo `REG_SINREQF` sí usa `USR_MOD_SUC` para alcance de sucursales en usuarios no-admin.
 - En unificación de facturación (`/facturacion/unificaciones/*`), no restringir gestión por `user.suc` del JWT cuando el usuario ya cuenta con permisos de gestión de facturación.
 
 ## Caja General: autorizacion por sucursal

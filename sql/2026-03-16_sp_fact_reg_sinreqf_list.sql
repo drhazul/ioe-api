@@ -1,0 +1,77 @@
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_fact_reg_sinreqf_list
+  @SUC NVARCHAR(20) = NULL,
+  @FCNM NVARCHAR(30) = NULL,
+  @SEARCH NVARCHAR(255) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  IF OBJECT_ID('dbo.PV_CTR_FOL_ASVR', 'U') IS NULL
+    THROW 51080, 'No existe dbo.PV_CTR_FOL_ASVR', 1;
+  IF OBJECT_ID('dbo.FACT_CLIENT_SHP', 'U') IS NULL
+    THROW 51081, 'No existe dbo.FACT_CLIENT_SHP', 1;
+
+  DECLARE @sucNorm NVARCHAR(20) = NULLIF(UPPER(LTRIM(RTRIM(@SUC))), '');
+  DECLARE @fcnmNorm NVARCHAR(30) = NULLIF(UPPER(LTRIM(RTRIM(@FCNM))), '');
+  DECLARE @searchNorm NVARCHAR(255) = NULLIF(UPPER(LTRIM(RTRIM(@SEARCH))), '');
+  DECLARE @fcnmDate DATE = TRY_CONVERT(DATE, @fcnmNorm);
+
+  DECLARE @reqfExpr NVARCHAR(64) = N'CAST(NULL AS INT)';
+  IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'REQF') IS NOT NULL
+    SET @reqfExpr = N'TRY_CONVERT(INT, a.REQF)';
+  ELSE IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'RQFAC') IS NOT NULL
+    SET @reqfExpr = N'TRY_CONVERT(INT, a.RQFAC)';
+
+  DECLARE @sql NVARCHAR(MAX) = N'
+    SELECT
+      a.*,
+      c.RazonSocialReceptor
+    FROM dbo.PV_CTR_FOL_ASVR a
+    INNER JOIN dbo.FACT_CLIENT_SHP c
+      ON TRY_CONVERT(BIGINT, a.CLIEN) = TRY_CONVERT(BIGINT, c.IDC)
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(CAST(a.AUT AS NVARCHAR(20)), '''')))) = ''VF''
+      AND (' + @reqfExpr + N' = 0 OR ' + @reqfExpr + N' IS NULL)
+      AND (
+        @SUC_NORM IS NULL
+        OR UPPER(LTRIM(RTRIM(ISNULL(CAST(a.SUC AS NVARCHAR(20)), '''')))) = @SUC_NORM
+      )
+      AND (
+        @FCNM_NORM IS NULL
+        OR (
+          @FCNM_DATE IS NOT NULL
+          AND TRY_CONVERT(DATE, TRY_CONVERT(DATETIME, a.FCNM)) = @FCNM_DATE
+        )
+        OR (
+          @FCNM_DATE IS NULL
+          AND UPPER(CONVERT(NVARCHAR(19), TRY_CONVERT(DATETIME, a.FCNM), 120))
+              LIKE ''%'' + @FCNM_NORM + ''%''
+        )
+      )
+      AND (
+        @SEARCH_NORM IS NULL
+        OR UPPER(LTRIM(RTRIM(ISNULL(CAST(a.IDFOL AS NVARCHAR(120)), ''''))))
+            LIKE ''%'' + @SEARCH_NORM + ''%''
+        OR UPPER(LTRIM(RTRIM(ISNULL(CAST(a.CLIEN AS NVARCHAR(120)), ''''))))
+            LIKE ''%'' + @SEARCH_NORM + ''%''
+        OR UPPER(LTRIM(RTRIM(ISNULL(CAST(c.RazonSocialReceptor AS NVARCHAR(4000)), ''''))))
+            LIKE ''%'' + @SEARCH_NORM + ''%''
+        OR UPPER(LTRIM(RTRIM(ISNULL(CAST(a.OPV AS NVARCHAR(120)), ''''))))
+            LIKE ''%'' + @SEARCH_NORM + ''%''
+      )
+    ORDER BY COALESCE(TRY_CONVERT(DATETIME, a.FCNM), TRY_CONVERT(DATETIME, a.FCN)) DESC;';
+
+  EXEC sys.sp_executesql
+    @sql,
+    N'@SUC_NORM NVARCHAR(20), @FCNM_NORM NVARCHAR(30), @FCNM_DATE DATE, @SEARCH_NORM NVARCHAR(255)',
+    @SUC_NORM = @sucNorm,
+    @FCNM_NORM = @fcnmNorm,
+    @FCNM_DATE = @fcnmDate,
+    @SEARCH_NORM = @searchNorm;
+END;
+GO

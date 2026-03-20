@@ -90,11 +90,25 @@ type FormaNormalizada = {
   aut: string | null;
 };
 
+type FormaOrigenPrincipal = {
+  form: string;
+  aut: string | null;
+};
+
 type SupervisorInfo = {
   idUsuario: number;
   username: string;
   roleCode: string;
   suc: string | null;
+};
+
+type FacturacionSyncResult = {
+  idfol: string;
+  syncApplied: boolean;
+  estatus: string | null;
+  impt: number | null;
+  detailRows: number;
+  evento: string | null;
 };
 
 @Injectable()
@@ -626,6 +640,11 @@ export class PvDevolucionesService {
         tipotran: context.tipotran,
         rqfac,
       });
+      await this.assertFormasPagoContraOrigen(
+        queryRunner,
+        context.idfolOrig,
+        formas,
+      );
 
       const sumPagos = this.round2(
         formas.reduce((acc, item) => acc + item.impp, 0),
@@ -652,6 +671,7 @@ export class PvDevolucionesService {
         selected.reduce((acc, item) => acc + (item.ctdd ?? 0), 0),
       );
       const finalizedAt = await this.loadSqlProcessNow(queryRunner);
+      let facturacionSync: FacturacionSyncResult | null = null;
 
       await this.insertFactIdfolDev(queryRunner, {
         idfolDev: context.idfolDev,
@@ -689,6 +709,9 @@ export class PvDevolucionesService {
         context.idfolDev,
         context.idfolOrig,
       );
+      facturacionSync = await this.syncFacturacionFolioOrigen(queryRunner, {
+        idfolOrig: context.idfolOrig,
+      });
       await this.updateDevolucionHeaderFinal(queryRunner, {
         idfolDev: context.idfolDev,
         autFinal,
@@ -715,6 +738,11 @@ export class PvDevolucionesService {
         idfolFinal = nextVisible.idfol;
       }
 
+      await this.pruneFacturacionDevolucionArtifacts(queryRunner, [
+        context.idfolDev,
+        idfolFinal,
+      ]);
+
       await this.executeMb51Transmission(queryRunner, {
         idfol: idfolFinal,
         user: opvActor,
@@ -739,6 +767,7 @@ export class PvDevolucionesService {
           cambio,
           formas: formas.map((f) => ({ ...f })),
           opv: opvActor,
+          facturacionSync,
         }),
         IP: ip,
       });
@@ -751,6 +780,7 @@ export class PvDevolucionesService {
         status: 'PAGADO',
         aut: autFinal,
         totals,
+        facturacionSync,
       };
     } catch (error) {
       await this.rollbackTransactionSafe(queryRunner);
@@ -1756,7 +1786,10 @@ export class PvDevolucionesService {
     const sugeridas: Array<{ form: string; impp: number; aut: string | null }> =
       [];
 
-    if (formaOrig === 'CREDITO' || formaOrig === 'DEUDOR') {
+    if (
+      formaOrig?.form === 'CREDITO' ||
+      formaOrig?.form === 'DEUDOR'
+    ) {
       const debeRows = await executor.query(
         `
         SELECT SUM(ISNULL(IMPT, 0)) AS DEBE
@@ -1771,7 +1804,7 @@ export class PvDevolucionesService {
 
       if (abonoCr > 0) {
         sugeridas.push({
-          form: formaOrig,
+          form: formaOrig.form,
           impp: abonoCr,
           aut: idfolDev,
         });
@@ -1786,6 +1819,16 @@ export class PvDevolucionesService {
       if (sugeridas.length) return sugeridas;
     }
 
+    if (formaOrig?.form) {
+      return [
+        {
+          form: formaOrig.form,
+          impp: this.round2(total),
+          aut: formaOrig.form === 'EFECTIVO' ? null : formaOrig.aut,
+        },
+      ];
+    }
+
     return [
       {
         form: 'EFECTIVO',
@@ -1798,21 +1841,32 @@ export class PvDevolucionesService {
   private async loadPrimaryFormaOriginal(
     executor: SqlExecutor,
     idfolOrig: string,
-  ) {
+  ): Promise<FormaOrigenPrincipal | null> {
     const tableName = await this.resolveFolioFormTable(executor);
     const cols = await this.loadTableColumns(executor, tableName);
     if (!cols.has('FORM')) return null;
 
-    let orderBy = '[FORM] ASC';
-    if (cols.has('FCN')) {
-      orderBy = '[FCN] ASC';
-    } else if (cols.has('IDF')) {
-      orderBy = '[IDF] ASC';
+    const selectedCols = ['FORM'];
+    if (cols.has('AUT')) {
+      selectedCols.push('AUT');
     }
+
+    const orderByParts: string[] = [];
+    if (cols.has('IMPP')) {
+      orderByParts.push('ABS(TRY_CONVERT(MONEY, IMPP)) DESC');
+    }
+    if (cols.has('FCN')) {
+      orderByParts.push('[FCN] ASC');
+    } else if (cols.has('IDF')) {
+      orderByParts.push('[IDF] ASC');
+    }
+    orderByParts.push('[FORM] ASC');
+    const orderBy = orderByParts.join(', ');
 
     const rows = await executor.query(
       `
-      SELECT TOP 1 FORM
+      SELECT TOP 1
+        ${selectedCols.join(', ')}
       FROM ${tableName}
       WHERE IDFOL = @0
       ORDER BY ${orderBy}
@@ -1820,8 +1874,48 @@ export class PvDevolucionesService {
       [idfolOrig],
     );
 
-    const forma = this.normalizeForma((rows?.[0] ?? {})['FORM']);
-    return forma || null;
+    const row = ((rows?.[0] ?? {}) as Record<string, unknown>) ?? {};
+    const forma = this.normalizeForma(row.FORM);
+    if (!forma) return null;
+    return {
+      form: forma,
+      aut: this.nullableText(row.AUT),
+    };
+  }
+
+  private async assertFormasPagoContraOrigen(
+    executor: SqlExecutor,
+    idfolOrig: string,
+    formas: FormaNormalizada[],
+  ) {
+    const formaOrig = await this.loadPrimaryFormaOriginal(executor, idfolOrig);
+    if (!formaOrig?.form) return;
+    if (formaOrig.form === 'CREDITO' || formaOrig.form === 'DEUDOR') {
+      return;
+    }
+
+    const distinctForms = Array.from(
+      new Set(formas.map((item) => this.normalizeUpper(item.form)).filter(Boolean)),
+    );
+    if (distinctForms.length !== 1 || distinctForms[0] !== formaOrig.form) {
+      throw new ConflictException(
+        `La devolución debe pagarse en la forma del ticket origen (${formaOrig.form})`,
+      );
+    }
+
+    if (formaOrig.form !== 'EFECTIVO') {
+      const autOrigNorm = this.normalizeUpper(formaOrig.aut);
+      if (autOrigNorm) {
+        const hasMismatchAut = formas.some(
+          (item) => this.normalizeUpper(item.aut) !== autOrigNorm,
+        );
+        if (hasMismatchAut) {
+          throw new ConflictException(
+            `La devolución en ${formaOrig.form} debe conservar la referencia original (${formaOrig.aut})`,
+          );
+        }
+      }
+    }
   }
 
   private normalizeForma(value: unknown) {
@@ -2892,6 +2986,88 @@ export class PvDevolucionesService {
       `,
       [input.idfol, input.user],
     );
+  }
+
+  private async syncFacturacionFolioOrigen(
+    executor: SqlExecutor,
+    input: {
+      idfolOrig: string;
+    },
+  ): Promise<FacturacionSyncResult> {
+    const procedureName = 'dbo.sp_fact_sync_folio_vf';
+    const exists = await this.procedureExists(executor, procedureName);
+    if (!exists) {
+      throw new ConflictException(
+        `No existe ${procedureName}. Ejecute sql/sp_fact_sync_folio_vf_create.sql`,
+      );
+    }
+
+    const rows = await executor.query(
+      `
+      EXEC dbo.sp_fact_sync_folio_vf
+        @IDFOL = @0,
+        @EVENTO = @1,
+        @FORCE = @2
+      `,
+      [input.idfolOrig, 'PV_DEV_FINALIZE', 0],
+    );
+    const row = ((rows?.[0] ?? {}) as Record<string, unknown>) ?? {};
+    const impt = this.toNumber(this.getRowValue(row, 'IMPT'));
+
+    return {
+      idfol:
+        this.normalizeText(this.getRowValue(row, 'IDFOL')) || input.idfolOrig,
+      syncApplied: (this.toInt(this.getRowValue(row, 'SYNC_APPLIED')) ?? 0) === 1,
+      estatus: this.nullableText(this.getRowValue(row, 'ESTATUS')),
+      impt: impt == null ? null : this.round2(impt),
+      detailRows: Math.max(this.toInt(this.getRowValue(row, 'DETAIL_ROWS')) ?? 0, 0),
+      evento: this.nullableText(this.getRowValue(row, 'EVENTO')),
+    };
+  }
+
+  private async pruneFacturacionDevolucionArtifacts(
+    executor: SqlExecutor,
+    idfolCandidates: string[],
+  ) {
+    const idfols = Array.from(
+      new Set(
+        (idfolCandidates ?? [])
+          .map((item) => this.normalizeText(item))
+          .filter((item) => item.length > 0),
+      ),
+    );
+    if (!idfols.length) return;
+
+    const placeholders = idfols.map((_, idx) => `@${idx}`).join(', ');
+
+    if (await this.tableExists(executor, 'dbo.FACT_TICKET_SHP')) {
+      const detailCols = await this.loadTableColumns(
+        executor,
+        'dbo.FACT_TICKET_SHP',
+      );
+      if (detailCols.has('IDFOL')) {
+        await executor.query(
+          `
+          DELETE FROM dbo.FACT_TICKET_SHP
+          WHERE IDFOL IN (${placeholders})
+          `,
+          idfols,
+        );
+      }
+    }
+
+    if (await this.tableExists(executor, 'dbo.FAC_SVR_SHAP')) {
+      const headerCols = await this.loadTableColumns(executor, 'dbo.FAC_SVR_SHAP');
+      if (headerCols.has('IDFOL')) {
+        await executor.query(
+          `
+          DELETE FROM dbo.FAC_SVR_SHAP
+          WHERE IDFOL IN (${placeholders})
+          `,
+          idfols,
+        );
+      }
+    }
   }
 
   private async procedureExists(executor: SqlExecutor, procedureName: string) {

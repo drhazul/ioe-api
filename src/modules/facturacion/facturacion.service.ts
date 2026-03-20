@@ -26,6 +26,13 @@ type ListarPendientesInput = {
   tipoFact?: string | null;
 };
 
+type ListarReqfFoliosInput = {
+  suc?: string | null;
+  fcnm?: string | null;
+  search?: string | null;
+  page?: number | null;
+};
+
 const FACTURIFY_REGIMEN_DESC_FALLBACK: Record<string, string> = {
   '601': 'General de Ley Personas Morales',
   '603': 'Personas Morales con Fines no Lucrativos',
@@ -62,12 +69,18 @@ export class FacturacionService {
     ...FacturacionService.FACTURACION_WRITE_MODULE_CODES,
   ] as const;
 
+  private static readonly FACTURACION_REQF_MODULE_CODES = [
+    'REG_SINREQF',
+    ...FacturacionService.FACTURACION_WRITE_MODULE_CODES,
+  ] as const;
+
   private facSvrShapColumnsCache: Set<string> | null = null;
   private factTicketShpColumnsCache: Set<string> | null = null;
   private factClientShpColumnsCache: Set<string> | null = null;
   private regimenByCodeCache: Map<string, string> | null = null;
   private facturacionReadAccessCache = new Map<number, boolean>();
   private facturacionWriteAccessCache = new Map<number, boolean>();
+  private facturacionReqfAccessCache = new Map<number, boolean>();
 
   constructor(
     private readonly dataSource: DataSource,
@@ -790,6 +803,246 @@ export class FacturacionService {
     };
   }
 
+  async listarFoliosReqf(
+    input: ListarReqfFoliosInput = {},
+    user?: JwtPayload | null,
+  ) {
+    await this.assertFacturacionReqfAccess(
+      user,
+      'consultar procesamiento de folios REQF',
+    );
+    const pageSize = 20;
+    const requestedPage = Number(input.page ?? 1);
+    const page =
+      Number.isFinite(requestedPage) && requestedPage >= 1
+        ? Math.trunc(requestedPage)
+        : 1;
+    const suc = this.normalizeTextFilter(input.suc);
+    const fcnm = this.normalizeTextFilter(input.fcnm);
+    const search = this.normalizeTextFilter(input.search);
+    const isAdmin = this.isAdminUser(user);
+    const allowedSucs = isAdmin
+      ? []
+      : await this.resolveFacturacionReqfAuthorizedSucs(user);
+    const allowedSucsSet = new Set(allowedSucs);
+
+    if (!fcnm && !search) {
+      return {
+        data: [],
+        total: 0,
+        page: 1,
+        pageSize,
+        totalPages: 0,
+        hasPrevPage: false,
+        hasNextPage: false,
+      };
+    }
+
+    if (!isAdmin && suc && !allowedSucsSet.has(suc)) {
+      throw new ForbiddenException(
+        `Sucursal ${suc} no autorizada para el módulo REG_SINREQF`,
+      );
+    }
+
+    await this.ensureStoredProcedure(
+      'dbo.sp_fact_reg_sinreqf_list',
+      'sql/2026-03-16_sp_fact_reg_sinreqf_list.sql',
+    );
+
+    const rows = await this.dataSource.query(
+      `${this.sqlServerStrictSetOptionsPrefix()}
+      EXEC dbo.sp_fact_reg_sinreqf_list
+        @SUC = @0,
+        @FCNM = @1,
+        @SEARCH = @2`,
+      [suc || null, fcnm, search],
+    );
+
+    const allRows = (rows ?? []) as Record<string, unknown>[];
+    let scopedRows = allRows;
+    if (!isAdmin) {
+      scopedRows = scopedRows.filter((row) => {
+        const rowSuc = this.normalizeUpper(this.readRowValue(row, 'SUC'));
+        return rowSuc.length > 0 && allowedSucsSet.has(rowSuc);
+      });
+    }
+    if (suc) {
+      scopedRows = scopedRows.filter((row) => {
+        const rowSuc = this.normalizeUpper(this.readRowValue(row, 'SUC'));
+        return rowSuc === suc;
+      });
+    }
+
+    const total = scopedRows.length;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+    const normalizedPage = totalPages > 0 ? Math.min(page, totalPages) : 1;
+    const offset = (normalizedPage - 1) * pageSize;
+    const data = scopedRows.slice(offset, offset + pageSize);
+
+    for (const row of data) {
+      const imptValue = Number(
+        (row as Record<string, unknown>).IMPT ??
+          (row as Record<string, unknown>).impt ??
+          0,
+      );
+      if (Number.isFinite(imptValue)) {
+        const rounded = Number(imptValue.toFixed(2));
+        (row as Record<string, unknown>).IMPT = rounded;
+        (row as Record<string, unknown>).impt = rounded;
+      }
+    }
+
+    return {
+      data,
+      total,
+      page: normalizedPage,
+      pageSize,
+      totalPages,
+      hasPrevPage: normalizedPage > 1,
+      hasNextPage: normalizedPage < totalPages,
+    };
+  }
+
+  async marcarFolioReqf(idFolRaw: string, user?: JwtPayload | null) {
+    await this.assertFacturacionReqfAccess(
+      user,
+      'marcar REQF en procesamiento de folios',
+    );
+
+    const idFol = this.normalizeUpper(idFolRaw);
+    if (!idFol) {
+      throw new BadRequestException('IDFOL es requerido');
+    }
+
+    const isAdmin = this.isAdminUser(user);
+    const allowedSucs = isAdmin
+      ? []
+      : await this.resolveFacturacionReqfAuthorizedSucs(user);
+    const allowedSucsSet = new Set(allowedSucs);
+
+    await this.ensureStoredProcedure(
+      'dbo.sp_fact_sync_folio_vf',
+      'sql/sp_fact_sync_folio_vf_create.sql',
+    );
+
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const reqfColRows = await manager.query(
+          `SELECT CASE
+              WHEN COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'REQF') IS NOT NULL THEN 'REQF'
+              WHEN COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'RQFAC') IS NOT NULL THEN 'RQFAC'
+              ELSE ''
+            END AS REQF_COL`,
+        );
+        const reqfCol = this.normalizeUpper(
+          (reqfColRows?.[0] as Record<string, unknown> | undefined)?.REQF_COL,
+        );
+        if (!reqfCol) {
+          throw new ConflictException(
+            'No existe columna REQF/RQFAC en dbo.PV_CTR_FOL_ASVR',
+          );
+        }
+
+        const hasIdFolInicialRows = await manager.query(
+          "SELECT CASE WHEN COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'IDFOLINICIAL') IS NOT NULL THEN 1 ELSE 0 END AS HAS_COL",
+        );
+        const hasIdFolInicial =
+          (this.toIntValue(
+            (hasIdFolInicialRows?.[0] as Record<string, unknown> | undefined)
+              ?.HAS_COL,
+          ) ?? 0) === 1;
+        const idFolInicialFilter = hasIdFolInicial
+          ? `OR UPPER(LTRIM(RTRIM(ISNULL(CAST(IDFOLINICIAL AS NVARCHAR(255)), '')))) = @0`
+          : '';
+
+        const folioRows = await manager.query(
+          `
+          SELECT TOP 1
+            LTRIM(RTRIM(ISNULL(CAST(IDFOL AS NVARCHAR(255)), ''))) AS IDFOL,
+            UPPER(LTRIM(RTRIM(ISNULL(CAST(SUC AS NVARCHAR(20)), '')))) AS SUC,
+            UPPER(LTRIM(RTRIM(ISNULL(CAST(AUT AS NVARCHAR(20)), '')))) AS AUT,
+            UPPER(LTRIM(RTRIM(ISNULL(CAST(ESTA AS NVARCHAR(30)), '')))) AS ESTA,
+            TRY_CONVERT(INT, [${reqfCol}]) AS REQF
+          FROM dbo.PV_CTR_FOL_ASVR WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
+          WHERE UPPER(LTRIM(RTRIM(ISNULL(CAST(IDFOL AS NVARCHAR(255)), '')))) = @0
+            ${idFolInicialFilter}
+          ORDER BY
+            CASE
+              WHEN UPPER(LTRIM(RTRIM(ISNULL(CAST(IDFOL AS NVARCHAR(255)), '')))) = @0
+                THEN 0
+              ELSE 1
+            END,
+            TRY_CONVERT(DATETIME, FCNM) DESC,
+            TRY_CONVERT(DATETIME, FCN) DESC`,
+          [idFol],
+        );
+
+        const folio = (folioRows?.[0] ?? null) as Record<string, unknown> | null;
+        if (!folio) {
+          throw new NotFoundException(`No existe folio ${idFol}`);
+        }
+
+        const resolvedIdFol = this.normalizeUpper(this.readRowValue(folio, 'IDFOL'));
+        const folioSuc = this.normalizeUpper(this.readRowValue(folio, 'SUC'));
+        const aut = this.normalizeUpper(this.readRowValue(folio, 'AUT'));
+        const esta = this.normalizeUpper(this.readRowValue(folio, 'ESTA'));
+
+        if (!resolvedIdFol) {
+          throw new NotFoundException(`No se pudo resolver IDFOL para ${idFol}`);
+        }
+
+        if (!isAdmin) {
+          if (!folioSuc || !allowedSucsSet.has(folioSuc)) {
+            throw new ForbiddenException(
+              `Sucursal ${folioSuc || '(sin sucursal)'} no autorizada para REG_SINREQF`,
+            );
+          }
+        }
+
+        if (aut !== 'VF' || esta !== 'MB51PROCES') {
+          throw new BadRequestException(
+            'Solo se permite marcar REQF para folios con AUT=VF y ESTA=MB51PROCES',
+          );
+        }
+
+        await manager.query(
+          `UPDATE dbo.PV_CTR_FOL_ASVR
+           SET [${reqfCol}] = 1
+           WHERE UPPER(LTRIM(RTRIM(ISNULL(CAST(IDFOL AS NVARCHAR(255)), '')))) = @0`,
+          [resolvedIdFol],
+        );
+
+        const syncRows = await manager.query(
+          `${this.sqlServerStrictSetOptionsPrefix()}
+          EXEC dbo.sp_fact_sync_folio_vf
+            @IDFOL = @0,
+            @EVENTO = @1,
+            @FORCE = @2`,
+          [resolvedIdFol, 'REG_SINREQF_MARK', 0],
+        );
+
+        const syncRow = (syncRows?.[0] ?? {}) as Record<string, unknown>;
+        const syncApplied =
+          this.toBoolValue(this.readRowValue(syncRow, 'SYNC_APPLIED')) ?? false;
+
+        return {
+          ok: true,
+          idFol: resolvedIdFol,
+          reqf: 1,
+          syncApplied,
+          message: syncApplied
+            ? 'REQF marcado y sincronizado en facturación'
+            : 'REQF marcado',
+        };
+      });
+    } catch (error) {
+      throw this.mapUnificacionError(
+        error,
+        `No se pudo marcar REQF para ${idFol}`,
+      );
+    }
+  }
+
   async previewUnificacion(idFols: string[], user?: JwtPayload | null) {
     await this.assertFacturacionWriteAccess(user, 'previsualizar unificación');
     const uniqueIdFols = this.uniqueIdFols(idFols);
@@ -1094,6 +1347,56 @@ export class FacturacionService {
     return suc;
   }
 
+  private normalizeDistinctText(values: unknown[]) {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const value of values ?? []) {
+      const normalized = this.normalizeUpper(value);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
+    }
+    return out;
+  }
+
+  private async resolveFacturacionReqfAuthorizedSucs(user?: JwtPayload | null) {
+    if (this.isAdminUser(user)) return [] as string[];
+
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (!username) {
+      throw new ForbiddenException('Usuario sin username');
+    }
+
+    const safeCodes = FacturacionService.FACTURACION_REQF_MODULE_CODES
+      .map((code) => code.replace(/'/g, "''"))
+      .map((code) => `'${code}'`)
+      .join(', ');
+
+    const rows = await this.dataSource.query(
+      `SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(CAST(ums.SUC AS NVARCHAR(20)), '')))) AS SUC
+       FROM dbo.USR_MOD_SUC ums
+       WHERE UPPER(LTRIM(RTRIM(ISNULL(ums.USUARIO, '')))) = @0
+         AND ISNULL(ums.ACTIVO, 1) = 1
+         AND UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, '')))) IN (${safeCodes})`,
+      [username],
+    );
+
+    const sucs = this.normalizeDistinctText(
+      (rows ?? []).map((row: Record<string, unknown>) =>
+        this.readRowValue(row, 'SUC'),
+      ),
+    );
+    if (sucs.length) return sucs;
+
+    // Compatibilidad legacy: si no hay filas en USR_MOD_SUC, usar SUC del JWT.
+    const fallbackSuc = this.currentUserSuc(user);
+    if (fallbackSuc) return [fallbackSuc];
+
+    throw new ForbiddenException(
+      'Usuario sin sucursales autorizadas para el módulo REG_SINREQF',
+    );
+  }
+
   private parseIds(...values: Array<string | undefined>) {
     const out: number[] = [];
     for (const value of values) {
@@ -1197,6 +1500,14 @@ export class FacturacionService {
     );
   }
 
+  private async hasFacturacionReqfAccess(user?: JwtPayload | null) {
+    return this.hasFrontModuleAccessByRole(
+      user,
+      FacturacionService.FACTURACION_REQF_MODULE_CODES,
+      this.facturacionReqfAccessCache,
+    );
+  }
+
   private async assertFacturacionReadAccess(
     user?: JwtPayload | null,
     action = 'consultar facturación',
@@ -1217,6 +1528,16 @@ export class FacturacionService {
     throw new ForbiddenException(
       `Sin permisos para ${action}. Usuario en modo consulta.`,
     );
+  }
+
+  private async assertFacturacionReqfAccess(
+    user?: JwtPayload | null,
+    action = 'consultar folios REQF',
+  ) {
+    if (!user) return;
+    const allowed = await this.hasFacturacionReqfAccess(user);
+    if (allowed) return;
+    throw new ForbiddenException(`Sin permisos para ${action}.`);
   }
 
   private uniqueIdFols(idFols: string[]) {
