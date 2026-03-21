@@ -5,11 +5,19 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, QueryFailedError, Repository } from 'typeorm';
 import { FactClientShpEntity } from './factclientshp.entity';
 import { CreateFactClientShpDto } from './dto/create-factclientshp.dto';
 import { UpdateFactClientShpDto } from './dto/update-factclientshp.dto';
+
+type FactClientUser = {
+  roleId?: number | string;
+  nivel?: number | string;
+  username?: string | null;
+  suc?: string | null;
+};
 
 @Injectable()
 export class FactClientShpService {
@@ -19,6 +27,7 @@ export class FactClientShpService {
     @InjectRepository(FactClientShpEntity)
     private readonly repo: Repository<FactClientShpEntity>,
     private readonly dataSource: DataSource,
+    private readonly config: ConfigService,
   ) {}
 
   private normalizeUsoCfdi(value: string) {
@@ -35,8 +44,53 @@ export class FactClientShpService {
     return Number(match[1]);
   }
 
-  private isAdmin(user?: { roleId?: number } | null) {
-    return Number(user?.roleId ?? 0) === 1;
+  private normalize(value: unknown) {
+    return String(value ?? '').trim();
+  }
+
+  private normalizeUpper(value: unknown) {
+    return this.normalize(value).toUpperCase();
+  }
+
+  private parseIds(...values: Array<string | undefined>) {
+    const out: number[] = [];
+    for (const value of values) {
+      if (!value) continue;
+      for (const part of value.split(',')) {
+        const n = Number(part.trim());
+        if (Number.isFinite(n)) out.push(n);
+      }
+    }
+    return out;
+  }
+
+  private isAdmin(user?: FactClientUser | null) {
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (username === 'ADMIN') return true;
+
+    const roleId = Number(user?.roleId ?? 0);
+    const nivel = Number(user?.nivel ?? 0);
+
+    const adminRoleIds = this.parseIds(
+      this.config.get<string>('ADMIN_ROLE_IDS'),
+      this.config.get<string>('ADMIN_ROLE_ID'),
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const adminNiveles = this.parseIds(
+      this.config.get<string>('ADMIN_NIVELES'),
+      this.config.get<string>('ADMIN_NIVEL'),
+      process.env.ADMIN_NIVELES,
+      process.env.ADMIN_NIVEL,
+    );
+
+    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [1]).includes(
+      roleId,
+    );
+    const nivelAllowed =
+      adminNiveles.length > 0 && adminNiveles.includes(nivel);
+
+    return roleAllowed || nivelAllowed;
   }
 
   private async getFacSvrShapColumns(manager: EntityManager) {
@@ -115,7 +169,7 @@ export class FactClientShpService {
     );
   }
 
-  findAll(user?: { roleId?: number; suc?: string | null }) {
+  findAll(user?: FactClientUser | null) {
     const table = this.repo.metadata.tablePath;
     if (this.isAdmin(user)) {
       return this.repo.query(`SELECT * FROM ${table} ORDER BY IDC ASC`);
@@ -128,7 +182,7 @@ export class FactClientShpService {
     );
   }
 
-  async findOne(id: number, user?: { roleId?: number; suc?: string | null }) {
+  async findOne(id: number, user?: FactClientUser | null) {
     const table = this.repo.metadata.tablePath;
     if (this.isAdmin(user)) {
       const rows = await this.repo.query(
@@ -152,7 +206,7 @@ export class FactClientShpService {
 
   async create(
     dto: CreateFactClientShpDto,
-    user?: { roleId?: number; suc?: string | null },
+    user?: FactClientUser | null,
   ) {
     const isAdmin = this.isAdmin(user);
     const suc = (user?.suc ?? '').trim();
@@ -253,7 +307,7 @@ export class FactClientShpService {
   async update(
     id: number,
     dto: UpdateFactClientShpDto,
-    user?: { roleId?: number; suc?: string | null },
+    user?: FactClientUser | null,
   ) {
     const row = await this.findOne(id, user);
     const isAdmin = this.isAdmin(user);

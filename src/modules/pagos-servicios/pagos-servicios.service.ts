@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryFailedError } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
@@ -40,6 +41,7 @@ export class PagosServiciosService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
   ) {}
 
   async listFolios(query: ListPsFoliosQueryDto, user: JwtPayload) {
@@ -958,6 +960,19 @@ export class PagosServiciosService {
     });
   }
 
+  private async hasLinkedReferences(idFol: string): Promise<boolean> {
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 1 AS HAS_REF
+      FROM dbo.PV_TICKET_LOG
+      WHERE IDFOL = @0
+        AND LTRIM(RTRIM(ISNULL(ORD, ''))) <> ''
+      `,
+      [idFol],
+    );
+    return this.firstRow(rows) !== null;
+  }
+
   private async assertNoMixedOrigen(
     folio: FolioRow,
     targetOrigin: 'CA' | 'VF',
@@ -965,8 +980,9 @@ export class PagosServiciosService {
     const explicitOrigin = this.normalizeUpper(folio.ORIGEN_AUT ?? '');
     const aut = normalizeAut(folio.AUT ?? '');
     const hasExplicit = explicitOrigin === 'CA' || explicitOrigin === 'VF';
+    const hasLinkedReferences = await this.hasLinkedReferences(folio.IDFOL);
 
-    if (hasExplicit && explicitOrigin !== targetOrigin) {
+    if (hasExplicit && explicitOrigin !== targetOrigin && hasLinkedReferences) {
       throw new ConflictException(
         `No se permite mezclar referencias de origen ${explicitOrigin} con ${targetOrigin} en la misma transacción de pago de servicio.`,
       );
@@ -978,7 +994,7 @@ export class PagosServiciosService {
         origenAut: explicitOrigin,
         fallback: 'CA',
       });
-      if (inferred !== targetOrigin) {
+      if (inferred !== targetOrigin && hasLinkedReferences) {
         throw new ConflictException(
           `No se permite mezclar referencias de origen ${inferred} con ${targetOrigin} en la misma transacción de pago de servicio.`,
         );
@@ -1045,8 +1061,45 @@ export class PagosServiciosService {
     return this.normalize(value).toUpperCase();
   }
 
-  private isAdmin(user: JwtPayload) {
-    return Number(user?.roleId ?? 0) === 1;
+  private parseIds(...values: Array<string | undefined>) {
+    const out: number[] = [];
+    for (const value of values) {
+      if (!value) continue;
+      for (const part of value.split(',')) {
+        const n = Number(part.trim());
+        if (Number.isFinite(n)) out.push(n);
+      }
+    }
+    return out;
+  }
+
+  private isAdmin(user?: JwtPayload | null) {
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (username === 'ADMIN') return true;
+
+    const roleId = Number(user?.roleId ?? 0);
+    const nivel = Number(user?.nivel ?? 0);
+
+    const adminRoleIds = this.parseIds(
+      this.config.get<string>('ADMIN_ROLE_IDS'),
+      this.config.get<string>('ADMIN_ROLE_ID'),
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const adminNiveles = this.parseIds(
+      this.config.get<string>('ADMIN_NIVELES'),
+      this.config.get<string>('ADMIN_NIVEL'),
+      process.env.ADMIN_NIVELES,
+      process.env.ADMIN_NIVEL,
+    );
+
+    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [1]).includes(
+      roleId,
+    );
+    const nivelAllowed =
+      adminNiveles.length > 0 && adminNiveles.includes(nivel);
+
+    return roleAllowed || nivelAllowed;
   }
 
   private firstRow(rows: unknown[]): Record<string, unknown> | null {

@@ -78,6 +78,7 @@
 ### Punto de venta / referencias
 
 - `factclientshp`: `FACT_CLIENT_SHP` (`IDC`, `CLIEN_UNI`, `RazonSocialReceptor`, `RfcReceptor`, `UsoCfdi`, `SUC`, ...).
+- compat admin `factclientshp` (2026-03-21): `FactClientShpService.isAdmin` se alinea con reglas transversales (`username='ADMIN'` y/o `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`) para no forzar `user.suc` cuando admin opera multi-sucursal en cotizaciones/PS.
 - Integración UI clientes PV (2026-03): la app puede enviar defaults de alta `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico de selección) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene aceptación con validación de no-vacío/numérica vigente.
 - `pvctrfolasvr`: `PV_CTR_FOL_ASVR` (`IDFOL`, `CLIEN`, `SUC`, `OPV`, `ESTA`, `IMPT`, ...).
 - `facturacion`: endpoints `/facturacion/*` para pendientes/validación/emisión/seguimiento/cancelación sobre `FAC_SVR_SHAP` + `FACT_TICKET_SHP`.
@@ -104,6 +105,7 @@
 - `GET /pvctrfolasvr/:idfol` (2026-03): retorna vista de lectura con `RazonSocialReceptor` (join a `FACT_CLIENT_SHP`) y resuelve por `IDFOL` actual o `IDFOLINICIAL` para compatibilidad cuando el folio visible cambia de `CP` a `CA/VF`.
 - Trazabilidad UI cotizaciones (2026-03-10): búsqueda por OPV desde `search` permite búsqueda cruzada entre OPV solo para folios con `AUT='CP'` y `ESTA='PENDIENTE'`.
 - Trazabilidad UI paneles (2026-03-10): cotizaciones/devoluciones/PS ejecutan anulación lógica vía `PATCH /pvctrfolasvr/:idfol` con `ESTA='ANULADO'` (sin `DELETE` físico), habilitada solo para filas en `PENDIENTE`.
+- Paneles PV (2026-03-21): los listados de cotizaciones/devoluciones/PS excluyen `ESTA='ANULADO'`; solo muestran `PENDIENTE`, `EDITANDO` y `PAGADO`.
 - `pvctrfolform`: `PV_CTR_FOL_FORM` (`IDF`, `IDFOL`, `FORM`, `IMPA`, `IMPP`, `IMPC`, `IMPD`, ...).
 - `pvctrords`: `PV_CTR_ORDS` (`IORD`, `IDFOL`, `ART`, `CTD`, `SUC`, `ESTATUS`, ...).
 - `pvctrordsdet`: `PV_CTR_ORDS_DET` (`IORDP`, `IORD`, `ART`, `JOB`, `ESF`, `CIL`, `EJE`).
@@ -115,6 +117,7 @@
 - Adeudos PS soporta clientes grandes: `sp_ps_adeudos_cliente(@CLIENT BIGINT)` con filtros `TRY_CONVERT(BIGINT, CLIENT)`.
 - Adeudos PS fuente primaria (2026-03): `sp_ps_adeudos_cliente` consulta `DAT_CTRL_CTAS` agrupando por `SUC/CLIENT/CTA/IDFOL`; `ADEUDOS_RES_JSON` se forma desde ese agregado con `ADEUDO < 0`.
 - Referencia folio PS (2026-03): `sp_ps_ticket_set_reference_folio` quedó depurado para no depender de `DAT_CTRL_CTAS_RES`; valida/toma el folio de referencia directamente desde `DAT_CTRL_CTAS` del cliente activo del folio PS.
+- Referencia folio PS (2026-03-21): la primera referencia ligada en el ticket define `ORIGEN_AUT` (`CA`/`VF`); si todavía no hay referencias (`ORD`) se permite adoptar el origen del primer vínculo. Cuando ya existen referencias ligadas, se conserva el origen y se rechaza mezcla `CA`/`VF`.
 - Cálculo adeudo PS (2026-03-03): `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_update_pvta` consolidan `DAT_CTRL_CTAS` por `IDFOL/NDOC + RELACION` para validar referencia y límite de importe sin falsos positivos por mezcla de cargos/abonos.
 - Regla AD/AP/CR (2026-03-03): `sp_ps_ticket_update_pvta` impide que `PVTA` por línea supere la deuda del folio referenciado y controla saldo acumulado por `ORD` sumando líneas `AD/AP/CR` del ticket.
 - Trazabilidad UI PS pago (2026-03): la app mueve el flujo de cierre a `PAGADO -> impresion -> TRANSMITIR`; el backend confirma `PAGADO` en `POST /ps/folios/:idFol/finalizar` y la salida a `TRANSMITIR` se mantiene con `PATCH /pvctrfolasvr/:idfol`.
@@ -369,6 +372,7 @@
 
 - Flujo frontend actualizado: despues de confirmar alta en panel de cotizaciones, la app abre modal para buscar/seleccionar cliente de la SUC del usuario logueado.
 - La app usa `GET /factclientshp` para listado y filtra por SUC en frontend.
+- para admin multi-sucursal, `GET /factclientshp` no debe limitar por `user.suc`; la restricción por SUC se aplica en frontend según sucursal seleccionada del folio/panel.
 - Tras `POST /pvctrfolasvr/auto`, la app asigna cliente al folio via `PATCH /pvctrfolasvr/:idfol` enviando `CLIEN`.
 - Correccion backend (2026-02): `PV_CTR_FOL_ASVR.CLIEN` se mapea como `float` en entidad TypeORM (no `int`) para soportar IDs de cliente > `2,147,483,647` y evitar `EPARAM` en `PATCH /pvctrfolasvr/:idfol`.
 - Compatibilidad facturación (2026-03): `FAC_SVR_SHAP.CLIEN` se ajusta a `FLOAT` para alinearlo con `PV_CTR_FOL_ASVR.CLIEN`; esto permite conservar IDs grandes de cliente (ej. `10460540001`) al sincronizar facturación.
@@ -437,6 +441,7 @@
 - `sql/2026-03-13_facturacion_aut_compat.sql` agrega columna `FAC_SVR_SHAP.AUT` si falta y hace backfill desde `TIPOVTA` para compatibilidad con consultas legacy de facturación.
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta staging de líneas para devoluciones PV.
 - `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación en eventos VF.
+- `sql/22_patch_sp_ps_origen_primer_referencia.sql` crea/actualiza `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_set_reference_gasto` para que `ORIGEN_AUT` se determine por la primera referencia ligada y se bloquee mezcla solo cuando ya existen referencias previas.
 - `sql/2026-03-20_facturacion_sync_after_devoluciones.sql` depura históricamente registros de `IDFOLDEV` en `FAC_SVR_SHAP/FACT_TICKET_SHP` y luego reprocesa folios origen elegibles (`AUT='VF'` + `REQF=1`) con `sp_fact_sync_folio_vf`.
 - `sql/USUARIO_forzar_cambio_pass_alter.sql` agrega `FORZAR_CAMBIO_PASS` para controlar cambio obligatorio de contraseña en primer acceso.
 - `sql/DAT_ART_idx_suc_bloq_detalle_cot_create.sql` crea índice `IX_DAT_ART_SUC_BLOQ_DETALLE_COT` para acelerar búsqueda de detalle cotización por `SUC` con filtro `BLOQ<>-1`.

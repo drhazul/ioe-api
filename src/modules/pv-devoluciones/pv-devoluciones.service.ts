@@ -140,9 +140,9 @@ export class PvDevolucionesService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
-    configService: ConfigService,
+    private readonly config: ConfigService,
   ) {
-    const raw = Number(configService.get('PV_DEV_ORD_BLOCK_THRESHOLD') ?? 5);
+    const raw = Number(this.config.get('PV_DEV_ORD_BLOCK_THRESHOLD') ?? 5);
     this.ordBlockThreshold =
       Number.isFinite(raw) && raw >= 1 ? Math.trunc(raw) : 5;
   }
@@ -957,8 +957,45 @@ export class PvDevolucionesService {
     return Math.round((value + Number.EPSILON) * 10000) / 10000;
   }
 
+  private parseIds(...values: Array<string | undefined>) {
+    const out: number[] = [];
+    for (const value of values) {
+      if (!value) continue;
+      for (const part of value.split(',')) {
+        const n = Number(part.trim());
+        if (Number.isFinite(n)) out.push(n);
+      }
+    }
+    return out;
+  }
+
   private isAdmin(user?: JwtPayload | null) {
-    return Number(user?.roleId ?? 0) === 1;
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (username === 'ADMIN') return true;
+
+    const roleId = Number(user?.roleId ?? 0);
+    const nivel = Number(user?.nivel ?? 0);
+
+    const adminRoleIds = this.parseIds(
+      this.config.get<string>('ADMIN_ROLE_IDS'),
+      this.config.get<string>('ADMIN_ROLE_ID'),
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const adminNiveles = this.parseIds(
+      this.config.get<string>('ADMIN_NIVELES'),
+      this.config.get<string>('ADMIN_NIVEL'),
+      process.env.ADMIN_NIVELES,
+      process.env.ADMIN_NIVEL,
+    );
+
+    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [1]).includes(
+      roleId,
+    );
+    const nivelAllowed =
+      adminNiveles.length > 0 && adminNiveles.includes(nivel);
+
+    return roleAllowed || nivelAllowed;
   }
 
   private resolveOpv(user: JwtPayload) {

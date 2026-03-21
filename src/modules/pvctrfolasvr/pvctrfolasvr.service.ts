@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { PvCtrFolAsvrEntity } from './pvctrfolasvr.entity';
@@ -26,6 +27,7 @@ export class PvCtrFolAsvrService {
     @InjectRepository(PvCtrFolAsvrEntity)
     private readonly repo: Repository<PvCtrFolAsvrEntity>,
     private readonly dataSource: DataSource,
+    private readonly config: ConfigService,
   ) {}
 
   async findAll(query: ListPvCtrFolAsvrQueryDto, user: JwtPayload) {
@@ -88,7 +90,7 @@ export class PvCtrFolAsvrService {
       const ownParams: unknown[] = [];
       const ownWhere: string[] = [
         "a.AUT IN ('CA','VF','CP')",
-        "a.ESTA IN ('PENDIENTE','EDITANDO','PAGADO','ANULADO')",
+        "a.ESTA IN ('PENDIENTE','EDITANDO','PAGADO')",
       ];
 
       if (suc.length > 0) {
@@ -129,7 +131,7 @@ export class PvCtrFolAsvrService {
       const crossParams: unknown[] = [];
       const crossWhere: string[] = [
         "a.AUT = 'CP'",
-        "a.ESTA IN ('PENDIENTE','ANULADO')",
+        "a.ESTA = 'PENDIENTE'",
       ];
 
       if (suc.length > 0) {
@@ -445,8 +447,45 @@ export class PvCtrFolAsvrService {
     return { deleted: true, IDFOL: idfol };
   }
 
-  private isAdmin(user: JwtPayload) {
-    return Number(user?.roleId ?? 0) === 1;
+  private parseIds(...values: Array<string | undefined>) {
+    const out: number[] = [];
+    for (const value of values) {
+      if (!value) continue;
+      for (const part of value.split(',')) {
+        const n = Number(part.trim());
+        if (Number.isFinite(n)) out.push(n);
+      }
+    }
+    return out;
+  }
+
+  private isAdmin(user?: JwtPayload | null) {
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (username === 'ADMIN') return true;
+
+    const roleId = Number(user?.roleId ?? 0);
+    const nivel = Number(user?.nivel ?? 0);
+
+    const adminRoleIds = this.parseIds(
+      this.config.get<string>('ADMIN_ROLE_IDS'),
+      this.config.get<string>('ADMIN_ROLE_ID'),
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const adminNiveles = this.parseIds(
+      this.config.get<string>('ADMIN_NIVELES'),
+      this.config.get<string>('ADMIN_NIVEL'),
+      process.env.ADMIN_NIVELES,
+      process.env.ADMIN_NIVEL,
+    );
+
+    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [1]).includes(
+      roleId,
+    );
+    const nivelAllowed =
+      adminNiveles.length > 0 && adminNiveles.includes(nivel);
+
+    return roleAllowed || nivelAllowed;
   }
 
   private normalizeText(value: string) {

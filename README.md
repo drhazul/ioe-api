@@ -127,6 +127,7 @@ Opcionales:
 - `GET /pvctrfolasvr/:idfol` (2026-03): devuelve vista de lectura con `RazonSocialReceptor` y resuelve por `IDFOL` actual o `IDFOLINICIAL` para compatibilidad cuando el folio visible cambia de `CP` a `CA/VF`.
 - trazabilidad UI cotizaciones (2026-03-10): cuando `search` se interpreta como OPV, frontend habilita búsqueda cruzada de otros OPV solo para folios con `AUT='CP'` y `ESTA='PENDIENTE'`.
 - trazabilidad UI paneles (2026-03-10): cotizaciones/devoluciones/PS usan anulación lógica con `PATCH /pvctrfolasvr/:idfol` (`ESTA='ANULADO'`) en lugar de eliminación física, habilitado solo para estado `PENDIENTE`.
+- paneles PV (2026-03-21): los listados operativos de cotizaciones/devoluciones/PS excluyen `ESTA='ANULADO'`; solo regresan `PENDIENTE`, `EDITANDO` y `PAGADO`.
 - `/pv/devoluciones/*` (flujo de devoluciones de cotizaciones/ventas/apartados)
 - `/ps/*` (modulo Pago de Servicios: panel, ticket, referencias, pago/finalizacion y terminar)
 - `/retiros/*` (flujo de retiros parciales de caja)
@@ -170,6 +171,7 @@ Opcionales:
 - Reglas de negocio relevantes:
 - el ticket PS se inserta con `PVTA` nulo y su captura se realiza después de asignar referencia.
 - el cliente del folio PS se cambia por `PUT /ps/folios/:idFol/cliente` y se bloquea cuando el ticket (`PV_TICKET_LOG`) ya tiene líneas.
+- en detalle PS, el modal `Seleccione Cliente` usa `GET /factclientshp` + filtro por `SUC`; para admin multi-sucursal, backend debe exponer catálogo completo (sin forzar `user.suc`) para permitir selección en la sucursal activa del folio.
 - edición de PVTA valida referencia (`ORD`) y límite de adeudo usando la misma fuente de adeudos de cliente (`DAT_CTRL_CTAS` + relación de `DAT_CAT_CTAS`), considerando el saldo disponible de la referencia en el ticket.
 - `sp_ps_adeudos_cliente` resume adeudos de `DAT_CTRL_CTAS` agrupados por `CLIENT, IDFOL` con filtro `SUM(IMPT) <> 0` (alineado al query operativo de Access).
 - al procesar tipo `DG/DC`, el folio guarda `IMPT` negativo pero no inserta formas de pago automáticas.
@@ -195,6 +197,7 @@ Opcionales:
 - `sp_ps_adeudos_cliente` prioriza `DAT_CTRL_CTAS` agregando por `SUC/CLIENT/CTA/IDFOL` (alineado al query histórico de Access); `adeudosRes` se deriva de ese conjunto con `ADEUDO < 0`.
 - Referencia de error corregido (2026-03-03): `POST /ps/folios/:idFol/ticket/reference/folio` devolvía `400` con `No existe DAT_CTRL_CTAS_RES para validar referencia de folio`; `sp_ps_ticket_set_reference_folio` se depuró para tomar/validar la referencia desde `DAT_CTRL_CTAS` del cliente seleccionado.
 - Regla vigente (2026-03-03): `POST /ps/folios/:idFol/ticket/reference/folio` bloquea referencias duplicadas en el mismo ticket (`La referencia ya fue asignada a otra linea del ticket`).
+- Regla origen PS (2026-03-21): la primera referencia ligada define `ORIGEN_AUT` del folio (`CA`/`VF`); si aún no hay referencias ligadas (`ORD`), se permite adoptar el origen del primer vínculo. Si ya existen referencias, se conserva el origen y se rechaza mezcla `CA`/`VF`.
 - Corrección de cálculo (2026-03-03): `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_update_pvta` consolidan adeudo por `IDFOL/NDOC + RELACION` antes de validar; con esto se evita falso `400 La referencia seleccionada no tiene adeudo pendiente` cuando existen cargos y abonos mezclados en `DAT_CTRL_CTAS`.
 - Regla AD/AP/CR (2026-03-03): en `sp_ps_ticket_update_pvta`, para servicios de adeudo (`AD`,`AP`,`CR`) el `PVTA` por línea no puede exceder la deuda del folio referenciado y además se valida saldo acumulado por `ORD` considerando las tres claves (`AD/AP/CR`) del mismo ticket.
 - Referencia de integración (2026-03-03): el cierre PS dejó de depender de `PV_CTR_FOL_FORMTMP`; el flujo definitivo persiste en `PV_CTR_FOL_FORM` al finalizar.
@@ -259,6 +262,7 @@ Opcionales:
 - Flujo frontend: confirmacion de alta y luego modal de busqueda/seleccion de cliente por sucursal del usuario.
 - Endpoints usados por la app:
 - `GET /factclientshp` (listado de clientes; app filtra por SUC).
+- compat admin multi-sucursal (2026-03-21): `FactClientShpService.isAdmin` reconoce `username='ADMIN'` y/o `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`; evita limitar `GET /factclientshp` a `user.suc` cuando admin selecciona otra sucursal en paneles PV.
 - `POST /pvctrfolasvr/auto` (creacion de folio).
 - `PATCH /pvctrfolasvr/:idfol` (asignacion de `CLIEN` al folio creado).
 - Correccion backend (2026-02): `PV_CTR_FOL_ASVR.CLIEN` se mapea como `float` en TypeORM para evitar `500 EPARAM` cuando el cliente excede el rango `int32`.
@@ -547,6 +551,7 @@ Opcionales:
 - `PV_DEV_DET_TMP_create.sql` (staging de detalle para devoluciones PV)
 - `USUARIO_forzar_cambio_pass_alter.sql` (agrega bandera `FORZAR_CAMBIO_PASS` para flujo de primer acceso)
 - `DAT_ART_idx_suc_bloq_detalle_cot_create.sql` (índice `IX_DAT_ART_SUC_BLOQ_DETALLE_COT` para consulta por sucursal con filtro `BLOQ<>-1` en detalle de cotización)
+- `22_patch_sp_ps_origen_primer_referencia.sql` (ajusta `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_set_reference_gasto` para fijar `ORIGEN_AUT` con la primera referencia y bloquear mezcla solo con referencias previas)
 
 ## Reglas de autorizacion por sucursal (criticas)
 
