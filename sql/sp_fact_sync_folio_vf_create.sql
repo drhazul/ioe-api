@@ -350,13 +350,29 @@ BEGIN
       AND @clien IS NOT NULL
       AND @clien > 0
     BEGIN
-      SELECT TOP 1
-        @razonSocial = NULLIF(LTRIM(RTRIM(ISNULL(RazonSocialReceptor, ''))), ''),
-        @rfcReceptor = NULLIF(LTRIM(RTRIM(ISNULL(RfcReceptor, ''))), ''),
-        @rfcEmisor = NULLIF(LTRIM(RTRIM(ISNULL(RfcEmisor, ''))), ''),
-        @usoCfdi = NULLIF(LTRIM(RTRIM(ISNULL(UsoCfdi, ''))), '')
-      FROM dbo.FACT_CLIENT_SHP
-      WHERE IDC = @clien;
+      SET @sql = N'
+        SELECT TOP 1
+          @pRAZON = NULLIF(LTRIM(RTRIM(ISNULL(RazonSocialReceptor, ''''))), ''''),
+          @pRFCR = NULLIF(LTRIM(RTRIM(ISNULL(RfcReceptor, ''''))), ''''),
+          @pRFCE = NULLIF(LTRIM(RTRIM(ISNULL(RfcEmisor, ''''))), ''''),
+          @pUSOCFDI = NULLIF(LTRIM(RTRIM(ISNULL(UsoCfdi, ''''))), '''')
+        FROM dbo.FACT_CLIENT_SHP
+        WHERE IDC = @pCLIEN' +
+        CASE
+          WHEN COL_LENGTH('dbo.FACT_CLIENT_SHP', 'SUC') IS NOT NULL
+            THEN N' ORDER BY CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(SUC, '''')))) = UPPER(LTRIM(RTRIM(ISNULL(@pSUC, '''')))) THEN 0 ELSE 1 END, IDC DESC'
+          ELSE N' ORDER BY IDC DESC'
+        END + N';';
+
+      EXEC sys.sp_executesql
+        @sql,
+        N'@pCLIEN FLOAT, @pSUC NVARCHAR(255), @pRAZON NVARCHAR(255) OUTPUT, @pRFCR NVARCHAR(40) OUTPUT, @pRFCE NVARCHAR(40) OUTPUT, @pUSOCFDI NVARCHAR(40) OUTPUT',
+        @pCLIEN = @clien,
+        @pSUC = @suc,
+        @pRAZON = @razonSocial OUTPUT,
+        @pRFCR = @rfcReceptor OUTPUT,
+        @pRFCE = @rfcEmisor OUTPUT,
+        @pUSOCFDI = @usoCfdi OUTPUT;
     END;
 
     SELECT TOP 1

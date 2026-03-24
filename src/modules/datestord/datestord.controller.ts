@@ -4,7 +4,7 @@ import {
   Delete,
   Get,
   Param,
-  ParseIntPipe,
+  ParseFloatPipe,
   Patch,
   Post,
   UseGuards,
@@ -28,7 +28,7 @@ export class DatEstOrdController {
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseFloatPipe) id: number) {
     return this.service.findOne(id);
   }
 
@@ -39,14 +39,14 @@ export class DatEstOrdController {
 
   @Patch(':id')
   update(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ParseFloatPipe) id: number,
     @Body() dto: UpdateDatEstOrdDto,
   ) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id', ParseFloatPipe) id: number) {
     return this.service.remove(id);
   }
 }

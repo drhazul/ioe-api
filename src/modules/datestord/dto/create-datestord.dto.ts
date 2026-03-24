@@ -1,11 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Length } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Length } from 'class-validator';
 
 export class CreateDatEstOrdDto {
   @ApiProperty({ type: Number })
   @Type(() => Number)
-  @IsInt()
+  @IsNumber({ maxDecimalPlaces: 4 })
   ESTA: number;
 
   @ApiPropertyOptional()

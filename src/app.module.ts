@@ -60,6 +60,7 @@ import { FormasPagoCambiosModule } from './modules/formas-pago-cambios/formas-pa
 import { CajonEstadoModule } from './modules/cajon-estado/cajon-estado.module';
 import { CajaGeneralModule } from './modules/caja-general/caja-general.module';
 import { FacturacionModule } from './modules/facturacion/facturacion.module';
+import { OrdenesTrabajoModule } from './modules/ordenes-trabajo/ordenes-trabajo.module';
 
 @Module({
   imports: [
@@ -122,6 +123,7 @@ import { FacturacionModule } from './modules/facturacion/facturacion.module';
     CajonEstadoModule,
     CajaGeneralModule,
     FacturacionModule,
+    OrdenesTrabajoModule,
   ],
   providers: [
     {

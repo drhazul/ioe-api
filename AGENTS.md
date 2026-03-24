@@ -90,6 +90,9 @@
 - facturación pendientes formato IMPT (2026-03-15): el backend redondea `IMPT` a 2 decimales en la respuesta de `GET /facturacion/pendientes` para evitar variaciones por precisión.
 - validación facturación detalle (2026-03-14): `GET /facturacion/:idFol/validar` incorpora `detalleArticulos` (fuente `FACT_TICKET_SHP`) con columnas `IDFOL`, `UPC`, `Descripcion`, `ClaveProdServ`, `Unidad`, `Cantidad`, `ValorUnitario`, `PVTAT`, `Impuesto`, `Total`, además de `totalesDetalle` para UI.
 - validación facturación redondeo (2026-03-14): en `GET /facturacion/:idFol/validar`, la conciliación de importes usa redondeo fijo a 2 decimales para `totales.cabecera`, `totales.detalle` y `totales.diferencia`, evitando ruido por precisiones mayores.
+- prevención CFDI40108 en pendientes (2026-03-23): `emitir` normaliza `factura.subtotal` al redondeo SAT de 2 decimales antes de timbrar; `validar` expone `subtotalSatCuadra/requiereAjusteSubtotalSat` para que frontend muestre trazabilidad del ajuste.
+- uso CFDI en timbrado (2026-03-23): `toFacturifyPayload` incluye `receptor.uso_cfdi` exclusivamente desde `FAC_SVR_SHAP.UsoCfdi` para evitar default implícito `G03`.
+- sincronización uso CFDI en cierre VF (2026-03-23): `sp_fact_sync_folio_vf` obtiene `UsoCfdi` del cliente seleccionado del folio (`IDC=CLIEN`, con preferencia por `SUC` del folio) antes de insertar/actualizar cabecera `FAC_SVR_SHAP`.
 - almacenamiento CFDI con alternancia (2026-03-15): `FacturacionService.saveCfdiArtifacts` intenta guardado en rutas candidatas (`CFDI_STORAGE_BASE_PATH`, `CFDI_STORAGE_BASE_PATH_ALT`, `CFDI_STORAGE_BASE_PATH_DEV/PROD`, `CFDI_STORAGE_BASE_PATHS` y defaults por SO); ante error en una ruta, prueba la siguiente.
 - conciliación facturación en origen VF (2026-03-15): `sp_fact_sync_folio_vf` recalcula al final `FAC_SVR_SHAP.IMPT` desde `FACT_TICKET_SHP` con suma por renglón `ROUND(PVTAT + ROUND(PVTAT*0.16,2),2)` para evitar descuadres de centavos entre cabecera y detalle.
 - saneamiento histórico facturación (2026-03-15): `sql/2026-03-15_facturacion_reconcile_impt_from_detail.sql` corrige folios existentes (`PENDIENTE`/`CANCELACION PENDIENTE`) ajustando `FAC_SVR_SHAP.IMPT` con base en su detalle.
@@ -109,6 +112,7 @@
 - `pvctrfolform`: `PV_CTR_FOL_FORM` (`IDF`, `IDFOL`, `FORM`, `IMPA`, `IMPP`, `IMPC`, `IMPD`, ...).
 - `pvctrords`: `PV_CTR_ORDS` (`IORD`, `IDFOL`, `ART`, `CTD`, `SUC`, `ESTATUS`, ...).
 - `pvctrordsdet`: `PV_CTR_ORDS_DET` (`IORDP`, `IORD`, `ART`, `JOB`, `ESF`, `CIL`, `EJE`).
+- `ordenes-trabajo`: flujo operativo unificado de ORDs sobre `PV_CTR_ORDS` + `PV_CTR_ORDS_DET`, con panel server-side, detalle, autorizaciones, envío/recepción, entrega, garantías, cambio de material, merma, escaneo y catálogo de incidencia `DAT_ORD_TMOV`.
 - `pvticketlog`: `PV_TICKET_LOG` (`ID`, `IDFOL`, `ART`, `UPC`, `CTD`, `PVTA`, `CTDD`, `CTDDF`, `UPDATED_AT`).
 - `pv-devoluciones`: flujo transaccional de devoluciones PV sobre `PV_CTR_FOL_ASVR`, `PV_TICKET_LOG`, `PV_CTR_FOL_FORM(_SVR)`, `PV_CTR_ORDS`, `FAC_SVR_SHAP`, `FACT_IDFOLDEV`, `DAT_CTRL_CTAS`.
 - `pagos-servicios`: flujo PS sobre `PV_CTR_FOL_ASVR`, `PV_TICKET_LOG`, `PV_CTR_FOL_FORM`, `DAT_CTRL_CTAS`, `PV_DAT_PS`, `DAT_REF_GTO`.
@@ -419,6 +423,51 @@
 - validaciones de entrada => `400`.
 - autorizacion por rol/alcance => `403`.
 
+## Ordenes de Trabajo (implementado 2026-03-22)
+
+- Módulo NestJS:
+- `src/modules/ordenes-trabajo/ordenes-trabajo.module.ts`
+- `src/modules/ordenes-trabajo/ordenes-trabajo.controller.ts`
+- `src/modules/ordenes-trabajo/ordenes-trabajo.service.ts`
+- `src/modules/ordenes-trabajo/dto/*`
+- Endpoints:
+- `GET /ordenes-trabajo`
+- `GET /ordenes-trabajo/:iord`
+- `GET /ordenes-trabajo/:iord/detalle`
+- `POST /ordenes-trabajo/:iord/autorizar|enviar|recibir|entregar|garantia|cambio-material|merma`
+- `POST /ordenes-trabajo/enviar/validar` (valida ORD por `IORD/IDFOL` para flujo de envío, exige `ESTSEGU=3`)
+- `POST /ordenes-trabajo/enviar/lote` (cambio masivo a `ESTSEGU=5` para ORDs relacionadas/seleccionadas)
+- `GET /ordenes-trabajo/asignar/colaboradores` (catálogo `PV_OPV` por `SUC`, `NIVEL=41`)
+- `POST /ordenes-trabajo/asignar/validar` (valida ORD en `ESTSEGU=7`)
+- `POST /ordenes-trabajo/asignar/lote` (cambio masivo `7 -> 8`, actualiza `ASIGN` y `FCNAS` cuando existe)
+- `POST /ordenes-trabajo/trabajo-terminado/validar` (valida ORD en `ESTSEGU=8`)
+- `POST /ordenes-trabajo/trabajo-terminado/lote` (cambio masivo `8 -> 9`)
+- `POST /ordenes-trabajo/regresar-incidencia/validar` (valida ORD en `ESTSEGU=9`)
+- `POST /ordenes-trabajo/regresar-incidencia/lote` (cambio masivo `9 -> 9.1`, requiere `tipom` y persiste `PV_CTR_ORDS.TIPOM` desde `DAT_ORD_TMOV`)
+- `POST /ordenes-trabajo/regresar-tienda/validar` (valida ORD en `ESTSEGU=9`)
+- `POST /ordenes-trabajo/regresar-tienda/lote` (cambio masivo `9 -> 10`)
+- `POST /ordenes-trabajo/asignar-laboratorio/lote` (asignación masiva de `LABOR` por lote)
+- `POST /ordenes-trabajo/recibir/validar` (valida ORD por `IORD/IDFOL`, exige `ESTSEGU=5`)
+- `POST /ordenes-trabajo/recibir/lote` (cambio masivo `ESTSEGU=5 -> 7`)
+- `POST /ordenes-trabajo/entregar/validar` (valida ORD por `IORD/IDFOL`, exige `ESTSEGU=10`)
+- `POST /ordenes-trabajo/entregar/lote` (cambio masivo `ESTSEGU=10 -> 11`)
+- `POST /ordenes-trabajo/scan/recibir`
+- `POST /ordenes-trabajo/scan/entregar`
+- Reglas:
+- respeta `IORD` como identidad y conserva `IDFOL` en ORDs derivadas.
+- cambio material crea ORD nueva, cancela la original, replica `PV_CTR_ORDS_DET`, registra movimientos MB51 y diferencia contable cuando hay variación de costo.
+- merma registra cantidad mermada/remanente y puede crear ORD derivada con trazabilidad (`REEORD/REOORD`, `TIPOM/TPOM`, `MOTR`, `DOCDIF/DOCIF` según esquema disponible).
+- selección de renglones y escaneo se resuelven en frontend/appstate y en endpoints dedicados, sin depender de flags legacy persistidos.
+- `enviar/lote` valida acceso por sucursal (`USR_MOD_SUC`), exige `ESTSEGU=3` en todas las ORDs del lote y aplica transición a `ESTSEGU=5` en una sola operación.
+- `recibir/lote` valida acceso por sucursal, exige `ESTSEGU=5` y aplica transición a `ESTSEGU=7`.
+- `entregar/lote` valida acceso por sucursal, exige `ESTSEGU=10` y aplica transición a `ESTSEGU=11`.
+- `regresar-incidencia/lote` valida `ESTSEGU=9`, exige motivo `DAT_ORD_TMOV.IDT` y actualiza `TIPOM`; el panel entrega `ASIGNADO` como label de `PV_OPV` (`NOMB + APELM + APELP`) para consumo de `ioe_app`.
+- recepción unificada sin destino (`TALLER/ANALISTA`): backend fija recepción operativa a `ESTSEGU=7`.
+- permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) restringidos a `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER`; admin conserva acceso total.
+- trazabilidad UI (app): en modal de envío de ORDs se retira botón `Agregar ORD`; la captura manual agrega por `Enter` en el campo `ORD` (sin cambios de contrato API).
+- trazabilidad UI taller (app, 2026-03-24): `ioe_app` mueve la botonera principal del panel a `Opciones de Trabajo`, sube `Configuracion de Vista` al AppBar y ajusta la etiqueta legado a `76mm x 51mm`; el backend mantiene el mismo contrato `/ordenes-trabajo/*` y no requiere SP nuevo ni ejecución SQL adicional.
+- catálogo estados ORD (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT` para soportar estados intermedios (ej. `9.1`); script: `sql/2026-03-22_dat_est_ord_esta_float.sql`.
+
 ## Stored procedures y consultas clave
 
 - Inventarios:
@@ -439,9 +488,15 @@
 - `sql/PV_CTR_ORDS_CLIEN_float.sql` ajusta `PV_CTR_ORDS.CLIEN` a `FLOAT` para soportar IDs grandes.
 - `sql/FAC_SVR_SHAP_CLIEN_float.sql` alinea `FAC_SVR_SHAP.CLIEN` a `FLOAT` y aplica backfill desde `PV_CTR_FOL_ASVR`.
 - `sql/2026-03-13_facturacion_aut_compat.sql` agrega columna `FAC_SVR_SHAP.AUT` si falta y hace backfill desde `TIPOVTA` para compatibilidad con consultas legacy de facturación.
+- `sql/2026-03-23_facturacion_reset_cfdi40108_pending.sql` limpia estado de reintento (`CFDI_STATUS='PENDIENTE'` + limpieza de `CFDI_ERROR_MSG`) para folios `ESTATUS='PENDIENTE'` que fallaron con `CFDI40108`.
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta staging de líneas para devoluciones PV.
 - `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación en eventos VF.
 - `sql/22_patch_sp_ps_origen_primer_referencia.sql` crea/actualiza `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_set_reference_gasto` para que `ORIGEN_AUT` se determine por la primera referencia ligada y se bloquee mezcla solo cuando ya existen referencias previas.
+- `sql/2026-03-22_ordenes_trabajo_module_create.sql` crea/actualiza `sp_ordenes_trabajo_*` (panel/detalle/estado/flujo/escaneo/cambio material/merma) y helpers de impacto en `DAT_MB51` y `DAT_CTRL_CTAS`.
+- `sql/2026-03-23_ordenes_trabajo_enviar_lote.sql` crea/actualiza `sp_ordenes_trabajo_enviar_lote` para envío masivo de ORDs con validación estricta de `ESTSEGU=3` antes de cambiar a `ESTSEGU=5`.
+- `sql/2026-03-23_ordenes_trabajo_recibir_entregar_lote.sql` crea/actualiza `sp_ordenes_trabajo_recibir_lote` (`5 -> 7`) y `sp_ordenes_trabajo_entregar_lote` (`10 -> 11`), y alinea `sp_ordenes_trabajo_recibir` sin destino.
+- `sql/2026-03-23_ordenes_trabajo_asignar_trabajo_laboratorio_lote.sql` crea/actualiza `sp_ordenes_trabajo_asignar_lote`, `sp_ordenes_trabajo_trabajo_terminado_lote`, `sp_ordenes_trabajo_regresar_incidencia_lote`, `sp_ordenes_trabajo_regresar_tienda_lote` y `sp_ordenes_trabajo_asignar_laboratorio_lote`.
+- `sql/2026-03-23_ordenes_trabajo_incidencia_tipom.sql` crea/siembra `DAT_ORD_TMOV`, actualiza `sp_ordenes_trabajo_panel` para exponer label de `ASIGN` y ajusta `sp_ordenes_trabajo_regresar_incidencia_lote` para exigir/persistir `TIPOM`.
 - `sql/2026-03-20_facturacion_sync_after_devoluciones.sql` depura históricamente registros de `IDFOLDEV` en `FAC_SVR_SHAP/FACT_TICKET_SHP` y luego reprocesa folios origen elegibles (`AUT='VF'` + `REQF=1`) con `sp_fact_sync_folio_vf`.
 - `sql/USUARIO_forzar_cambio_pass_alter.sql` agrega `FORZAR_CAMBIO_PASS` para controlar cambio obligatorio de contraseña en primer acceso.
 - `sql/DAT_ART_idx_suc_bloq_detalle_cot_create.sql` crea índice `IX_DAT_ART_SUC_BLOQ_DETALLE_COT` para acelerar búsqueda de detalle cotización por `SUC` con filtro `BLOQ<>-1`.

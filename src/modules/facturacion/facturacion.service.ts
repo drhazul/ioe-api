@@ -1936,12 +1936,13 @@ SET NUMERIC_ROUNDABORT OFF;`;
       };
     });
 
-    const subtotalDetalle = Number(
+    const subtotalDetalleRaw = Number(
       detalleArticulos.reduce(
         (acc: number, row: any) => acc + Number(row.PVTAT ?? 0),
         0,
       ),
     );
+    const subtotalDetalle = round2(subtotalDetalleRaw);
     const impuestoDetalle = Number(
       detalleArticulos
         .reduce((acc: number, row: any) => acc + Number(row.Impuesto ?? 0), 0)
@@ -1956,6 +1957,11 @@ SET NUMERIC_ROUNDABORT OFF;`;
     const totalCabecera = round2(totalCabeceraRaw);
     const totalDetalle = round2(totalConImpuesto);
     const diff = round2(totalCabecera - totalDetalle);
+    const subtotalSatDiferencia = Number(
+      (subtotalDetalleRaw - subtotalDetalle).toFixed(6),
+    );
+    const requiereAjusteSubtotalSat =
+      Math.abs(subtotalSatDiferencia) >= 0.000001;
 
     const cleanText = (value: unknown) => String(value ?? '').trim();
     const cleanUpper = (value: unknown) => cleanText(value).toUpperCase();
@@ -2046,13 +2052,17 @@ SET NUMERIC_ROUNDABORT OFF;`;
         clienteFiscalCompleto,
         rfcGenerico,
         camposFiscalesFaltantes: Array.from(new Set(camposFiscalesFaltantes)),
+        subtotalSatCuadra: !requiereAjusteSubtotalSat,
+        requiereAjusteSubtotalSat,
+        subtotalSatDiferencia,
       },
       cliente: full.cliente,
       sucursal: full.sucursal,
       conceptos: full.detail.length,
       detalleArticulos,
       totalesDetalle: {
-        subtotal: round2(subtotalDetalle),
+        subtotal: subtotalDetalle,
+        subtotalRaw: Number(subtotalDetalleRaw.toFixed(6)),
         impuesto: impuestoDetalle,
         total: totalDetalle,
       },
@@ -2215,6 +2225,11 @@ SET NUMERIC_ROUNDABORT OFF;`;
     sucursal: any;
     cliente: any;
   }) {
+    const round2 = (value: number) => this.round2(Number(value || 0));
+    const round6 = (value: number) =>
+      Math.round((Number(value || 0) + Number.EPSILON) * 1_000_000) /
+      1_000_000;
+
     const h = full.header;
     const c = full.cliente || {};
     const s = full.sucursal || {};
@@ -2222,52 +2237,64 @@ SET NUMERIC_ROUNDABORT OFF;`;
     const rfcEmisor = String(h.RfcEmisor ?? s.RFC ?? '').trim();
     const emisor = await this.resolveEmisor(rfcEmisor);
 
-    const conceptos = (full.detail || []).map((d) => ({
-      clave_producto_servicio: String(d.ClaveProdServ ?? '01010101').split('.')[0],
-      clave_unidad_de_medida: String(d.Unidad ?? 'H87'),
-      cantidad: Number(d.Cantidad ?? 1),
-      descripcion: String(d.Descripcion ?? 'CONCEPTO'),
-      valor_unitario: Number(d.ValorUnitario ?? d.PVTAT ?? 0),
-      total: Number(d.PVTAT ?? 0),
-      exento_de_impuestos: false,
-      objeto_imp: String(d.ObjetoImp ?? '02')
-        .split('.')[0]
-        .padStart(2, '0'),
-    }));
+    const conceptos = (full.detail || []).map((d) => {
+      const cantidad = round6(Number(d.Cantidad ?? 1));
+      const valorUnitario = round6(Number(d.ValorUnitario ?? d.PVTAT ?? 0));
+      const totalConcepto = round6(Number(d.PVTAT ?? 0));
+      return {
+        clave_producto_servicio: String(d.ClaveProdServ ?? '01010101').split('.')[0],
+        clave_unidad_de_medida: String(d.Unidad ?? 'H87'),
+        cantidad,
+        descripcion: String(d.Descripcion ?? 'CONCEPTO'),
+        valor_unitario: valorUnitario,
+        total: totalConcepto,
+        exento_de_impuestos: false,
+        objeto_imp: String(d.ObjetoImp ?? '02')
+          .split('.')[0]
+          .padStart(2, '0'),
+      };
+    });
 
-    const subtotal = conceptos.reduce(
-      (a: number, x: any) => a + Number(x.total ?? 0),
+    const subtotalRaw = conceptos.reduce(
+      (acc: number, concepto: any) => acc + Number(concepto.total ?? 0),
       0,
     );
-    const impuestoFederal = Number(
-      conceptos
-        .reduce(
-          (a: number, x: any) =>
-            a + Number((Number(x.total ?? 0) * 0.16).toFixed(2)),
-          0,
-        )
-        .toFixed(2),
+    const subtotal = round2(subtotalRaw);
+    const total = round2(
+      conceptos.reduce((acc: number, concepto: any) => {
+        const totalConcepto = Number(concepto.total ?? 0);
+        const impuestoConcepto = round2(totalConcepto * 0.16);
+        return acc + round2(totalConcepto + impuestoConcepto);
+      }, 0),
     );
-    const total = Number(
-      conceptos
-        .reduce(
-          (a: number, x: any) =>
-            a +
-            Number(
-              (
-                Number(x.total ?? 0) + Number((Number(x.total ?? 0) * 0.16).toFixed(2))
-              ).toFixed(2),
-            ),
-          0,
-        )
-        .toFixed(2),
-    );
+    const impuestoFederal = round2(total - subtotal);
 
     const email = String(c.EMAILRECEPTOR ?? '').trim();
     const regimen = await this.resolveReceptorRegimen(c);
     const exportacionRaw = String(
       h.exportacion ?? h.Exportacion ?? '01',
     ).trim();
+    const normalizeUsoCfdi = (value: unknown) => {
+      const text = String(value ?? '').trim().toUpperCase();
+      if (
+        !text ||
+        text === '-' ||
+        text === 'SELECCIONAR' ||
+        text === 'COLOCAR' ||
+        text === 'NULL'
+      ) {
+        return '';
+      }
+      const exact = text.match(/^[A-Z][0-9]{2}$/)?.[0];
+      if (exact) return exact;
+      return text.match(/\b([A-Z][0-9]{2})\b/)?.[1] ?? text;
+    };
+    const usoCfdi = normalizeUsoCfdi(h.UsoCfdi ?? h.USOCFDI);
+    if (!usoCfdi) {
+      throw new BadRequestException(
+        `Folio ${String(h.IDFOL ?? '').trim() || 'N/A'} no tiene UsoCfdi válido en FAC_SVR_SHAP`,
+      );
+    }
     const exportacion =
       exportacionRaw.match(/\d{2}/)?.[0] ??
       exportacionRaw.split('.')[0].trim().padStart(2, '0');
@@ -2286,6 +2313,7 @@ SET NUMERIC_ROUNDABORT OFF;`;
         forma_de_pago: String(h.FormaPagoSAT ?? h.FormaPago ?? '99')
           .split('.')[0]
           .padStart(2, '0'),
+        uso_cfdi: usoCfdi,
         tarjeta_ultimos_4digitos: 'NA',
         cp: String(c.CODIGOPOSTALRECEPTOR ?? '00000'),
         regimen,
