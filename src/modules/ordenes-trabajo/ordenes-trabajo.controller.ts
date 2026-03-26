@@ -91,6 +91,15 @@ export class OrdenesTrabajoController {
     return this.service.enviarLote(dto, user, this.requestIp(req));
   }
 
+  @Post('anular/lote')
+  anularLote(
+    @Body() dto: SendOrdBatchDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.anularLote(dto, user, this.requestIp(req));
+  }
+
   @Get('asignar/colaboradores')
   listarColaboradoresAsignar(
     @Query('suc') suc: string,

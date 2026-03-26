@@ -466,6 +466,11 @@
 - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) restringidos a `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER`; admin conserva acceso total.
 - trazabilidad UI (app): en modal de envío de ORDs se retira botón `Agregar ORD`; la captura manual agrega por `Enter` en el campo `ORD` (sin cambios de contrato API).
 - trazabilidad UI taller (app, 2026-03-24): `ioe_app` mueve la botonera principal del panel a `Opciones de Trabajo`, sube `Configuracion de Vista` al AppBar y ajusta la etiqueta legado a `76mm x 51mm`; el backend mantiene el mismo contrato `/ordenes-trabajo/*` y no requiere SP nuevo ni ejecución SQL adicional.
+- trazabilidad UI taller (app, 2026-03-24): los botones del AppBar pasan a fondo blanco y la paginación se integra al renglón de filtros, retirando el label de selección dentro del card; no cambia contrato, consulta ni stored procedure.
+- matriz permisos ORDs (2026-03-24): `resolveAllowedActions` y `assertActionPermission` se alinean con la tabla operativa solicitada; `JEF_TALLER/TALLER` conserva flujo completo e impresión, `ANALISTA_ORD/ANALISTA` limita el panel a `VER_DETALLE/AUTORIZAR/ENVIAR/ASIGNAR_LABORATORIO/SCAN_ENTREGAR/IMPRIMIR_ETIQUETA` y `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` a `VER_DETALLE/ASIGNAR/TRABAJO_TERMINADO/REGRESAR_INCIDENCIA/REGRESAR_TIENDA/SCAN_RECIBIR`.
+- trazabilidad UI/Home (app, 2026-03-24): `ioe_app` agrega accesos rápidos en Home para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar`; la visibilidad se resuelve consumiendo `allowedActions` del panel ORDs, sin crear módulos nuevos en DB ni ejecutar SP.
+- trazabilidad UI/Home (app, 2026-03-24): esos accesos abren páginas standalone adicionales, no el panel principal; la app replica allí la mecánica de validación/captura de los popups del panel y conserva intactos los botones emergentes del flujo operativo original.
+- trazabilidad UI/Home (app, 2026-03-24): la entrega directa captura firma digital del cliente y reutiliza `POST /ordenes-trabajo/:iord/entregar` por cada ORD relacionada; no requiere cambios backend, DB ni SP para esta variante.
 - catálogo estados ORD (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT` para soportar estados intermedios (ej. `9.1`); script: `sql/2026-03-22_dat_est_ord_esta_float.sql`.
 
 ## Stored procedures y consultas clave

@@ -105,6 +105,8 @@ Opcionales:
 - Punto de venta:
 - `/factclientshp`, `/pvctrfolasvr`, `/pvctrfolform`, `/pvctrords`, `/pvctrordsdet`, `/pvticketlog`, `/refdetalle`
 - `/ordenes-trabajo/*` (panel/flujo ORD operativo: autorizar, enviar, recibir, entregar, garantía, cambio material, merma y escaneo)
+- trazabilidad UI ORDs/Home (2026-03-24): `ioe_app` expone páginas standalone para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar` desde Home; reutilizan las mismas validaciones y endpoints `/ordenes-trabajo/*`, sin mostrar el panel principal.
+- trazabilidad UI ORDs/Home (2026-03-24): la página directa de `Entregar` captura firma digital del cliente y reutiliza `POST /ordenes-trabajo/:iord/entregar` por cada ORD relacionada; no requiere cambios de contrato API, base de datos ni ejecución adicional de SP.
 - `/facturacion/*` (pendientes/validar/emitir/refrescar-estado/reenviar-email/cancelar sobre `FAC_SVR_SHAP` + `FACT_TICKET_SHP`).
 - compatibilidad facturación legacy (2026-03-13): `FacturacionService` detecta columnas de `FAC_SVR_SHAP` y resuelve `AUT` con fallback `TIPOVTA` (o `NULL`), además de fallback para `REQF/RQFAC`, `FormaPagoSAT` y `Exportacion`, evitando `500 Invalid column name 'AUT'`.
 - facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` acepta filtros server-side `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
@@ -264,6 +266,9 @@ Opcionales:
   - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) solo para `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER` (admin conserva acceso total).
   - trazabilidad UI (app): en modal de envío se elimina botón `Agregar ORD`; la captura manual agrega por `Enter` en el `TextField` `ORD` (sin cambios de endpoint).
   - trazabilidad UI taller (app, 2026-03-24): la botonera principal del panel ORD se mueve al popup `Opciones de Trabajo`, `Configuracion de Vista` se reubica al AppBar y la etiqueta legado queda en `76mm x 51mm`; no cambia endpoints, payloads ni requiere ejecutar SP/SQL adicional.
+  - trazabilidad UI taller (app, 2026-03-24): el AppBar usa botones con fondo blanco para contraste y el card de filtros integra el paginador en la misma franja, eliminando el label de selección interno; sin impacto en API ni SP.
+  - permisos visibles ORD (2026-03-24): `resolveAllowedActions` alinea el panel operativo con la matriz de roles; `JEF_TALLER/TALLER` conserva flujo completo + impresión, `ANALISTA_ORD/ANALISTA` se limita a `VER_DETALLE/AUTORIZAR/ENVIAR/ASIGNAR_LABORATORIO/SCAN_ENTREGAR/IMPRIMIR_ETIQUETA` y `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` se limita a `VER_DETALLE/ASIGNAR/TRABAJO_TERMINADO/REGRESAR_INCIDENCIA/REGRESAR_TIENDA/SCAN_RECIBIR`.
+  - trazabilidad UI/Home (app, 2026-03-24): `ioe_app` agrega accesos directos desde Home para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar`; el backend no crea módulos nuevos en DB y el frontend decide visibilidad consumiendo `allowedActions` del mismo `GET /ordenes-trabajo`.
   - compatibilidad catálogo estados (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT` para soportar estados intermedios (ej. `9.1`), aplicado con `sql/2026-03-22_dat_est_ord_esta_float.sql`.
 
 ## Retiros parciales (nuevo flujo 2026-03)

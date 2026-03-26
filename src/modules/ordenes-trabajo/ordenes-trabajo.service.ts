@@ -27,6 +27,7 @@ import {
 
 type SucScope = {
   isAdmin: boolean;
+  homeSuc: string | null;
   requestedSuc: string | null;
   allowedSucs: string[];
   allowedSucsCsv: string | null;
@@ -49,6 +50,63 @@ export class OrdenesTrabajoService {
     private readonly audit: AuditService,
     private readonly config: ConfigService,
   ) {}
+
+  private buildOrdLaboratorioJoinSql(ordAlias: string, labAlias: string) {
+    return `
+      LEFT JOIN dbo.DAT_LAB ${labAlias}
+        ON TRY_CONVERT(INT, ${labAlias}.ID) = TRY_CONVERT(INT, ${ordAlias}.LABOR)
+    `;
+  }
+
+  private buildOrdAllowedSucSql(
+    ordAlias: string,
+    labAlias: string,
+    isAdminParam: string,
+    allowedSucsParam: string,
+    roleCodeParam: string,
+    homeSucParam: string,
+  ) {
+    return `
+      (
+        ${isAdminParam} = 1
+        OR (
+          (
+            ${allowedSucsParam} IS NULL
+            OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) IN (
+              SELECT UPPER(LTRIM(RTRIM(value)))
+              FROM STRING_SPLIT(ISNULL(${allowedSucsParam}, ''), ',')
+              WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> ''
+            )
+          )
+          AND (
+            UPPER(LTRIM(RTRIM(ISNULL(${roleCodeParam}, '')))) NOT IN (
+              'ANALISTA',
+              'ANALISTA_ORD',
+              'ENC_MAQUILA',
+              'ENCARGADO_MAQUILA',
+              'ENC_BISEL',
+              'ENCARGADO_BISELADO'
+            )
+            OR ${homeSucParam} IS NULL
+            OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${homeSucParam})
+            OR UPPER(LTRIM(RTRIM(ISNULL(${labAlias}.SUC, '')))) = UPPER(${homeSucParam})
+          )
+        )
+      )
+    `;
+  }
+
+  private buildOrdRequestedSucSql(
+    ordAlias: string,
+    requestedSucParam: string,
+  ) {
+    return `
+      (
+        ${requestedSucParam} IS NULL
+        OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${requestedSucParam})
+      )
+    `;
+  }
 
   async list(query: ListOrdenesTrabajoQueryDto, user: JwtPayload) {
     const scope = await this.resolveSucScope(user, query.suc ?? null);
@@ -85,6 +143,7 @@ export class OrdenesTrabajoService {
         total: 0,
         roleCode: this.isAdmin(user) ? 'ADMIN' : roleCode,
         panelMode,
+        allowedSucs: scope.allowedSucs,
         allowedActions,
         flowStatusOptions,
         incidenciaOptions,
@@ -115,8 +174,9 @@ export class OrdenesTrabajoService {
         @PAGESIZE=@16,
         @IS_ADMIN=@17,
         @ALLOWED_SUCS=@18,
-        @PANEL_MODE=@19,
-        @ROLE_CODE=@20
+        @HOME_SUC=@19,
+        @PANEL_MODE=@20,
+        @ROLE_CODE=@21
       `,
       [
         this.normalizeText(query.iord),
@@ -138,12 +198,13 @@ export class OrdenesTrabajoService {
         pageSize,
         scope.isAdmin ? 1 : 0,
         scope.allowedSucsCsv,
+        scope.homeSuc,
         panelMode,
         roleCode,
       ],
     );
 
-    const items = Array.isArray(rows)
+    const rawItems = Array.isArray(rows)
       ? rows.map((row) => {
           const out = { ...(row as Record<string, unknown>) };
           delete out.TOTAL_COUNT;
@@ -151,6 +212,20 @@ export class OrdenesTrabajoService {
           return out;
         })
       : [];
+    const asignLabels = await this.resolveOpvLabels(
+      rawItems.map((item) => item.ASIGN),
+    );
+    const items = rawItems.map((item) => {
+      const asignId = this.normalizeText(item.ASIGN);
+      const asignLabel = asignId == null ? null : asignLabels.get(asignId);
+      if (asignLabel == null) return item;
+      return {
+        ...item,
+        ASIGN_ID: asignId,
+        ASIGN_LABEL: asignLabel,
+        ASIGN: asignLabel,
+      };
+    });
     items.sort((a, b) => {
       const aTime = this.toTime(a.FCNS);
       const bTime = this.toTime(b.FCNS);
@@ -169,6 +244,7 @@ export class OrdenesTrabajoService {
       total,
       roleCode: this.isAdmin(user) ? 'ADMIN' : roleCode,
       panelMode,
+      allowedSucs: scope.allowedSucs,
       allowedActions,
       flowStatusOptions,
       incidenciaOptions,
@@ -189,6 +265,7 @@ export class OrdenesTrabajoService {
     const iord = this.requireIord(iordRaw);
     const scope = await this.resolveSucScope(user, null);
     const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
+    await this.assertOrdTypeAccessByIord(iord, user, scope);
     await this.markAsEditandoIfNeeded(iord, roleCode, scope);
 
     const rows = await this.dataSource.query(
@@ -229,31 +306,46 @@ export class OrdenesTrabajoService {
   ) {
     const iord = this.requireIord(iordRaw);
     const scope = await this.resolveSucScope(user, null);
+    const roleCode = await this.resolveRoleCode(user);
+    if (!this.canEditOrdDetail(user, roleCode)) {
+      throw new ForbiddenException(
+        'Tu usuario no tiene permiso para editar laboratorio, comentario o detalle de la ORD',
+      );
+    }
+    await this.assertOrdTypeAccessByIord(iord, user, scope);
     const actor = this.auditActor(user);
     const commentsValue = this.normalizeText(dto.comentarios);
     const laborValue =
       dto.labor == null || !Number.isFinite(Number(dto.labor))
         ? null
         : Math.trunc(Number(dto.labor));
+    if (laborValue != null && laborValue > 0) {
+      await this.assertLaboratorioDisponibleParaOrd(
+        iord,
+        laborValue,
+        user,
+        scope,
+      );
+    }
     const rows = Array.isArray(dto.details) ? dto.details : [];
 
     const exists = await this.dataSource.query(
       `
       SELECT TOP 1 1 AS ok
       FROM dbo.PV_CTR_ORDS o
+      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE o.IORD = @0
-        AND (
-          @1 = 1
-          OR @2 IS NULL
-          OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (
-            SELECT UPPER(LTRIM(RTRIM(value)))
-            FROM STRING_SPLIT(ISNULL(@2, ''), ',')
-            WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> ''
-          )
-        )
-        AND (@3 IS NULL OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@3))
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
-      [iord, scope.isAdmin ? 1 : 0, scope.allowedSucsCsv, scope.requestedSuc],
+      [
+        iord,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        this.normalizeUpper(roleCode),
+        scope.homeSuc,
+        scope.requestedSuc,
+      ],
     );
 
     if (!this.firstRow(exists)) {
@@ -334,6 +426,19 @@ export class OrdenesTrabajoService {
     );
   }
 
+  async anularLote(dto: SendOrdBatchDto, user: JwtPayload, ip: string | null) {
+    await this.assertActionPermission('ANULAR', user);
+    return this.executeLoteAction(dto, user, ip, {
+      spName: 'sp_ordenes_trabajo_anular_lote',
+      auditAction: 'ORD_ANULAR_LOTE',
+      fallbackError:
+        'No se pudo anular el lote de ORDs. Verifique estado y permisos.',
+      singleMessage: '1 ORD anulada a estatus 4',
+      pluralMessagePrefix: 'ORDs anuladas a estatus 4',
+      notFoundMessage: 'No fue posible procesar las ORDs para anulación',
+    });
+  }
+
   async enviar(
     iordRaw: string,
     dto: SendOrdDto,
@@ -376,12 +481,28 @@ export class OrdenesTrabajoService {
   }
 
   async listarColaboradoresAsignar(sucRaw: string, user: JwtPayload) {
-    await this.assertActionPermission('ASIGNAR', user);
     const suc = this.normalizeText(sucRaw);
     if (!suc) {
       throw new BadRequestException('suc es requerida');
     }
+    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
+    if (!this.canAccessAsignadoOptions(user, roleCode)) {
+      throw new ForbiddenException(
+        'Rol no autorizado para consultar asignados del panel',
+      );
+    }
     const scope = await this.resolveSucScope(user, suc);
+    const allowedDeptos = this.resolveAsignadoDeptos(user, roleCode);
+    if (!allowedDeptos.length) {
+      return {
+        ok: true,
+        suc: this.normalizeUpper(suc),
+        items: [],
+      };
+    }
+    const deptPlaceholders = allowedDeptos
+      .map((_, idx) => `@${3 + idx}`)
+      .join(',');
     const rows = await this.dataSource.query(
       `
       SELECT
@@ -393,6 +514,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_OPV o
       WHERE TRY_CONVERT(INT, o.NIVEL) = 41
         AND UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@0)
+        AND UPPER(LTRIM(RTRIM(ISNULL(o.DEPTO, '')))) IN (${deptPlaceholders})
         AND (
           @1 = 1
           OR @2 IS NULL
@@ -404,7 +526,7 @@ export class OrdenesTrabajoService {
         )
       ORDER BY NOMB, APELP, APELM, IDOPV
       `,
-      [suc, scope.isAdmin ? 1 : 0, scope.allowedSucsCsv],
+      [suc, scope.isAdmin ? 1 : 0, scope.allowedSucsCsv, ...allowedDeptos],
     );
 
     const items = (Array.isArray(rows) ? rows : [])
@@ -415,9 +537,7 @@ export class OrdenesTrabajoService {
         const nomb = this.normalizeText(rec.NOMB) ?? '';
         const apelp = this.normalizeText(rec.APELP) ?? '';
         const apelm = this.normalizeText(rec.APELM) ?? '';
-        const label = [nomb, apelm, apelp]
-          .filter((v) => v.length > 0)
-          .join(' ');
+        const label = this.composeOpvLabel({ idopv, nomb, apelp, apelm });
         return {
           idopv,
           nomb,
@@ -585,6 +705,18 @@ export class OrdenesTrabajoService {
     if (!Number.isFinite(labor) || labor <= 0) {
       throw new BadRequestException('labor es requerido y debe ser mayor a 0');
     }
+    const iords = this.normalizeDistinctIords(dto.iords);
+    if (!iords.length) {
+      throw new BadRequestException('Debe proporcionar al menos una ORD');
+    }
+    const scope = await this.resolveSucScope(user, null);
+    await this.assertBatchOrdTypeAccess(iords, user, scope);
+    await this.assertLaboratorioDisponibleParaLote(
+      iords,
+      Math.trunc(labor),
+      user,
+      scope,
+    );
     return this.executeLoteActionWithParams(dto, user, ip, {
       spName: 'sp_ordenes_trabajo_asignar_laboratorio_lote',
       auditAction: 'ORD_ASIGNAR_LABORATORIO_LOTE',
@@ -769,6 +901,7 @@ export class OrdenesTrabajoService {
     const actor = this.auditActor(user);
     const code = this.normalizeText(dto.code);
     if (!code) throw new BadRequestException('code es requerido');
+    await this.assertOrdTypeAccessByCode(code, user, scope);
 
     let rows: unknown[] = [];
     try {
@@ -822,6 +955,7 @@ export class OrdenesTrabajoService {
     const actor = this.auditActor(user);
     const code = this.normalizeText(dto.code);
     if (!code) throw new BadRequestException('code es requerido');
+    await this.assertOrdTypeAccessByCode(code, user, scope);
 
     let rows: unknown[] = [];
     try {
@@ -884,12 +1018,14 @@ export class OrdenesTrabajoService {
     }
 
     const scope = await this.resolveSucScope(user, null);
+    const roleCode = await this.resolveRoleCode(user);
     const rows = await this.dataSource.query(
       `
       SELECT TOP 1
         o.IORD,
         o.IDFOL,
         o.SUC,
+        o.TIPO,
         o.CLIEN,
         o.NCLIENTE,
         o.ART,
@@ -900,20 +1036,13 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       LEFT JOIN dbo.DAT_EST_ORD e
         ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, o.ESTSEGU)
+      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE (
           UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
           OR UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) = UPPER(@0)
         )
-        AND (
-          @1 = 1
-          OR @2 IS NULL
-          OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (
-            SELECT UPPER(LTRIM(RTRIM(value)))
-            FROM STRING_SPLIT(ISNULL(@2, ''), ',')
-            WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> ''
-          )
-        )
-        AND (@3 IS NULL OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@3))
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdRequestedSucSql('o', '@5')}
       ORDER BY
         CASE
           WHEN UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0) THEN 0
@@ -922,7 +1051,14 @@ export class OrdenesTrabajoService {
         ISNULL(o.FCNS, ISNULL(o.FCNMOD, o.FCNM)) DESC,
         o.IORD DESC
       `,
-      [code, scope.isAdmin ? 1 : 0, scope.allowedSucsCsv, scope.requestedSuc],
+      [
+        code,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        this.normalizeUpper(roleCode),
+        scope.homeSuc,
+        scope.requestedSuc,
+      ],
     );
 
     const row = this.firstRow(rows);
@@ -936,6 +1072,11 @@ export class OrdenesTrabajoService {
     if (!iord) {
       throw new NotFoundException('La ORD encontrada no tiene IORD válido');
     }
+    this.assertOrdTipoMatchesRole(
+      await this.resolveRoleCode(user),
+      row.TIPO,
+      iord,
+    );
 
     const flow = this.toFloat(row.ESTSEGU);
     if (flow == null || Math.abs(flow - options.requiredFlow) > 0.0001) {
@@ -983,6 +1124,7 @@ export class OrdenesTrabajoService {
     }
 
     const scope = await this.resolveSucScope(user, null);
+    await this.assertBatchOrdTypeAccess(iords, user, scope);
     const actor = this.auditActor(user);
     let rows: unknown[] = [];
     try {
@@ -1058,6 +1200,7 @@ export class OrdenesTrabajoService {
     }
 
     const scope = await this.resolveSucScope(user, null);
+    await this.assertBatchOrdTypeAccess(iords, user, scope);
     const actor = this.auditActor(user);
     let rows: unknown[] = [];
     try {
@@ -1125,6 +1268,7 @@ export class OrdenesTrabajoService {
   ) {
     const iord = this.requireIord(iordRaw);
     const scope = await this.resolveSucScope(user, null);
+    await this.assertOrdTypeAccessByIord(iord, user, scope);
     const actor = this.auditActor(user);
 
     const sql = `
@@ -1207,6 +1351,7 @@ export class OrdenesTrabajoService {
     if (isAdmin) {
       return {
         isAdmin,
+        homeSuc: this.normalizeUpper(user?.suc) || null,
         requestedSuc,
         allowedSucs: [],
         allowedSucsCsv: null,
@@ -1231,18 +1376,20 @@ export class OrdenesTrabajoService {
       [username, ...OrdenesTrabajoService.MODULE_CODES],
     );
 
-    const allowed = this.normalizeUnique(
-      (rows ?? []).map((row: Record<string, unknown>) => row.SUC),
-    );
+    const ownSuc = this.normalizeUpper(user?.suc);
+    const allowed = this.normalizeUnique([
+      ownSuc,
+      ...(rows ?? []).map((row: Record<string, unknown>) => row.SUC),
+    ]);
+    const homeSuc = ownSuc || allowed[0] || null;
 
     if (!allowed.length) {
-      const fallbackSuc = this.normalizeText(user?.suc);
-      if (!fallbackSuc) {
+      if (!homeSuc) {
         throw new ForbiddenException(
           'Usuario sin sucursal autorizada para modulo de ordenes de trabajo',
         );
       }
-      allowed.push(this.normalizeUpper(fallbackSuc));
+      allowed.push(homeSuc);
     }
 
     if (requestedSuc && !allowed.includes(this.normalizeUpper(requestedSuc))) {
@@ -1253,6 +1400,7 @@ export class OrdenesTrabajoService {
 
     return {
       isAdmin,
+      homeSuc,
       requestedSuc,
       allowedSucs: allowed,
       allowedSucsCsv: allowed.join(','),
@@ -1267,23 +1415,41 @@ export class OrdenesTrabajoService {
 
     const allowedByAction: Record<string, string[]> = {
       AUTORIZAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      ENVIAR: [
+      ANULAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      ENVIAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      ASIGNAR: [
         'JEF_TALLER',
         'TALLER',
-        'ANALISTA_ORD',
-        'ANALISTA',
         'ENC_MAQUILA',
         'ENCARGADO_MAQUILA',
         'ENC_BISEL',
         'ENCARGADO_BISELADO',
       ],
-      ASIGNAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      TRABAJO_TERMINADO: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      REGRESAR_INCIDENCIA: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      REGRESAR_TIENDA: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      TRABAJO_TERMINADO: [
+        'JEF_TALLER',
+        'TALLER',
+        'ENC_MAQUILA',
+        'ENCARGADO_MAQUILA',
+        'ENC_BISEL',
+        'ENCARGADO_BISELADO',
+      ],
+      REGRESAR_INCIDENCIA: [
+        'JEF_TALLER',
+        'TALLER',
+        'ENC_MAQUILA',
+        'ENCARGADO_MAQUILA',
+        'ENC_BISEL',
+        'ENCARGADO_BISELADO',
+      ],
+      REGRESAR_TIENDA: [
+        'JEF_TALLER',
+        'ANALISTA_ORD',
+        'ANALISTA',
+      ],
       ASIGNAR_LABORATORIO: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
       RECIBIR: [
         'JEF_TALLER',
+        'TALLER',
         'ENC_MAQUILA',
         'ENCARGADO_MAQUILA',
         'ENC_BISEL',
@@ -1313,6 +1479,7 @@ export class OrdenesTrabajoService {
       ],
       SCAN_RECIBIR: [
         'JEF_TALLER',
+        'TALLER',
         'ENC_MAQUILA',
         'ENCARGADO_MAQUILA',
         'ENC_BISEL',
@@ -1345,6 +1512,92 @@ export class OrdenesTrabajoService {
     );
 
     return this.normalizeUpper(this.firstRow(rows)?.CODIGO);
+  }
+
+  private resolveAsignadoDeptos(user: JwtPayload, roleCodeRaw: string) {
+    if (this.isAdmin(user)) {
+      return ['TALLER', 'BISELADO'];
+    }
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    if (
+      roleCode === 'ENC_MAQUILA' ||
+      roleCode === 'ENCARGADO_MAQUILA'
+    ) {
+      return ['TALLER'];
+    }
+    if (
+      roleCode === 'ENC_BISEL' ||
+      roleCode === 'ENCARGADO_BISELADO'
+    ) {
+      return ['BISELADO'];
+    }
+    return ['TALLER', 'BISELADO'];
+  }
+
+  private canAccessAsignadoOptions(user: JwtPayload, roleCodeRaw: string) {
+    if (this.isAdmin(user)) return true;
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    return [
+      'JEF_TALLER',
+      'TALLER',
+      'ANALISTA_ORD',
+      'ANALISTA',
+      'ENC_MAQUILA',
+      'ENCARGADO_MAQUILA',
+      'ENC_BISEL',
+      'ENCARGADO_BISELADO',
+    ].includes(roleCode);
+  }
+
+  private composeOpvLabel(values: {
+    idopv?: string | null;
+    nomb?: string | null;
+    apelp?: string | null;
+    apelm?: string | null;
+  }) {
+    const parts = [
+      this.normalizeText(values.nomb),
+      this.normalizeText(values.apelp),
+      this.normalizeText(values.apelm),
+    ].filter((item): item is string => item != null && item.length > 0);
+    return parts.join(' ').trim() || (this.normalizeText(values.idopv) ?? '');
+  }
+
+  private async resolveOpvLabels(idsRaw: unknown[]) {
+    const ids = [...new Set(idsRaw.map((item) => this.normalizeText(item) ?? ''))]
+      .filter((item) => item.length > 0);
+    if (!ids.length) {
+      return new Map<string, string>();
+    }
+    const placeholders = ids.map((_, idx) => `@${idx}`).join(',');
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        LTRIM(RTRIM(ISNULL(CAST(o.IDOPV AS NVARCHAR(100)), ''))) AS IDOPV,
+        LTRIM(RTRIM(ISNULL(o.NOMB, ''))) AS NOMB,
+        LTRIM(RTRIM(ISNULL(o.APELP, ''))) AS APELP,
+        LTRIM(RTRIM(ISNULL(o.APELM, ''))) AS APELM
+      FROM dbo.PV_OPV o
+      WHERE LTRIM(RTRIM(ISNULL(CAST(o.IDOPV AS NVARCHAR(100)), ''))) IN (${placeholders})
+      `,
+      ids,
+    );
+    const out = new Map<string, string>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const rec = row as Record<string, unknown>;
+      const idopv = this.normalizeText(rec.IDOPV);
+      if (!idopv) continue;
+      const label = this.composeOpvLabel({
+        idopv,
+        nomb: this.normalizeText(rec.NOMB),
+        apelp: this.normalizeText(rec.APELP),
+        apelm: this.normalizeText(rec.APELM),
+      });
+      if (label) {
+        out.set(idopv, label);
+      }
+    }
+    return out;
   }
 
   private isAdmin(user?: JwtPayload | null) {
@@ -1443,7 +1696,7 @@ export class OrdenesTrabajoService {
       return [2, 3, 3.1, 5, 6, 7, 8, 9, 9.1, 9.2, 10, 12];
     }
     if (roleCode === 'ANALISTA_ORD' || roleCode === 'ANALISTA') {
-      return [2, 3, 3.1, 6, 9.1, 9.2, 10, 12];
+      return [2, 3, 3.1, 5, 6, 7, 8, 9, 9.1, 9.2, 10, 12];
     }
     if (
       roleCode === 'ENC_MAQUILA' ||
@@ -1451,7 +1704,7 @@ export class OrdenesTrabajoService {
       roleCode === 'ENC_BISEL' ||
       roleCode === 'ENCARGADO_BISELADO'
     ) {
-      return [5, 7, 8, 9];
+      return [5, 7, 8, 9, 9.1, 9.2];
     }
     return [];
   }
@@ -1566,33 +1819,121 @@ export class OrdenesTrabajoService {
     );
   }
 
-  private async resolveLaboratorios(scope: SucScope) {
-    if (
-      !(
-        await this.dataSource.query(`
-        SELECT 1
-        FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'DAT_LAB'
-      `)
-      ).length
-    ) {
+  private async resolveLaboratorios(
+    scope: SucScope,
+    sucOverride?: string | null,
+  ) {
+    if (!(await this.hasTable('DAT_LAB'))) {
       return [];
     }
+    if (await this.hasTable('DAT_LAB_ACCESO')) {
+      return this.resolveLaboratoriosFromAcceso(scope, sucOverride);
+    }
+    return this.resolveLaboratoriosLegacy(sucOverride ?? scope.requestedSuc);
+  }
 
+  private async hasTable(tableName: string) {
+    if (!tableName.trim()) return false;
+    return (
+      await this.dataSource.query(
+        `
+        SELECT 1
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @0
+        `,
+        [tableName.trim()],
+      )
+    ).length > 0;
+  }
+
+  private async resolveLaboratoriosFromAcceso(
+    scope: SucScope,
+    sucOverride?: string | null,
+  ) {
+    const requestedSuc = this.normalizeUpper(sucOverride ?? scope.requestedSuc);
+    const rows = await this.dataSource.query(
+      `
+      WITH raw AS (
+        SELECT
+          TRY_CONVERT(INT, a.LAB_ACCESO) AS ID,
+          LTRIM(RTRIM(ISNULL(l.LAB, ''))) AS LAB,
+          UPPER(
+            LTRIM(
+              RTRIM(
+                ISNULL(
+                  NULLIF(a.TIPO, ''),
+                  ISNULL(l.TIPOLAB, '')
+                )
+              )
+            )
+          ) AS TIPOLAB,
+          UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) AS SUC,
+          ROW_NUMBER() OVER (
+            PARTITION BY
+              UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))),
+              TRY_CONVERT(INT, a.LAB_ACCESO),
+              UPPER(
+                LTRIM(
+                  RTRIM(
+                    ISNULL(
+                      NULLIF(a.TIPO, ''),
+                      ISNULL(l.TIPOLAB, '')
+                    )
+                  )
+                )
+              )
+            ORDER BY
+              UPPER(LTRIM(RTRIM(ISNULL(l.LAB, '')))),
+              TRY_CONVERT(INT, a.ID)
+          ) AS RN
+        FROM dbo.DAT_LAB_ACCESO a
+        INNER JOIN dbo.DAT_LAB l
+          ON TRY_CONVERT(INT, l.ID) = TRY_CONVERT(INT, a.LAB_ACCESO)
+        WHERE ISNULL(a.ESTADO, 0) = 1
+          AND ISNULL(l.BLOQ, 0) = 0
+          AND (
+            @0 = 1
+            OR @1 IS NULL
+            OR UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) IN (
+              SELECT UPPER(LTRIM(RTRIM(value)))
+              FROM STRING_SPLIT(ISNULL(@1, ''), ',')
+              WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> ''
+            )
+          )
+          AND (
+            @2 IS NULL
+            OR UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = UPPER(@2)
+          )
+      )
+      SELECT ID, LAB, TIPOLAB, SUC
+      FROM raw
+      WHERE RN = 1
+      ORDER BY
+        UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))),
+        UPPER(LTRIM(RTRIM(ISNULL(LAB, '')))),
+        ID
+      `,
+      [scope.isAdmin ? 1 : 0, scope.allowedSucsCsv, requestedSuc],
+    );
+    return this.mapLaboratorios(rows);
+  }
+
+  private async resolveLaboratoriosLegacy(sucOverride?: string | null) {
+    const requestedSuc = this.normalizeUpper(sucOverride);
     const rows = await this.dataSource.query(
       `
       WITH raw AS (
         SELECT
           TRY_CONVERT(INT, l.ID) AS ID,
           LTRIM(RTRIM(ISNULL(l.LAB, ''))) AS LAB,
-          LTRIM(RTRIM(ISNULL(l.TIPOLAB, ''))) AS TIPOLAB,
-          LTRIM(RTRIM(ISNULL(l.SUC, ''))) AS SUC,
+          UPPER(LTRIM(RTRIM(ISNULL(l.TIPOLAB, '')))) AS TIPOLAB,
+          UPPER(LTRIM(RTRIM(ISNULL(l.SUC, '')))) AS SUC,
           ROW_NUMBER() OVER (
             PARTITION BY TRY_CONVERT(INT, l.ID)
             ORDER BY
               CASE
                 WHEN @0 IS NOT NULL
-                  AND UPPER(LTRIM(RTRIM(ISNULL(l.SUC, '')))) = UPPER(@0)
+                  AND UPPER(LTRIM(RTRIM(ISNULL(l.SUC, '')))) = @0
                   THEN 0
                 WHEN LTRIM(RTRIM(ISNULL(l.SUC, ''))) = '' THEN 1
                 ELSE 2
@@ -1607,9 +1948,12 @@ export class OrdenesTrabajoService {
       WHERE RN = 1
       ORDER BY UPPER(LTRIM(RTRIM(ISNULL(LAB, '')))), ID
       `,
-      [scope.requestedSuc],
+      [requestedSuc],
     );
+    return this.mapLaboratorios(rows);
+  }
 
+  private mapLaboratorios(rows: unknown[]) {
     return (Array.isArray(rows) ? rows : [])
       .map((row) => {
         const id = this.toInt((row as Record<string, unknown>)['ID']) ?? 0;
@@ -1630,6 +1974,162 @@ export class OrdenesTrabajoService {
       );
   }
 
+  private async assertLaboratorioDisponibleParaOrd(
+    iord: string,
+    labor: number,
+    user: JwtPayload,
+    scope: SucScope,
+  ) {
+    const roleCode = await this.resolveRoleCode(user);
+    const ord = await this.fetchOrdLaboratorioContext(iord, scope, roleCode);
+    this.assertOrdTipoMatchesRole(roleCode, ord.tipo, iord);
+    const laboratorios = await this.resolveLaboratorios(scope, ord.suc);
+    if (this.isLaboratorioDisponible(laboratorios, labor, ord.tipo)) return;
+    throw new BadRequestException(
+      `El laboratorio ${labor} no está habilitado para la sucursal ${ord.suc || 'N/D'} y tipo ${ord.tipo || 'N/D'} de la ORD ${iord}.`,
+    );
+  }
+
+  private async assertLaboratorioDisponibleParaLote(
+    iords: string[],
+    labor: number,
+    user: JwtPayload,
+    scope: SucScope,
+  ) {
+    const roleCode = await this.resolveRoleCode(user);
+    const ords = await this.fetchBatchOrdLaboratorioContext(
+      iords,
+      scope,
+      roleCode,
+    );
+    const cache = new Map<
+      string,
+      Array<{ id: number; lab: string; tipoLab: string; suc: string }>
+    >();
+    const invalid: string[] = [];
+
+    for (const ord of ords) {
+      this.assertOrdTipoMatchesRole(roleCode, ord.tipo, ord.iord);
+      let laboratorios = cache.get(ord.suc);
+      if (!laboratorios) {
+        laboratorios = await this.resolveLaboratorios(scope, ord.suc);
+        cache.set(ord.suc, laboratorios);
+      }
+      if (this.isLaboratorioDisponible(laboratorios, labor, ord.tipo)) {
+        continue;
+      }
+      invalid.push(ord.iord);
+    }
+
+    if (!invalid.length) return;
+    throw new BadRequestException(
+      `El laboratorio ${labor} no está habilitado en DAT_LAB_ACCESO para las ORDs: ${invalid.join(', ')}`,
+    );
+  }
+
+  private isLaboratorioDisponible(
+    laboratorios: Array<{ id: number; lab: string; tipoLab: string; suc: string }>,
+    labor: number,
+    tipoRaw: string,
+  ) {
+    const tipo = this.normalizeUpper(tipoRaw);
+    return laboratorios.some(
+      (item) =>
+        item.id === labor &&
+        (!tipo || this.normalizeUpper(item.tipoLab) === tipo),
+    );
+  }
+
+  private async fetchOrdLaboratorioContext(
+    iord: string,
+    scope: SucScope,
+    roleCodeRaw: string,
+  ) {
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) AS IORD,
+        UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) AS SUC,
+        UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) AS TIPO
+      FROM dbo.PV_CTR_ORDS o
+      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdRequestedSucSql('o', '@5')}
+      `,
+      [
+        iord,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        this.normalizeUpper(roleCodeRaw),
+        scope.homeSuc,
+        scope.requestedSuc,
+      ],
+    );
+    const row = this.firstRow(rows);
+    if (!row) {
+      throw new NotFoundException(`No existe ORD ${iord} o no tiene acceso`);
+    }
+    return {
+      iord: this.normalizeUpper(row.IORD ?? iord),
+      suc: this.normalizeUpper(row.SUC ?? ''),
+      tipo: this.normalizeUpper(row.TIPO ?? ''),
+    };
+  }
+
+  private async fetchBatchOrdLaboratorioContext(
+    iords: string[],
+    scope: SucScope,
+    roleCodeRaw: string,
+  ) {
+    if (!iords.length) return [];
+    const placeholders = iords.map((_, idx) => `@${idx}`).join(',');
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) AS IORD,
+        UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) AS SUC,
+        UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) AS TIPO
+      FROM dbo.PV_CTR_ORDS o
+      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) IN (${placeholders})
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`)}
+        AND ${this.buildOrdRequestedSucSql('o', `@${iords.length + 4}`)}
+      `,
+      [
+        ...iords,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        this.normalizeUpper(roleCodeRaw),
+        scope.homeSuc,
+        scope.requestedSuc,
+      ],
+    );
+
+    const records = (Array.isArray(rows) ? rows : []).map(
+      (row) => row as Record<string, unknown>,
+    );
+    const visibleIords = new Set(
+      records
+        .map((row) => this.normalizeUpper(row.IORD ?? ''))
+        .filter((value) => value.length > 0),
+    );
+    const missing = iords.filter(
+      (iordItem) => !visibleIords.has(this.normalizeUpper(iordItem)),
+    );
+    if (missing.length) {
+      throw new NotFoundException(
+        `ORD no encontrada o sin acceso por sucursal: ${missing.join(', ')}`,
+      );
+    }
+
+    return records.map((row) => ({
+      iord: this.normalizeUpper(row.IORD ?? ''),
+      suc: this.normalizeUpper(row.SUC ?? ''),
+      tipo: this.normalizeUpper(row.TIPO ?? ''),
+    }));
+  }
+
   private formatStatusCode(value: number) {
     const rounded = Math.round(value * 1000) / 1000;
     const text = rounded.toString();
@@ -1644,6 +2144,7 @@ export class OrdenesTrabajoService {
     const operationalActions = [
       'VER_DETALLE',
       'AUTORIZAR',
+      'ANULAR',
       'ENVIAR',
       'ASIGNAR',
       'TRABAJO_TERMINADO',
@@ -1652,6 +2153,7 @@ export class OrdenesTrabajoService {
       'ASIGNAR_LABORATORIO',
       'RECIBIR',
       'ENTREGAR',
+      'IMPRIMIR_ETIQUETA',
       'CAMBIO_MATERIAL',
       'MERMA',
       'SCAN_RECIBIR',
@@ -1665,32 +2167,20 @@ export class OrdenesTrabajoService {
     }
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
+    const nonStoreReceiveActions = operationalActions
+      .filter((action) => action !== 'REGRESAR_TIENDA');
     const byRole: Record<string, string[]> = {
       JEF_TALLER: operationalActions,
-      TALLER: [
-        'VER_DETALLE',
-        'AUTORIZAR',
-        'ENVIAR',
-        'ASIGNAR',
-        'TRABAJO_TERMINADO',
-        'REGRESAR_INCIDENCIA',
-        'REGRESAR_TIENDA',
-        'ASIGNAR_LABORATORIO',
-        'ENTREGAR',
-        'CAMBIO_MATERIAL',
-        'MERMA',
-        'SCAN_ENTREGAR',
-      ],
+      TALLER: nonStoreReceiveActions,
       ANALISTA_ORD: [
         'VER_DETALLE',
         'AUTORIZAR',
+        'ANULAR',
         'ENVIAR',
-        'ASIGNAR',
-        'TRABAJO_TERMINADO',
-        'REGRESAR_INCIDENCIA',
         'REGRESAR_TIENDA',
         'ASIGNAR_LABORATORIO',
         'ENTREGAR',
+        'IMPRIMIR_ETIQUETA',
         'CAMBIO_MATERIAL',
         'MERMA',
         'SCAN_ENTREGAR',
@@ -1698,20 +2188,21 @@ export class OrdenesTrabajoService {
       ANALISTA: [
         'VER_DETALLE',
         'AUTORIZAR',
+        'ANULAR',
         'ENVIAR',
-        'ASIGNAR',
-        'TRABAJO_TERMINADO',
-        'REGRESAR_INCIDENCIA',
         'REGRESAR_TIENDA',
         'ASIGNAR_LABORATORIO',
         'ENTREGAR',
+        'IMPRIMIR_ETIQUETA',
         'CAMBIO_MATERIAL',
         'MERMA',
         'SCAN_ENTREGAR',
       ],
       ENC_MAQUILA: [
         'VER_DETALLE',
-        'ENVIAR',
+        'ASIGNAR',
+        'TRABAJO_TERMINADO',
+        'REGRESAR_INCIDENCIA',
         'RECIBIR',
         'CAMBIO_MATERIAL',
         'MERMA',
@@ -1719,7 +2210,9 @@ export class OrdenesTrabajoService {
       ],
       ENCARGADO_MAQUILA: [
         'VER_DETALLE',
-        'ENVIAR',
+        'ASIGNAR',
+        'TRABAJO_TERMINADO',
+        'REGRESAR_INCIDENCIA',
         'RECIBIR',
         'CAMBIO_MATERIAL',
         'MERMA',
@@ -1727,7 +2220,9 @@ export class OrdenesTrabajoService {
       ],
       ENC_BISEL: [
         'VER_DETALLE',
-        'ENVIAR',
+        'ASIGNAR',
+        'TRABAJO_TERMINADO',
+        'REGRESAR_INCIDENCIA',
         'RECIBIR',
         'CAMBIO_MATERIAL',
         'MERMA',
@@ -1735,7 +2230,9 @@ export class OrdenesTrabajoService {
       ],
       ENCARGADO_BISELADO: [
         'VER_DETALLE',
-        'ENVIAR',
+        'ASIGNAR',
+        'TRABAJO_TERMINADO',
+        'REGRESAR_INCIDENCIA',
         'RECIBIR',
         'CAMBIO_MATERIAL',
         'MERMA',
@@ -1773,21 +2270,215 @@ export class OrdenesTrabajoService {
         o.ESTATUS = 2,
         o.FCNMOD = GETDATE()
       FROM dbo.PV_CTR_ORDS o
+      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE o.IORD = @0
         AND TRY_CONVERT(FLOAT, o.ESTSEGU) = 3
         AND TRY_CONVERT(INT, o.ESTATUS) = 2
-        AND (
-          @1 = 1
-          OR @2 IS NULL
-          OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (
-            SELECT UPPER(LTRIM(RTRIM(value)))
-            FROM STRING_SPLIT(ISNULL(@2, ''), ',')
-            WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> ''
-          )
-        )
-        AND (@3 IS NULL OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@3))
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
-      [iord, scope.isAdmin ? 1 : 0, scope.allowedSucsCsv, scope.requestedSuc],
+      [
+        iord,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        roleCode,
+        scope.homeSuc,
+        scope.requestedSuc,
+      ],
+    );
+  }
+
+  private canEditOrdDetail(user: JwtPayload, roleCodeRaw: string) {
+    if (this.isAdmin(user)) return true;
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    return (
+      roleCode === 'JEF_TALLER' ||
+      roleCode === 'TALLER' ||
+      roleCode === 'ANALISTA_ORD' ||
+      roleCode === 'ANALISTA'
+    );
+  }
+
+  private resolveOrdTipoScope(roleCodeRaw: string) {
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    if (roleCode === 'ENC_MAQUILA' || roleCode === 'ENCARGADO_MAQUILA') {
+      return 'TALLADO';
+    }
+    if (roleCode === 'ENC_BISEL' || roleCode === 'ENCARGADO_BISELADO') {
+      return 'BISELADO';
+    }
+    return null;
+  }
+
+  private async assertOrdTypeAccessByIord(
+    iord: string,
+    user: JwtPayload,
+    scope: SucScope,
+  ) {
+    if (scope.isAdmin) return;
+    const roleCode = await this.resolveRoleCode(user);
+    const requiredTipo = this.resolveOrdTipoScope(roleCode);
+    if (!requiredTipo) return;
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) AS IORD,
+        UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) AS TIPO
+      FROM dbo.PV_CTR_ORDS o
+      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdRequestedSucSql('o', '@5')}
+      `,
+      [
+        iord,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        this.normalizeUpper(roleCode),
+        scope.homeSuc,
+        scope.requestedSuc,
+      ],
+    );
+
+    const row = this.firstRow(rows);
+    if (!row) {
+      throw new NotFoundException(`No existe ORD ${iord} o no tiene acceso`);
+    }
+    const actualTipo = this.normalizeUpper(row.TIPO ?? '');
+    if (actualTipo === requiredTipo) return;
+
+    throw new ForbiddenException(
+      `La ORD ${iord} pertenece a ${actualTipo || 'OTRO TALLER'} y tu rol solo puede operar ORDs ${requiredTipo}.`,
+    );
+  }
+
+  private async assertOrdTypeAccessByCode(
+    code: string,
+    user: JwtPayload,
+    scope: SucScope,
+  ) {
+    if (scope.isAdmin) return;
+    const roleCode = await this.resolveRoleCode(user);
+    const requiredTipo = this.resolveOrdTipoScope(roleCode);
+    if (!requiredTipo) return;
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) AS IORD,
+        UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) AS TIPO
+      FROM dbo.PV_CTR_ORDS o
+      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
+      WHERE (
+          UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
+          OR UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) = UPPER(@0)
+        )
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdRequestedSucSql('o', '@5')}
+      ORDER BY
+        CASE
+          WHEN UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0) THEN 0
+          ELSE 1
+        END,
+        ISNULL(o.FCNS, ISNULL(o.FCNMOD, o.FCNM)) DESC,
+        o.IORD DESC
+      `,
+      [
+        code,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        this.normalizeUpper(roleCode),
+        scope.homeSuc,
+        scope.requestedSuc,
+      ],
+    );
+
+    const row = this.firstRow(rows);
+    if (!row) {
+      throw new NotFoundException(
+        `No existe ORD para el código ${code} o no tiene acceso por sucursal`,
+      );
+    }
+    this.assertOrdTipoMatchesRole(
+      roleCode,
+      row.TIPO,
+      this.normalizeText(row.IORD) ?? code,
+    );
+  }
+
+  private assertOrdTipoMatchesRole(
+    roleCodeRaw: string,
+    ordTipoRaw: unknown,
+    iord: string,
+  ) {
+    const requiredTipo = this.resolveOrdTipoScope(roleCodeRaw);
+    if (!requiredTipo) return;
+    const actualTipo = this.normalizeUpper(ordTipoRaw);
+    if (actualTipo === requiredTipo) return;
+
+    throw new ForbiddenException(
+      `La ORD ${iord} pertenece a ${actualTipo || 'OTRO TALLER'} y tu rol solo puede operar ORDs ${requiredTipo}.`,
+    );
+  }
+
+  private async assertBatchOrdTypeAccess(
+    iords: string[],
+    user: JwtPayload,
+    scope: SucScope,
+  ) {
+    if (scope.isAdmin || !iords.length) return;
+    const roleCode = await this.resolveRoleCode(user);
+    const requiredTipo = this.resolveOrdTipoScope(roleCode);
+    if (!requiredTipo) return;
+
+    const placeholders = iords.map((_, idx) => `@${idx}`).join(',');
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) AS IORD,
+        UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) AS TIPO
+      FROM dbo.PV_CTR_ORDS o
+      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) IN (${placeholders})
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`)}
+        AND ${this.buildOrdRequestedSucSql('o', `@${iords.length + 4}`)}
+      `,
+      [
+        ...iords,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        this.normalizeUpper(roleCode),
+        scope.homeSuc,
+        scope.requestedSuc,
+      ],
+    );
+
+    const records = (Array.isArray(rows) ? rows : []).map(
+      (row) => row as Record<string, unknown>,
+    );
+    const visibleIords = new Set(
+      records
+        .map((row) => this.normalizeUpper(row.IORD ?? ''))
+        .filter((value) => value.length > 0),
+    );
+    const missing = iords.filter(
+      (iord) => !visibleIords.has(this.normalizeUpper(iord)),
+    );
+    if (missing.length) {
+      throw new NotFoundException(
+        `ORD no encontrada o sin acceso por sucursal: ${missing.join(', ')}`,
+      );
+    }
+
+    const invalid = records
+      .filter((row) => this.normalizeUpper(row.TIPO ?? '') !== requiredTipo)
+      .map((row) => this.normalizeUpper(row.IORD ?? ''))
+      .filter((value) => value.length > 0);
+    if (!invalid.length) return;
+
+    throw new ForbiddenException(
+      `Las siguientes ORDs no corresponden a tu taller ${requiredTipo}: ${invalid.join(', ')}`,
     );
   }
 
