@@ -33,6 +33,10 @@ type ListarReqfFoliosInput = {
   page?: number | null;
 };
 
+type SqlExecutor = {
+  query: (query: string, parameters?: unknown[]) => Promise<any>;
+};
+
 const FACTURIFY_REGIMEN_DESC_FALLBACK: Record<string, string> = {
   '601': 'General de Ley Personas Morales',
   '603': 'Personas Morales con Fines no Lucrativos',
@@ -296,6 +300,12 @@ export class FacturacionService {
 
   private normalizedSqlTextExpr(sqlExpr: string) {
     return `UPPER(LTRIM(RTRIM(ISNULL(CAST(${sqlExpr} AS NVARCHAR(4000)), ''))))`;
+  }
+
+  private normalizedSqlIntegerIdentifierExpr(sqlExpr: string) {
+    return this.normalizedSqlTextExpr(
+      `COALESCE(CONVERT(NVARCHAR(255), TRY_CONVERT(BIGINT, ${sqlExpr})), CAST(${sqlExpr} AS NVARCHAR(255)))`,
+    );
   }
 
   private async buildPendientesSelectSql() {
@@ -690,14 +700,13 @@ export class FacturacionService {
         defaultSql: 'NULL',
       }),
     );
-    const clienExpr = this.normalizedSqlTextExpr(
-      this.facColumnRef({
-        alias: 'f',
-        columns,
-        primary: 'CLIEN',
-        defaultSql: 'NULL',
-      }),
-    );
+    const clienRef = this.facColumnRef({
+      alias: 'f',
+      columns,
+      primary: 'CLIEN',
+      defaultSql: 'NULL',
+    });
+    const clienExpr = this.normalizedSqlIntegerIdentifierExpr(clienRef);
     const idFolExpr = this.normalizedSqlTextExpr('f.IDFOL');
     const tipoFactExpr = this.normalizedSqlTextExpr(
       this.facColumnRef({
@@ -737,7 +746,19 @@ export class FacturacionService {
     }
     addContainsFilter(razonSocialExpr, input.razonSocialReceptor);
     addContainsFilter(rfcReceptorExpr, input.rfcReceptor);
-    addContainsFilter(clienExpr, input.clien);
+    const clienFilter = this.normalizeTextFilter(input.clien);
+    if (clienFilter) {
+      if (
+        /^\d+$/.test(clienFilter) &&
+        clienFilter.length <= 19
+      ) {
+        where.push(
+          `(TRY_CONVERT(BIGINT, ${clienRef}) = TRY_CONVERT(BIGINT, ${addParam(clienFilter)}) OR ${clienExpr} LIKE ${addParam(`%${clienFilter}%`)})`,
+        );
+      } else {
+        where.push(`${clienExpr} LIKE ${addParam(`%${clienFilter}%`)}`);
+      }
+    }
     addContainsFilter(idFolExpr, input.idFol);
     addContainsFilter(tipoFactExpr, input.tipoFact);
 
@@ -1648,6 +1669,112 @@ SET NUMERIC_ROUNDABORT OFF;`;
     }
   }
 
+  private async ensureCfdiSerieControlProcedures() {
+    const scriptPath = 'sql/2026-03-27_fact_cfdi_serie_control.sql';
+    await this.ensureStoredProcedure('dbo.sp_fact_cfdi_serie_reserve', scriptPath);
+    await this.ensureStoredProcedure(
+      'dbo.sp_fact_cfdi_serie_update_status',
+      scriptPath,
+    );
+  }
+
+  private mapCfdiSerieControlRow(row?: Record<string, unknown> | null) {
+    if (!row) return null;
+    return {
+      id: this.toIntValue(row.ID),
+      idFol: this.normalizeText(row.IDFOL),
+      reemision: this.toIntValue(row.REEMISION) ?? 1,
+      rfcEmisor: this.normalizeText(row.RFCEMISOR),
+      serie: this.normalizeText(row.SERIE),
+      folio: this.normalizeText(row.FOLIO),
+      nomenclatura: this.normalizeText(row.NOMENCLATURA),
+      fecha: this.normalizeText(row.FECHA),
+      consecutivo: this.toIntValue(row.CONSECUTIVO) ?? 0,
+      estado: this.normalizeText(row.ESTADO),
+      cfdiUuid: this.normalizeText(row.CFDI_UUID) || null,
+      observaciones: this.normalizeText(row.OBSERVACIONES) || null,
+      fcnc: this.normalizeText(row.FCNC) || null,
+      fcnm: this.normalizeText(row.FCNM) || null,
+      fcnTimbrado: this.normalizeText(row.FCN_TIMBRADO) || null,
+      fcnCancelacion: this.normalizeText(row.FCN_CANCELACION) || null,
+    };
+  }
+
+  private async reserveCfdiSerieControl(input: {
+    idFol: string;
+    rfcEmisor: string;
+    user?: JwtPayload | null;
+    executor?: SqlExecutor;
+  }) {
+    await this.ensureCfdiSerieControlProcedures();
+    const executor = input.executor ?? this.dataSource;
+    const rows = await executor.query(
+      `${this.sqlServerStrictSetOptionsPrefix()}
+      EXEC dbo.sp_fact_cfdi_serie_reserve
+        @IDFOL = @0,
+        @RFCEMISOR = @1,
+        @FECHA = @2,
+        @USUARIO = @3`,
+      [
+        this.normalizeText(input.idFol),
+        this.normalizeUpper(input.rfcEmisor),
+        null,
+        this.normalizeText(input.user?.username ?? '') || null,
+      ],
+    );
+    const mapped = this.mapCfdiSerieControlRow(
+      (rows?.[0] ?? null) as Record<string, unknown> | null,
+    );
+    if (!mapped?.serie || !mapped?.folio || !mapped?.nomenclatura) {
+      throw new ConflictException(
+        `sp_fact_cfdi_serie_reserve no devolvió serie controlada para ${input.idFol}`,
+      );
+    }
+    return mapped;
+  }
+
+  private async updateCfdiSerieControlStatus(input: {
+    idFol: string;
+    estado: string;
+    cfdiUuid?: string | null;
+    observaciones?: string | null;
+    user?: JwtPayload | null;
+    executor?: SqlExecutor;
+    allowMissing?: boolean;
+  }) {
+    await this.ensureCfdiSerieControlProcedures();
+    const executor = input.executor ?? this.dataSource;
+    try {
+      const rows = await executor.query(
+        `${this.sqlServerStrictSetOptionsPrefix()}
+        EXEC dbo.sp_fact_cfdi_serie_update_status
+          @IDFOL = @0,
+          @ESTADO = @1,
+          @CFDI_UUID = @2,
+          @USUARIO = @3,
+          @OBSERVACIONES = @4`,
+        [
+          this.normalizeText(input.idFol),
+          this.normalizeUpper(input.estado),
+          this.normalizeText(input.cfdiUuid ?? '') || null,
+          this.normalizeText(input.user?.username ?? '') || null,
+          this.normalizeText(input.observaciones ?? '') || null,
+        ],
+      );
+      return this.mapCfdiSerieControlRow(
+        (rows?.[0] ?? null) as Record<string, unknown> | null,
+      );
+    } catch (error) {
+      if (input.allowMissing && error instanceof QueryFailedError) {
+        const message = this.extractSqlMessage(error).toUpperCase();
+        if (message.includes('NO EXISTE CONTROL CFDI')) {
+          return null;
+        }
+      }
+      throw error;
+    }
+  }
+
   private mapUnificacionError(error: unknown, fallbackMessage: string) {
     if (
       error instanceof BadRequestException ||
@@ -2105,12 +2232,6 @@ SET NUMERIC_ROUNDABORT OFF;`;
     return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
   }
 
-  private toNumericFolio(idFol: string) {
-    const digits = (idFol || '').replace(/\D/g, '');
-    if (!digits) return 1;
-    return Number(digits.slice(-8));
-  }
-
   private async resolveEmisor(rfcEmisor: string) {
     const empresas = await this.facturify.listEmpresas();
     if (!empresas.ok) return null;
@@ -2224,6 +2345,10 @@ SET NUMERIC_ROUNDABORT OFF;`;
     detail: any[];
     sucursal: any;
     cliente: any;
+  }, serieControl: {
+    serie: string;
+    folio: string;
+    nomenclatura?: string | null;
   }) {
     const round2 = (value: number) => this.round2(Number(value || 0));
     const round6 = (value: number) =>
@@ -2237,10 +2362,20 @@ SET NUMERIC_ROUNDABORT OFF;`;
     const rfcEmisor = String(h.RfcEmisor ?? s.RFC ?? '').trim();
     const emisor = await this.resolveEmisor(rfcEmisor);
 
-    const conceptos = (full.detail || []).map((d) => {
+    const conceptosConTotalesSat = (full.detail || []).map((d) => {
       const cantidad = round6(Number(d.Cantidad ?? 1));
       const valorUnitario = round6(Number(d.ValorUnitario ?? d.PVTAT ?? 0));
-      const totalConcepto = round6(Number(d.PVTAT ?? 0));
+      const objetoImp = String(d.ObjetoImp ?? '02')
+        .split('.')[0]
+        .padStart(2, '0');
+      const tasaIvaRaw = Number(d.IvaTasa ?? 0.16);
+      const tasaIva = Number.isFinite(tasaIvaRaw) ? tasaIvaRaw : 0.16;
+      const totalConcepto = round2(Number(d.PVTAT ?? 0));
+      const aplicaImpuesto = objetoImp === '02' && Math.abs(tasaIva) > 0;
+      const impuestoConcepto = aplicaImpuesto
+        ? round2(totalConcepto * tasaIva)
+        : 0;
+
       return {
         clave_producto_servicio: String(d.ClaveProdServ ?? '01010101').split('.')[0],
         clave_unidad_de_medida: String(d.Unidad ?? 'H87'),
@@ -2248,26 +2383,29 @@ SET NUMERIC_ROUNDABORT OFF;`;
         descripcion: String(d.Descripcion ?? 'CONCEPTO'),
         valor_unitario: valorUnitario,
         total: totalConcepto,
-        exento_de_impuestos: false,
-        objeto_imp: String(d.ObjetoImp ?? '02')
-          .split('.')[0]
-          .padStart(2, '0'),
+        exento_de_impuestos: !aplicaImpuesto,
+        objeto_imp: objetoImp,
+        _impuesto_sat: impuestoConcepto,
       };
     });
 
-    const subtotalRaw = conceptos.reduce(
-      (acc: number, concepto: any) => acc + Number(concepto.total ?? 0),
-      0,
+    const subtotal = round2(
+      conceptosConTotalesSat.reduce(
+        (acc: number, concepto: any) => acc + Number(concepto.total ?? 0),
+        0,
+      ),
     );
-    const subtotal = round2(subtotalRaw);
-    const total = round2(
-      conceptos.reduce((acc: number, concepto: any) => {
-        const totalConcepto = Number(concepto.total ?? 0);
-        const impuestoConcepto = round2(totalConcepto * 0.16);
-        return acc + round2(totalConcepto + impuestoConcepto);
-      }, 0),
+    const impuestoFederal = round2(
+      conceptosConTotalesSat.reduce(
+        (acc: number, concepto: any) =>
+          acc + Number(concepto._impuesto_sat ?? 0),
+        0,
+      ),
     );
-    const impuestoFederal = round2(total - subtotal);
+    const total = round2(subtotal + impuestoFederal);
+    const conceptos = conceptosConTotalesSat.map(
+      ({ _impuesto_sat, ...concepto }) => concepto,
+    );
 
     const email = String(c.EMAILRECEPTOR ?? '').trim();
     const regimen = await this.resolveReceptorRegimen(c);
@@ -2298,6 +2436,13 @@ SET NUMERIC_ROUNDABORT OFF;`;
     const exportacion =
       exportacionRaw.match(/\d{2}/)?.[0] ??
       exportacionRaw.split('.')[0].trim().padStart(2, '0');
+    const serieFacturify = this.normalizeUpper(serieControl?.serie ?? '');
+    const folioFacturify = this.normalizeText(serieControl?.folio ?? '');
+    if (!serieFacturify || !folioFacturify) {
+      throw new ConflictException(
+        `No se resolvió serie/folio controlado para ${String(h.IDFOL ?? '').trim() || 'N/A'}`,
+      );
+    }
 
     return {
       emisor: {
@@ -2332,8 +2477,8 @@ SET NUMERIC_ROUNDABORT OFF;`;
         impuesto_federal: impuestoFederal,
         total,
         conceptos,
-        serie: 'IOE-I',
-        folio: this.toNumericFolio(String(h.IDFOL ?? '1')),
+        serie: serieFacturify,
+        folio: folioFacturify,
         send_pdf_and_xml_by_mail: Boolean(email),
         emails_send: email || undefined,
       },
@@ -2386,7 +2531,20 @@ SET NUMERIC_ROUNDABORT OFF;`;
     }
 
     const full = await this.getFolioData(idFol);
-    const payload = await this.toFacturifyPayload(full);
+    const rfcEmisor = this.normalizeText(
+      full.header?.RfcEmisor ?? full.header?.RFCEMISOR ?? full.sucursal?.RFC,
+    );
+    if (!rfcEmisor) {
+      throw new BadRequestException(
+        `Folio ${idFol} no tiene RFC emisor para generar serie controlada`,
+      );
+    }
+    const serieControl = await this.reserveCfdiSerieControl({
+      idFol,
+      rfcEmisor,
+      user,
+    });
+    const payload = await this.toFacturifyPayload(full, serieControl);
     if (!payload?.emisor?.uuid) {
       throw new BadRequestException(
         `No se encontró emisor.uuid en Facturify para RFC emisor del folio ${idFol}`,
@@ -2408,6 +2566,7 @@ SET NUMERIC_ROUNDABORT OFF;`;
       xmlBase64: factura?.xml || null,
       pdfBase64: factura?.pdf || null,
       metadata: {
+        serieControl,
         request: payload,
         response: timbrado,
         retry: {
@@ -2423,28 +2582,43 @@ SET NUMERIC_ROUNDABORT OFF;`;
              FCNF=CASE WHEN @3='TIMBRADO' THEN GETDATE() ELSE FCNF END`
       : '';
     const newStatus = timbrado.ok ? 'FACTURADO' : 'PENDIENTE';
-    await this.dataSource.query(
-      `UPDATE FAC_SVR_SHAP
-         SET ESTATUS=@1,
-             CFDI_UUID=@2,
-             CFDI_STATUS=@3,
-             CFDI_XML_PATH=@4,
-             CFDI_PDF_PATH=@5,
-             CFDI_FACTURIFY_JOB_ID=@6,
-             CFDI_F_TIMBRADO=CASE WHEN @3='TIMBRADO' THEN GETDATE() ELSE CFDI_F_TIMBRADO END${setFcnfSql},
-             CFDI_ERROR_MSG=@7
-       WHERE IDFOL=@0`,
-      [
+    const controlStatus = timbrado.ok ? 'TIMBRADO' : 'ERROR_EMISION';
+    const controlObservaciones = timbrado.ok
+      ? null
+      : JSON.stringify(timbrado.data).slice(0, 500);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `UPDATE FAC_SVR_SHAP
+           SET ESTATUS=@1,
+               CFDI_UUID=@2,
+               CFDI_STATUS=@3,
+               CFDI_XML_PATH=@4,
+               CFDI_PDF_PATH=@5,
+               CFDI_FACTURIFY_JOB_ID=@6,
+               CFDI_F_TIMBRADO=CASE WHEN @3='TIMBRADO' THEN GETDATE() ELSE CFDI_F_TIMBRADO END${setFcnfSql},
+               CFDI_ERROR_MSG=@7
+         WHERE IDFOL=@0`,
+        [
+          idFol,
+          newStatus,
+          uuid,
+          timbrado.ok ? 'TIMBRADO' : 'ERROR',
+          storage.xml,
+          storage.pdf,
+          factura?.job_id || null,
+          timbrado.ok ? null : JSON.stringify(timbrado.data).slice(0, 900),
+        ],
+      );
+
+      await this.updateCfdiSerieControlStatus({
         idFol,
-        newStatus,
-        uuid,
-        timbrado.ok ? 'TIMBRADO' : 'ERROR',
-        storage.xml,
-        storage.pdf,
-        factura?.job_id || null,
-        timbrado.ok ? null : JSON.stringify(timbrado.data).slice(0, 900),
-      ],
-    );
+        estado: controlStatus,
+        cfdiUuid: uuid,
+        observaciones: controlObservaciones,
+        user,
+        executor: manager,
+      });
+    });
 
     let emailRes: any = null;
     const emailTarget = String(full.cliente?.EMAILRECEPTOR ?? '').trim();
@@ -2477,6 +2651,7 @@ SET NUMERIC_ROUNDABORT OFF;`;
       idFol,
       uuid,
       storage,
+      serieControl,
       email: emailRes
         ? { ok: emailRes.ok, status: emailRes.status, target: emailTarget }
         : null,
@@ -2544,15 +2719,32 @@ SET NUMERIC_ROUNDABORT OFF;`;
         ? 'CANCELADO_CONFIRMADO'
         : rows[0].CFDI_CANCEL_STATUS || null;
 
-      await this.dataSource.query(
-        `UPDATE FAC_SVR_SHAP
-           SET CFDI_STATUS=@1,
-               CFDI_CANCEL_STATUS=@2,
-               ESTATUS=@3,
-               CFDI_ERROR_MSG=NULL
-         WHERE IDFOL=@0`,
-        [idFol, nextCfdiStatus, nextCancelStatus, nextEstatus],
-      );
+      const controlStatus = canceled
+        ? 'CANCELADO'
+        : hasCfdi
+        ? 'TIMBRADO'
+        : 'RESERVADO';
+      await this.dataSource.transaction(async (manager) => {
+        await manager.query(
+          `UPDATE FAC_SVR_SHAP
+             SET CFDI_STATUS=@1,
+                 CFDI_CANCEL_STATUS=@2,
+                 ESTATUS=@3,
+                 CFDI_ERROR_MSG=NULL
+           WHERE IDFOL=@0`,
+          [idFol, nextCfdiStatus, nextCancelStatus, nextEstatus],
+        );
+
+        await this.updateCfdiSerieControlStatus({
+          idFol,
+          estado: controlStatus,
+          cfdiUuid: String(uuid ?? '').trim() || null,
+          observaciones: null,
+          user,
+          executor: manager,
+          allowMissing: true,
+        });
+      });
     }
 
     const after = await this.dataSource.query(
@@ -2641,20 +2833,38 @@ SET NUMERIC_ROUNDABORT OFF;`;
       : facturifyMessage ||
         `No se pudo cancelar CFDI para ${idFol} (status ${cancelRes.status})`;
 
-    await this.dataSource.query(
-      `UPDATE FAC_SVR_SHAP
-         SET CFDI_CANCEL_STATUS=@1,
-             ESTATUS=@2,
-             CFDI_F_CANCELACION=CASE WHEN @1='CANCELACION_PENDIENTE' THEN GETDATE() ELSE CFDI_F_CANCELACION END,
-             CFDI_ERROR_MSG=@3
-       WHERE IDFOL=@0`,
-      [
+    const controlStatus = cancelRes.ok
+      ? 'CANCELACION_PENDIENTE'
+      : 'ERROR_CANCELACION';
+    const controlObservaciones = cancelRes.ok
+      ? null
+      : JSON.stringify(cancelRes.data).slice(0, 500);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `UPDATE FAC_SVR_SHAP
+           SET CFDI_CANCEL_STATUS=@1,
+               ESTATUS=@2,
+               CFDI_F_CANCELACION=CASE WHEN @1='CANCELACION_PENDIENTE' THEN GETDATE() ELSE CFDI_F_CANCELACION END,
+               CFDI_ERROR_MSG=@3
+         WHERE IDFOL=@0`,
+        [
+          idFol,
+          cancelRes.ok ? 'CANCELACION_PENDIENTE' : 'ERROR',
+          cancelRes.ok ? 'CANCELACION PENDIENTE' : 'FACTURADO',
+          cancelRes.ok ? null : JSON.stringify(cancelRes.data).slice(0, 900),
+        ],
+      );
+
+      await this.updateCfdiSerieControlStatus({
         idFol,
-        cancelRes.ok ? 'CANCELACION_PENDIENTE' : 'ERROR',
-        cancelRes.ok ? 'CANCELACION PENDIENTE' : 'FACTURADO',
-        cancelRes.ok ? null : JSON.stringify(cancelRes.data).slice(0, 900),
-      ],
-    );
+        estado: controlStatus,
+        cfdiUuid: String(uuid ?? '').trim() || null,
+        observaciones: controlObservaciones,
+        user,
+        executor: manager,
+        allowMissing: true,
+      });
+    });
 
     return {
       ok: cancelRes.ok,

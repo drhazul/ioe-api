@@ -1,0 +1,316 @@
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+IF OBJECT_ID('dbo.FACT_CFDI_FOLIOS_DIARIOS', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.FACT_CFDI_FOLIOS_DIARIOS (
+    ID BIGINT IDENTITY(1,1) NOT NULL,
+    IDFOL NVARCHAR(255) NOT NULL,
+    REEMISION INT NOT NULL
+      CONSTRAINT DF_FACT_CFDI_FOLIOS_DIARIOS_REEMISION DEFAULT (1),
+    RFCEMISOR NVARCHAR(20) NOT NULL,
+    SERIE NVARCHAR(4) NOT NULL,
+    FOLIO NVARCHAR(20) NOT NULL,
+    NOMENCLATURA NVARCHAR(40) NOT NULL,
+    FECHA DATE NOT NULL,
+    CONSECUTIVO INT NOT NULL,
+    ESTADO NVARCHAR(40) NOT NULL,
+    CFDI_UUID NVARCHAR(120) NULL,
+    USUARIO_CREACION NVARCHAR(120) NULL,
+    USUARIO_ULT_MOD NVARCHAR(120) NULL,
+    OBSERVACIONES NVARCHAR(500) NULL,
+    FCNC DATETIME NOT NULL
+      CONSTRAINT DF_FACT_CFDI_FOLIOS_DIARIOS_FCNC DEFAULT (GETDATE()),
+    FCNM DATETIME NOT NULL
+      CONSTRAINT DF_FACT_CFDI_FOLIOS_DIARIOS_FCNM DEFAULT (GETDATE()),
+    FCN_TIMBRADO DATETIME NULL,
+    FCN_CANCELACION DATETIME NULL,
+    CONSTRAINT PK_FACT_CFDI_FOLIOS_DIARIOS PRIMARY KEY CLUSTERED (ID),
+    CONSTRAINT CK_FACT_CFDI_FOLIOS_DIARIOS_CONSECUTIVO
+      CHECK (CONSECUTIVO >= 1 AND CONSECUTIVO <= 999)
+  );
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE object_id = OBJECT_ID('dbo.FACT_CFDI_FOLIOS_DIARIOS')
+    AND name = 'UX_FACT_CFDI_FOLIOS_DIARIOS_SERIE_FECHA_CONSEC'
+)
+BEGIN
+  CREATE UNIQUE NONCLUSTERED INDEX UX_FACT_CFDI_FOLIOS_DIARIOS_SERIE_FECHA_CONSEC
+    ON dbo.FACT_CFDI_FOLIOS_DIARIOS (SERIE, FECHA, CONSECUTIVO);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE object_id = OBJECT_ID('dbo.FACT_CFDI_FOLIOS_DIARIOS')
+    AND name = 'UX_FACT_CFDI_FOLIOS_DIARIOS_NOMENCLATURA'
+)
+BEGIN
+  CREATE UNIQUE NONCLUSTERED INDEX UX_FACT_CFDI_FOLIOS_DIARIOS_NOMENCLATURA
+    ON dbo.FACT_CFDI_FOLIOS_DIARIOS (NOMENCLATURA);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE object_id = OBJECT_ID('dbo.FACT_CFDI_FOLIOS_DIARIOS')
+    AND name = 'UX_FACT_CFDI_FOLIOS_DIARIOS_IDFOL_REEMISION'
+)
+BEGIN
+  CREATE UNIQUE NONCLUSTERED INDEX UX_FACT_CFDI_FOLIOS_DIARIOS_IDFOL_REEMISION
+    ON dbo.FACT_CFDI_FOLIOS_DIARIOS (IDFOL, REEMISION);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE object_id = OBJECT_ID('dbo.FACT_CFDI_FOLIOS_DIARIOS')
+    AND name = 'IX_FACT_CFDI_FOLIOS_DIARIOS_IDFOL_FCNM'
+)
+BEGIN
+  CREATE NONCLUSTERED INDEX IX_FACT_CFDI_FOLIOS_DIARIOS_IDFOL_FCNM
+    ON dbo.FACT_CFDI_FOLIOS_DIARIOS (IDFOL, FCNM DESC);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_fact_cfdi_serie_reserve
+  @IDFOL NVARCHAR(255),
+  @RFCEMISOR NVARCHAR(20),
+  @FECHA DATE = NULL,
+  @USUARIO NVARCHAR(120) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  DECLARE @startedTran BIT = 0;
+  DECLARE @idFolNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@IDFOL, ''))));
+  DECLARE @rfcNorm NVARCHAR(20) = UPPER(LTRIM(RTRIM(ISNULL(@RFCEMISOR, ''))));
+  DECLARE @fechaNorm DATE = ISNULL(@FECHA, CONVERT(DATE, GETDATE()));
+  DECLARE @fechaTxt CHAR(8) = CONVERT(CHAR(8), @fechaNorm, 112);
+  DECLARE @serie NVARCHAR(4);
+  DECLARE @consecutivo INT;
+  DECLARE @folio NVARCHAR(20);
+  DECLARE @nomenclatura NVARCHAR(40);
+  DECLARE @reemision INT;
+  DECLARE @targetId BIGINT;
+  DECLARE @existingEstado NVARCHAR(40);
+  DECLARE @lockResource NVARCHAR(120);
+  DECLARE @lockResult INT;
+
+  SET @rfcNorm = REPLACE(REPLACE(@rfcNorm, '-', ''), ' ', '');
+
+  IF @idFolNorm = ''
+    THROW 58010, 'IDFOL es requerido para reservar serie CFDI.', 1;
+
+  IF LEN(@rfcNorm) < 4
+    THROW 58011, 'RFCEMISOR debe contener al menos 4 caracteres para generar serie CFDI.', 1;
+
+  SET @serie = LEFT(@rfcNorm, 4);
+
+  BEGIN TRY
+    IF @@TRANCOUNT = 0
+    BEGIN
+      SET @startedTran = 1;
+      BEGIN TRANSACTION;
+    END;
+
+    SET @lockResource = CONCAT('FACT_CFDI_SERIE_', @serie, '_', @fechaTxt);
+
+    EXEC @lockResult = sp_getapplock
+      @Resource = @lockResource,
+      @LockMode = 'Exclusive',
+      @LockOwner = 'Transaction',
+      @LockTimeout = 15000;
+
+    IF @lockResult < 0
+      THROW 58012, 'No se pudo obtener lock para reservar serie CFDI.', 1;
+
+    SELECT TOP 1
+      @targetId = ID,
+      @existingEstado = ESTADO
+    FROM dbo.FACT_CFDI_FOLIOS_DIARIOS WITH (UPDLOCK, HOLDLOCK)
+    WHERE IDFOL = @idFolNorm
+    ORDER BY REEMISION DESC, ID DESC;
+
+    IF @targetId IS NOT NULL AND ISNULL(@existingEstado, '') <> 'CANCELADO'
+    BEGIN
+      UPDATE dbo.FACT_CFDI_FOLIOS_DIARIOS
+      SET
+        ESTADO = CASE
+          WHEN ESTADO IN ('ERROR_EMISION', 'ERROR_CANCELACION') THEN 'RESERVADO'
+          ELSE ESTADO
+        END,
+        USUARIO_ULT_MOD = COALESCE(NULLIF(LTRIM(RTRIM(@USUARIO)), ''), USUARIO_ULT_MOD),
+        FCNM = GETDATE()
+      WHERE ID = @targetId;
+    END
+    ELSE
+    BEGIN
+      SELECT @reemision = ISNULL(MAX(REEMISION), 0) + 1
+      FROM dbo.FACT_CFDI_FOLIOS_DIARIOS WITH (UPDLOCK, HOLDLOCK)
+      WHERE IDFOL = @idFolNorm;
+
+      SELECT @consecutivo = ISNULL(MAX(CONSECUTIVO), 0) + 1
+      FROM dbo.FACT_CFDI_FOLIOS_DIARIOS WITH (UPDLOCK, HOLDLOCK)
+      WHERE SERIE = @serie
+        AND FECHA = @fechaNorm;
+
+      IF ISNULL(@consecutivo, 0) <= 0
+        SET @consecutivo = 1;
+
+      IF @consecutivo > 999
+        THROW 58014, 'Se alcanzó el máximo consecutivo diario (999) para la serie CFDI.', 1;
+
+      SET @folio = CONCAT(@fechaTxt, '-', RIGHT('000' + CONVERT(VARCHAR(10), @consecutivo), 3));
+      SET @nomenclatura = CONCAT(@serie, '-', @folio);
+
+      INSERT INTO dbo.FACT_CFDI_FOLIOS_DIARIOS (
+        IDFOL,
+        REEMISION,
+        RFCEMISOR,
+        SERIE,
+        FOLIO,
+        NOMENCLATURA,
+        FECHA,
+        CONSECUTIVO,
+        ESTADO,
+        USUARIO_CREACION,
+        USUARIO_ULT_MOD,
+        FCNC,
+        FCNM
+      )
+      VALUES (
+        @idFolNorm,
+        @reemision,
+        @rfcNorm,
+        @serie,
+        @folio,
+        @nomenclatura,
+        @fechaNorm,
+        @consecutivo,
+        'RESERVADO',
+        NULLIF(LTRIM(RTRIM(@USUARIO)), ''),
+        NULLIF(LTRIM(RTRIM(@USUARIO)), ''),
+        GETDATE(),
+        GETDATE()
+      );
+
+      SET @targetId = CONVERT(BIGINT, SCOPE_IDENTITY());
+    END;
+
+    SELECT TOP 1
+      ID,
+      IDFOL,
+      REEMISION,
+      RFCEMISOR,
+      SERIE,
+      FOLIO,
+      NOMENCLATURA,
+      FECHA,
+      CONSECUTIVO,
+      ESTADO,
+      CFDI_UUID,
+      OBSERVACIONES,
+      FCNC,
+      FCNM,
+      FCN_TIMBRADO,
+      FCN_CANCELACION
+    FROM dbo.FACT_CFDI_FOLIOS_DIARIOS
+    WHERE ID = @targetId;
+
+    IF @startedTran = 1 AND @@TRANCOUNT > 0
+      COMMIT TRANSACTION;
+  END TRY
+  BEGIN CATCH
+    IF @startedTran = 1 AND @@TRANCOUNT > 0
+      ROLLBACK TRANSACTION;
+    THROW;
+  END CATCH
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_fact_cfdi_serie_update_status
+  @IDFOL NVARCHAR(255),
+  @ESTADO NVARCHAR(40),
+  @CFDI_UUID NVARCHAR(120) = NULL,
+  @USUARIO NVARCHAR(120) = NULL,
+  @OBSERVACIONES NVARCHAR(500) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  DECLARE @idFolNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@IDFOL, ''))));
+  DECLARE @estadoNorm NVARCHAR(40) = UPPER(LTRIM(RTRIM(ISNULL(@ESTADO, ''))));
+  DECLARE @cfdiUuidNorm NVARCHAR(120) = NULLIF(LTRIM(RTRIM(ISNULL(@CFDI_UUID, ''))), '');
+  DECLARE @usuarioNorm NVARCHAR(120) = NULLIF(LTRIM(RTRIM(ISNULL(@USUARIO, ''))), '');
+  DECLARE @observacionesNorm NVARCHAR(500) = NULLIF(LTRIM(RTRIM(ISNULL(@OBSERVACIONES, ''))), '');
+  DECLARE @targetId BIGINT;
+
+  IF @idFolNorm = ''
+    THROW 58020, 'IDFOL es requerido para actualizar estado de serie CFDI.', 1;
+
+  IF @estadoNorm = ''
+    THROW 58021, 'ESTADO es requerido para actualizar serie CFDI.', 1;
+
+  SELECT TOP 1
+    @targetId = ID
+  FROM dbo.FACT_CFDI_FOLIOS_DIARIOS WITH (UPDLOCK, HOLDLOCK)
+  WHERE IDFOL = @idFolNorm
+  ORDER BY REEMISION DESC, ID DESC;
+
+  IF @targetId IS NULL
+    THROW 58022, 'No existe control CFDI para el IDFOL indicado.', 1;
+
+  UPDATE dbo.FACT_CFDI_FOLIOS_DIARIOS
+  SET
+    ESTADO = @estadoNorm,
+    CFDI_UUID = COALESCE(@cfdiUuidNorm, CFDI_UUID),
+    USUARIO_ULT_MOD = COALESCE(@usuarioNorm, USUARIO_ULT_MOD),
+    OBSERVACIONES = CASE
+      WHEN @observacionesNorm IS NULL THEN OBSERVACIONES
+      ELSE LEFT(@observacionesNorm, 500)
+    END,
+    FCNM = GETDATE(),
+    FCN_TIMBRADO = CASE
+      WHEN @estadoNorm = 'TIMBRADO' THEN COALESCE(FCN_TIMBRADO, GETDATE())
+      ELSE FCN_TIMBRADO
+    END,
+    FCN_CANCELACION = CASE
+      WHEN @estadoNorm IN ('CANCELACION_PENDIENTE', 'CANCELADO')
+        THEN COALESCE(FCN_CANCELACION, GETDATE())
+      ELSE FCN_CANCELACION
+    END
+  WHERE ID = @targetId;
+
+  SELECT TOP 1
+    ID,
+    IDFOL,
+    REEMISION,
+    RFCEMISOR,
+    SERIE,
+    FOLIO,
+    NOMENCLATURA,
+    FECHA,
+    CONSECUTIVO,
+    ESTADO,
+    CFDI_UUID,
+    OBSERVACIONES,
+    FCNC,
+    FCNM,
+    FCN_TIMBRADO,
+    FCN_CANCELACION
+  FROM dbo.FACT_CFDI_FOLIOS_DIARIOS
+  WHERE ID = @targetId;
+END;
+GO
