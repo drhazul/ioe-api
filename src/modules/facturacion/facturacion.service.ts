@@ -684,6 +684,30 @@ export class FacturacionService {
 
     const statusExpr = this.normalizedSqlTextExpr('f.ESTATUS');
     const sucExpr = this.normalizedSqlTextExpr('f.SUC');
+    const cfdiStatusExpr = this.normalizedSqlTextExpr(
+      this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'CFDI_STATUS',
+        defaultSql: 'NULL',
+      }),
+    );
+    const cfdiCancelStatusExpr = this.normalizedSqlTextExpr(
+      this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'CFDI_CANCEL_STATUS',
+        defaultSql: 'NULL',
+      }),
+    );
+    const cfdiErrorExpr = this.normalizedSqlTextExpr(
+      this.facColumnRef({
+        alias: 'f',
+        columns,
+        primary: 'CFDI_ERROR_MSG',
+        defaultSql: 'NULL',
+      }),
+    );
     const razonSocialExpr = this.normalizedSqlTextExpr(
       this.facColumnRef({
         alias: 'f',
@@ -719,7 +743,11 @@ export class FacturacionService {
 
     const filterEstatus = this.normalizeTextFilter(input.estatus);
     const where: string[] = [];
-    if (filterEstatus === 'FACTURADO') {
+    if (filterEstatus === 'CON ERROR') {
+      where.push(
+        `(${cfdiStatusExpr} = ${addParam('ERROR')} OR ${cfdiCancelStatusExpr} = ${addParam('ERROR')} OR ${cfdiErrorExpr} <> ${addParam('')})`,
+      );
+    } else if (filterEstatus === 'FACTURADO') {
       where.push(`${statusExpr} = ${addParam('FACTURADO')}`);
     } else if (filterEstatus === 'FACTURADO Y CANCELACION PENDIENTE') {
       where.push(
@@ -1690,6 +1718,10 @@ SET NUMERIC_ROUNDABORT OFF;`;
       nomenclatura: this.normalizeText(row.NOMENCLATURA),
       fecha: this.normalizeText(row.FECHA),
       consecutivo: this.toIntValue(row.CONSECUTIVO) ?? 0,
+      consecutivoGlobal:
+        this.toIntValue(row.CONSECUTIVO_GLOBAL) ??
+        this.toIntValue(row.CONSECUTIVO) ??
+        0,
       estado: this.normalizeText(row.ESTADO),
       cfdiUuid: this.normalizeText(row.CFDI_UUID) || null,
       observaciones: this.normalizeText(row.OBSERVACIONES) || null,
@@ -2348,6 +2380,7 @@ SET NUMERIC_ROUNDABORT OFF;`;
   }, serieControl: {
     serie: string;
     folio: string;
+    consecutivoGlobal?: number | null;
     nomenclatura?: string | null;
   }) {
     const round2 = (value: number) => this.round2(Number(value || 0));
@@ -2437,8 +2470,14 @@ SET NUMERIC_ROUNDABORT OFF;`;
       exportacionRaw.match(/\d{2}/)?.[0] ??
       exportacionRaw.split('.')[0].trim().padStart(2, '0');
     const serieFacturify = this.normalizeUpper(serieControl?.serie ?? '');
-    const folioFacturify = this.normalizeText(serieControl?.folio ?? '');
-    if (!serieFacturify || !folioFacturify) {
+    const folioFacturify = Math.trunc(
+      Number(
+        serieControl?.consecutivoGlobal ??
+          this.toIntValue(serieControl?.folio ?? null) ??
+          0,
+      ),
+    );
+    if (!serieFacturify || !Number.isInteger(folioFacturify) || folioFacturify <= 0) {
       throw new ConflictException(
         `No se resolvió serie/folio controlado para ${String(h.IDFOL ?? '').trim() || 'N/A'}`,
       );
