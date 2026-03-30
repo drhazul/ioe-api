@@ -96,10 +96,7 @@ export class OrdenesTrabajoService {
     `;
   }
 
-  private buildOrdRequestedSucSql(
-    ordAlias: string,
-    requestedSucParam: string,
-  ) {
+  private buildOrdRequestedSucSql(ordAlias: string, requestedSucParam: string) {
     return `
       (
         ${requestedSucParam} IS NULL
@@ -285,7 +282,9 @@ export class OrdenesTrabajoService {
     }
 
     const header = this.tryParseJsonObject(row.HEADER_JSON);
-    const details = this.tryParseJsonArray(row.DETAILS_JSON);
+    const details = this.sortOrdDetails(
+      this.tryParseJsonArray(row.DETAILS_JSON),
+    );
 
     if (!header) {
       throw new NotFoundException(`No existe ORD ${iord}`);
@@ -315,6 +314,21 @@ export class OrdenesTrabajoService {
     await this.assertOrdTypeAccessByIord(iord, user, scope);
     const actor = this.auditActor(user);
     const commentsValue = this.normalizeText(dto.comentarios);
+    const tipoValueRaw = this.normalizeUpper(dto.tipo);
+    const tipoValue =
+      !tipoValueRaw || tipoValueRaw === 'TALLADO' || tipoValueRaw === 'BISELADO'
+        ? tipoValueRaw || null
+        : null;
+    if (tipoValueRaw && !tipoValue) {
+      throw new BadRequestException(
+        'El tipo de ORD debe ser TALLADO o BISELADO',
+      );
+    }
+    if (tipoValue && !this.canManageOrdTipoAndPrint(user, roleCode)) {
+      throw new ForbiddenException(
+        'Tu usuario no tiene permiso para cambiar el tipo o imprimir la etiqueta de la ORD',
+      );
+    }
     const laborValue =
       dto.labor == null || !Number.isFinite(Number(dto.labor))
         ? null
@@ -360,10 +374,11 @@ export class OrdenesTrabajoService {
         ESTATUS = 2,
         LABOR = CASE WHEN @1 IS NULL THEN LABOR ELSE @1 END,
         COMAD = CASE WHEN @2 IS NULL THEN COMAD ELSE LEFT(@2, 2000) END,
+        TIPO = CASE WHEN @3 IS NULL THEN TIPO ELSE @3 END,
         FCNMOD = GETDATE()
       WHERE IORD = @0
       `,
-      [iord, laborValue, commentsValue],
+      [iord, laborValue, commentsValue, tipoValue],
     );
 
     if (rows.length) {
@@ -397,6 +412,7 @@ export class OrdenesTrabajoService {
     await this.auditMutation('ORD_GUARDAR_DETALLE', user, ip, {
       iord,
       labor: laborValue,
+      tipo: tipoValue,
       comentarios: commentsValue,
       rowsUpdated: rows.length,
       actor,
@@ -1441,11 +1457,7 @@ export class OrdenesTrabajoService {
         'ENC_BISEL',
         'ENCARGADO_BISELADO',
       ],
-      REGRESAR_TIENDA: [
-        'JEF_TALLER',
-        'ANALISTA_ORD',
-        'ANALISTA',
-      ],
+      REGRESAR_TIENDA: ['JEF_TALLER', 'ANALISTA_ORD', 'ANALISTA'],
       ASIGNAR_LABORATORIO: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
       RECIBIR: [
         'JEF_TALLER',
@@ -1519,16 +1531,10 @@ export class OrdenesTrabajoService {
       return ['TALLER', 'BISELADO'];
     }
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    if (
-      roleCode === 'ENC_MAQUILA' ||
-      roleCode === 'ENCARGADO_MAQUILA'
-    ) {
+    if (roleCode === 'ENC_MAQUILA' || roleCode === 'ENCARGADO_MAQUILA') {
       return ['TALLER'];
     }
-    if (
-      roleCode === 'ENC_BISEL' ||
-      roleCode === 'ENCARGADO_BISELADO'
-    ) {
+    if (roleCode === 'ENC_BISEL' || roleCode === 'ENCARGADO_BISELADO') {
       return ['BISELADO'];
     }
     return ['TALLER', 'BISELADO'];
@@ -1564,8 +1570,9 @@ export class OrdenesTrabajoService {
   }
 
   private async resolveOpvLabels(idsRaw: unknown[]) {
-    const ids = [...new Set(idsRaw.map((item) => this.normalizeText(item) ?? ''))]
-      .filter((item) => item.length > 0);
+    const ids = [
+      ...new Set(idsRaw.map((item) => this.normalizeText(item) ?? '')),
+    ].filter((item) => item.length > 0);
     if (!ids.length) {
       return new Map<string, string>();
     }
@@ -1835,15 +1842,17 @@ export class OrdenesTrabajoService {
   private async hasTable(tableName: string) {
     if (!tableName.trim()) return false;
     return (
-      await this.dataSource.query(
-        `
+      (
+        await this.dataSource.query(
+          `
         SELECT 1
         FROM INFORMATION_SCHEMA.TABLES
         WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @0
         `,
-        [tableName.trim()],
-      )
-    ).length > 0;
+          [tableName.trim()],
+        )
+      ).length > 0
+    );
   }
 
   private async resolveLaboratoriosFromAcceso(
@@ -2028,7 +2037,12 @@ export class OrdenesTrabajoService {
   }
 
   private isLaboratorioDisponible(
-    laboratorios: Array<{ id: number; lab: string; tipoLab: string; suc: string }>,
+    laboratorios: Array<{
+      id: number;
+      lab: string;
+      tipoLab: string;
+      suc: string;
+    }>,
     labor: number,
     tipoRaw: string,
   ) {
@@ -2136,6 +2150,25 @@ export class OrdenesTrabajoService {
     return text.endsWith('.0') ? text.slice(0, -2) : text;
   }
 
+  private sortOrdDetails(details: Record<string, unknown>[]) {
+    const jobOrder = new Map<string, number>([
+      ['OD', 0],
+      ['OI', 1],
+      ['ADD', 2],
+    ]);
+    return [...details].sort((a, b) => {
+      const aJob = this.normalizeUpper(a?.JOB ?? '');
+      const bJob = this.normalizeUpper(b?.JOB ?? '');
+      const aWeight = jobOrder.get(aJob) ?? jobOrder.size;
+      const bWeight = jobOrder.get(bJob) ?? jobOrder.size;
+      if (aWeight !== bWeight) return aWeight - bWeight;
+      const aIordp = this.toInt(a?.IORDP) ?? Number.MAX_SAFE_INTEGER;
+      const bIordp = this.toInt(b?.IORDP) ?? Number.MAX_SAFE_INTEGER;
+      if (aIordp !== bIordp) return aIordp - bIordp;
+      return aJob.localeCompare(bJob);
+    });
+  }
+
   private resolveAllowedActions(
     user: JwtPayload,
     roleCodeRaw: string,
@@ -2167,11 +2200,15 @@ export class OrdenesTrabajoService {
     }
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    const nonStoreReceiveActions = operationalActions
-      .filter((action) => action !== 'REGRESAR_TIENDA');
+    const nonStoreReceiveActions = operationalActions.filter(
+      (action) => action !== 'REGRESAR_TIENDA',
+    );
+    const nonStoreReceiveActionsNoPrint = nonStoreReceiveActions.filter(
+      (action) => action !== 'IMPRIMIR_ETIQUETA',
+    );
     const byRole: Record<string, string[]> = {
       JEF_TALLER: operationalActions,
-      TALLER: nonStoreReceiveActions,
+      TALLER: nonStoreReceiveActionsNoPrint,
       ANALISTA_ORD: [
         'VER_DETALLE',
         'AUTORIZAR',
@@ -2294,6 +2331,16 @@ export class OrdenesTrabajoService {
     return (
       roleCode === 'JEF_TALLER' ||
       roleCode === 'TALLER' ||
+      roleCode === 'ANALISTA_ORD' ||
+      roleCode === 'ANALISTA'
+    );
+  }
+
+  private canManageOrdTipoAndPrint(user: JwtPayload, roleCodeRaw: string) {
+    if (this.isAdmin(user)) return true;
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    return (
+      roleCode === 'JEF_TALLER' ||
       roleCode === 'ANALISTA_ORD' ||
       roleCode === 'ANALISTA'
     );

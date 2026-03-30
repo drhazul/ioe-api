@@ -185,6 +185,12 @@ export class SaveOrdDetalleDto {
   @IsNumber()
   labor?: number | null;
 
+  @ApiPropertyOptional({ example: 'BISELADO', enum: ['TALLADO', 'BISELADO'] })
+  @IsOptional()
+  @IsString()
+  @Length(0, 20)
+  tipo?: string;
+
   @ApiPropertyOptional({ example: 'Observaciones del analista' })
   @IsOptional()
   @IsString()

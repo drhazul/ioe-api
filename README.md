@@ -107,6 +107,8 @@ Opcionales:
 - `/ordenes-trabajo/*` (panel/flujo ORD operativo: autorizar, enviar, recibir, entregar, garantía, cambio material, merma y escaneo)
 - trazabilidad UI ORDs/Home (2026-03-24): `ioe_app` expone páginas standalone para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar` desde Home; reutilizan las mismas validaciones y endpoints `/ordenes-trabajo/*`, sin mostrar el panel principal.
 - trazabilidad UI ORDs/Home (2026-03-24): la página directa de `Entregar` captura firma digital del cliente y reutiliza `POST /ordenes-trabajo/:iord/entregar` por cada ORD relacionada; no requiere cambios de contrato API, base de datos ni ejecución adicional de SP.
+- compatibilidad ORDs cliente/job (2026-03-30): `GET /ordenes-trabajo` filtra `client` por coincidencias en `CLIEN` y `NCLIENTE`; `GET /ordenes-trabajo/:iord/detalle` entrega `PV_CTR_ORDS_DET` ordenado como `OD`, `OI`, `ADD`.
+- trazabilidad API/UI ORDs (2026-03-30): además del `ORDER BY` SQL, `OrdenesTrabajoService` reordena `details` como defensa en memoria para que popup e impresión reciban siempre la misma secuencia.
 - `/facturacion/*` (pendientes/validar/emitir/refrescar-estado/reenviar-email/cancelar sobre `FAC_SVR_SHAP` + `FACT_TICKET_SHP`).
 - compatibilidad facturación legacy (2026-03-13): `FacturacionService` detecta columnas de `FAC_SVR_SHAP` y resuelve `AUT` con fallback `TIPOVTA` (o `NULL`), además de fallback para `REQF/RQFAC`, `FormaPagoSAT` y `Exportacion`, evitando `500 Invalid column name 'AUT'`.
 - facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` acepta filtros server-side `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
@@ -247,10 +249,11 @@ Opcionales:
   - `POST /ordenes-trabajo/entregar/validar`
   - `POST /ordenes-trabajo/entregar/lote`
   - `POST /ordenes-trabajo/scan/recibir`
-  - `POST /ordenes-trabajo/scan/entregar`
+- `POST /ordenes-trabajo/scan/entregar`
 - SPs base (`sql/2026-03-22_ordenes_trabajo_module_create.sql`):
   - `sp_ordenes_trabajo_panel`, `sp_ordenes_trabajo_detalle`, `sp_ordenes_trabajo_set_estado`
   - `sp_ordenes_trabajo_autorizar|enviar|recibir|entregar|garantia`
+- detalle ORD/roles (2026-03-30): `POST /ordenes-trabajo/:iord/detalle/guardar` acepta `tipo` (`TALLADO`/`BISELADO`) y actualiza `PV_CTR_ORDS.TIPO`; solo `admin`, `JEF_TALLER`, `ANALISTA_ORD` y `ANALISTA` pueden cambiarlo o recibir `IMPRIMIR_ETIQUETA` en acciones permitidas.
   - `sp_ordenes_trabajo_cambio_material`, `sp_ordenes_trabajo_merma`
   - `sp_ordenes_trabajo_scan_recibir`, `sp_ordenes_trabajo_scan_entregar`
   - helpers: `sp_ordenes_trabajo_clone_ord`, `sp_ordenes_trabajo_registrar_mb51`, `sp_ordenes_trabajo_registrar_ctrl_ctas_diff`
@@ -627,6 +630,7 @@ Opcionales:
 - `2026-03-23_ordenes_trabajo_recibir_entregar_lote.sql` (crea/actualiza `sp_ordenes_trabajo_recibir_lote`, `sp_ordenes_trabajo_entregar_lote` y recepción operativa unificada)
 - `2026-03-23_ordenes_trabajo_asignar_trabajo_laboratorio_lote.sql` (crea/actualiza SPs de asignación, trabajo terminado, regresar incidencia, regresar tienda y asignación de laboratorio)
 - `2026-03-23_ordenes_trabajo_incidencia_tipom.sql` (crea/siembra `DAT_ORD_TMOV`, ajusta `sp_ordenes_trabajo_panel` para exponer `ASIGNADO` legible y exige/persiste `TIPOM` en `sp_ordenes_trabajo_regresar_incidencia_lote`)
+- `2026-03-30_ordenes_trabajo_cliente_job_order.sql` (ajusta `sp_ordenes_trabajo_panel` para filtrar `client` por `CLIEN/NCLIENTE`, extender `search` a `NCLIENTE` y `sp_ordenes_trabajo_detalle` para ordenar `JOB` como `OD/OI/ADD`)
 
 ## Reglas de autorizacion por sucursal (criticas)
 

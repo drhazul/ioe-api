@@ -115,6 +115,7 @@
 - `pvctrords`: `PV_CTR_ORDS` (`IORD`, `IDFOL`, `ART`, `CTD`, `SUC`, `ESTATUS`, ...).
 - `pvctrordsdet`: `PV_CTR_ORDS_DET` (`IORDP`, `IORD`, `ART`, `JOB`, `ESF`, `CIL`, `EJE`).
 - `ordenes-trabajo`: flujo operativo unificado de ORDs sobre `PV_CTR_ORDS` + `PV_CTR_ORDS_DET`, con panel server-side, detalle, autorizaciones, envío/recepción, entrega, garantías, cambio de material, merma, escaneo y catálogo de incidencia `DAT_ORD_TMOV`.
+- `ordenes-trabajo` detalle/roles (2026-03-30): `saveDetail` ya puede persistir `PV_CTR_ORDS.TIPO` con valores `TALLADO`/`BISELADO`; el permiso fino para cambiar `TIPO` e imprimir etiqueta queda restringido a `admin`, `JEF_TALLER`, `ANALISTA_ORD` y `ANALISTA`.
 - `pvticketlog`: `PV_TICKET_LOG` (`ID`, `IDFOL`, `ART`, `UPC`, `CTD`, `PVTA`, `CTDD`, `CTDDF`, `UPDATED_AT`).
 - `pv-devoluciones`: flujo transaccional de devoluciones PV sobre `PV_CTR_FOL_ASVR`, `PV_TICKET_LOG`, `PV_CTR_FOL_FORM(_SVR)`, `PV_CTR_ORDS`, `FAC_SVR_SHAP`, `FACT_IDFOLDEV`, `DAT_CTRL_CTAS`.
 - `pagos-servicios`: flujo PS sobre `PV_CTR_FOL_ASVR`, `PV_TICKET_LOG`, `PV_CTR_FOL_FORM`, `DAT_CTRL_CTAS`, `PV_DAT_PS`, `DAT_REF_GTO`.
@@ -470,9 +471,11 @@
 - trazabilidad UI taller (app, 2026-03-24): `ioe_app` mueve la botonera principal del panel a `Opciones de Trabajo`, sube `Configuracion de Vista` al AppBar y ajusta la etiqueta legado a `76mm x 51mm`; el backend mantiene el mismo contrato `/ordenes-trabajo/*` y no requiere SP nuevo ni ejecución SQL adicional.
 - trazabilidad UI taller (app, 2026-03-24): los botones del AppBar pasan a fondo blanco y la paginación se integra al renglón de filtros, retirando el label de selección dentro del card; no cambia contrato, consulta ni stored procedure.
 - matriz permisos ORDs (2026-03-24): `resolveAllowedActions` y `assertActionPermission` se alinean con la tabla operativa solicitada; `JEF_TALLER/TALLER` conserva flujo completo e impresión, `ANALISTA_ORD/ANALISTA` limita el panel a `VER_DETALLE/AUTORIZAR/ENVIAR/ASIGNAR_LABORATORIO/SCAN_ENTREGAR/IMPRIMIR_ETIQUETA` y `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` a `VER_DETALLE/ASIGNAR/TRABAJO_TERMINADO/REGRESAR_INCIDENCIA/REGRESAR_TIENDA/SCAN_RECIBIR`.
+- compat ORD panel/detalle (2026-03-30): `sp_ordenes_trabajo_panel` ahora filtra `@CLIENT` contra `CLIEN` y `NCLIENTE`; `sp_ordenes_trabajo_detalle` devuelve `PV_CTR_ORDS_DET` en secuencia `OD`, `OI`, `ADD`, y el service refuerza ese orden en la respuesta JSON para `ioe_app`.
 - trazabilidad UI/Home (app, 2026-03-24): `ioe_app` agrega accesos rápidos en Home para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar`; la visibilidad se resuelve consumiendo `allowedActions` del panel ORDs, sin crear módulos nuevos en DB ni ejecutar SP.
 - trazabilidad UI/Home (app, 2026-03-24): esos accesos abren páginas standalone adicionales, no el panel principal; la app replica allí la mecánica de validación/captura de los popups del panel y conserva intactos los botones emergentes del flujo operativo original.
 - trazabilidad UI/Home (app, 2026-03-24): la entrega directa captura firma digital del cliente y reutiliza `POST /ordenes-trabajo/:iord/entregar` por cada ORD relacionada; no requiere cambios backend, DB ni SP para esta variante.
+- trazabilidad API/UI ORDs (2026-03-30): `OrdenesTrabajoService.getDetail` reordena el arreglo `details` en memoria como defensa adicional para popup/etiqueta aunque el origen SQL llegue mezclado.
 - catálogo estados ORD (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT` para soportar estados intermedios (ej. `9.1`); script: `sql/2026-03-22_dat_est_ord_esta_float.sql`.
 
 ## Stored procedures y consultas clave
@@ -504,6 +507,7 @@
 - `sql/2026-03-23_ordenes_trabajo_recibir_entregar_lote.sql` crea/actualiza `sp_ordenes_trabajo_recibir_lote` (`5 -> 7`) y `sp_ordenes_trabajo_entregar_lote` (`10 -> 11`), y alinea `sp_ordenes_trabajo_recibir` sin destino.
 - `sql/2026-03-23_ordenes_trabajo_asignar_trabajo_laboratorio_lote.sql` crea/actualiza `sp_ordenes_trabajo_asignar_lote`, `sp_ordenes_trabajo_trabajo_terminado_lote`, `sp_ordenes_trabajo_regresar_incidencia_lote`, `sp_ordenes_trabajo_regresar_tienda_lote` y `sp_ordenes_trabajo_asignar_laboratorio_lote`.
 - `sql/2026-03-23_ordenes_trabajo_incidencia_tipom.sql` crea/siembra `DAT_ORD_TMOV`, actualiza `sp_ordenes_trabajo_panel` para exponer label de `ASIGN` y ajusta `sp_ordenes_trabajo_regresar_incidencia_lote` para exigir/persistir `TIPOM`.
+- `sql/2026-03-30_ordenes_trabajo_cliente_job_order.sql` actualiza `sp_ordenes_trabajo_panel` para buscar `@CLIENT` sobre `CLIEN/NCLIENTE`, extender `@SEARCH` a `NCLIENTE` y ordenar `sp_ordenes_trabajo_detalle.PV_CTR_ORDS_DET` por `JOB` en secuencia `OD/OI/ADD`.
 - `sql/2026-03-20_facturacion_sync_after_devoluciones.sql` depura históricamente registros de `IDFOLDEV` en `FAC_SVR_SHAP/FACT_TICKET_SHP` y luego reprocesa folios origen elegibles (`AUT='VF'` + `REQF=1`) con `sp_fact_sync_folio_vf`.
 - `sql/USUARIO_forzar_cambio_pass_alter.sql` agrega `FORZAR_CAMBIO_PASS` para controlar cambio obligatorio de contraseña en primer acceso.
 - `sql/DAT_ART_idx_suc_bloq_detalle_cot_create.sql` crea índice `IX_DAT_ART_SUC_BLOQ_DETALLE_COT` para acelerar búsqueda de detalle cotización por `SUC` con filtro `BLOQ<>-1`.
