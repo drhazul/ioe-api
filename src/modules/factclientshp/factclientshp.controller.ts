@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -22,8 +23,13 @@ export class FactClientShpController {
   constructor(private readonly service: FactClientShpService) {}
 
   @Get()
-  findAll(@Req() req: any) {
-    return this.service.findAll(req.user);
+  findAll(@Req() req: any, @Query('suc') suc?: string) {
+    return this.service.findAll({ suc }, req.user);
+  }
+
+  @Get('sucursales-autorizadas')
+  findAuthorizedSucs(@Req() req: any) {
+    return this.service.findAuthorizedSucs(req.user);
   }
 
   @Get(':id')

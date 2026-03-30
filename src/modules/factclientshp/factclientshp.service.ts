@@ -11,6 +11,7 @@ import { DataSource, EntityManager, QueryFailedError, Repository } from 'typeorm
 import { FactClientShpEntity } from './factclientshp.entity';
 import { CreateFactClientShpDto } from './dto/create-factclientshp.dto';
 import { UpdateFactClientShpDto } from './dto/update-factclientshp.dto';
+import { UsrModSucEntity } from '../usr-mod-suc/usr-mod-suc.entity';
 
 type FactClientUser = {
   roleId?: number | string;
@@ -22,10 +23,19 @@ type FactClientUser = {
 @Injectable()
 export class FactClientShpService {
   private facSvrShapColumnsCache: Set<string> | null = null;
+  private static readonly FACTURA_MODULE_CODES = [
+    'FACTURA',
+    'FACTURACION',
+    'PV_FACTURACION',
+    'FACT_IOE',
+    'FACTURA_MTTOCLIENTE',
+  ] as const;
 
   constructor(
     @InjectRepository(FactClientShpEntity)
     private readonly repo: Repository<FactClientShpEntity>,
+    @InjectRepository(UsrModSucEntity)
+    private readonly usrModSucRepo: Repository<UsrModSucEntity>,
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
   ) {}
@@ -169,16 +179,99 @@ export class FactClientShpService {
     );
   }
 
-  findAll(user?: FactClientUser | null) {
+  private normalizeUniqueSucs(values: string[]) {
+    const seen = new Set<string>();
+    const output: string[] = [];
+    for (const raw of values) {
+      const cleaned = (raw ?? '').trim();
+      if (!cleaned) continue;
+      const upper = cleaned.toUpperCase();
+      if (seen.has(upper)) continue;
+      seen.add(upper);
+      output.push(upper);
+    }
+    return output;
+  }
+
+  private async resolveAuthorizedSucsList(user?: FactClientUser | null) {
+    if (this.isAdmin(user)) return [];
+
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (username) {
+      const rows = await this.usrModSucRepo
+        .createQueryBuilder('ums')
+        .select("UPPER(LTRIM(RTRIM(ISNULL(ums.SUC, ''))))", 'SUC')
+        .where(
+          "UPPER(LTRIM(RTRIM(ISNULL(ums.USUARIO, '')))) = :username",
+          { username },
+        )
+        .andWhere('ums.ACTIVO = :activo', { activo: true })
+        .andWhere(
+          "UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, '')))) IN (:...modulos)",
+          { modulos: FactClientShpService.FACTURA_MODULE_CODES },
+        )
+        .orderBy('SUC', 'ASC')
+        .getRawMany<{ SUC?: string }>();
+      const sucs = this.normalizeUniqueSucs(
+        (rows ?? []).map((row) => row.SUC ?? ''),
+      );
+      if (sucs.length) return sucs;
+    }
+
+    const fallback = this.normalizeUpper(user?.suc ?? '');
+    if (fallback) {
+      return [fallback];
+    }
+
+    return [];
+  }
+
+  async findAuthorizedSucs(user?: FactClientUser | null) {
+    return this.resolveAuthorizedSucsList(user);
+  }
+
+  async findAll(
+    query?: { suc?: string },
+    user?: FactClientUser | null,
+  ) {
+    const sucFilter = this.normalizeUpper(query?.suc);
     const table = this.repo.metadata.tablePath;
+
     if (this.isAdmin(user)) {
+      if (sucFilter) {
+        return this.repo.query(
+          `SELECT * FROM ${table} WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @0 ORDER BY IDC ASC`,
+          [sucFilter],
+        );
+      }
       return this.repo.query(`SELECT * FROM ${table} ORDER BY IDC ASC`);
     }
-    const suc = (user?.suc ?? '').trim();
-    if (!suc) return [];
+
+    const allowedSucs = await this.resolveAuthorizedSucsList(user);
+    if (!allowedSucs.length) {
+      throw new ForbiddenException(
+        'Usuario sin sucursal autorizada para acceder a clientes',
+      );
+    }
+
+    if (sucFilter) {
+      if (!allowedSucs.includes(sucFilter)) {
+        throw new ForbiddenException(
+          `Sucursal ${sucFilter} no autorizada para facturación`,
+        );
+      }
+      return this.repo.query(
+        `SELECT * FROM ${table} WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @0 ORDER BY IDC ASC`,
+        [sucFilter],
+      );
+    }
+
+    const placeholders = allowedSucs.map((_, idx) => `@${idx}`);
     return this.repo.query(
-      `SELECT * FROM ${table} WHERE SUC = @0 ORDER BY IDC ASC`,
-      [suc],
+      `SELECT * FROM ${table} WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) IN (${placeholders.join(
+        ', ',
+      )}) ORDER BY IDC ASC`,
+      allowedSucs,
     );
   }
 
@@ -193,11 +286,19 @@ export class FactClientShpService {
         throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
       return rows[0];
     }
-    const suc = (user?.suc ?? '').trim();
-    if (!suc) throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
+
+    const allowedSucs = await this.resolveAuthorizedSucsList(user);
+    if (!allowedSucs.length) {
+      throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
+    }
+
+    const placeholders = allowedSucs.map((_, idx) => `@${idx + 1}`);
+    const params = [id, ...allowedSucs];
     const rows = await this.repo.query(
-      `SELECT TOP 1 * FROM ${table} WHERE IDC = @0 AND SUC = @1`,
-      [id, suc],
+      `SELECT TOP 1 * FROM ${table} WHERE IDC = @0 AND UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) IN (${placeholders.join(
+        ', ',
+      )})`,
+      params,
     );
     if (!rows?.length)
       throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
