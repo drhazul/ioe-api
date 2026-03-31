@@ -47,9 +47,6 @@ export class FactClientShpEntity {
   @Column({ name: 'RegimenFiscalReceptor', type: 'float' })
   REGIMENFISCALRECEPTOR: number;
 
-  @Column({ name: 'I_CRED', type: 'money', nullable: true })
-  I_CRED: number | null;
-
   @Column({ name: 'VF', type: 'float', nullable: true })
   VF: number | null;
 

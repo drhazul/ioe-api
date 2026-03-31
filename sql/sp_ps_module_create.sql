@@ -1030,18 +1030,15 @@ BEGIN
           c.IDFOL,
           c.NDOC
       )
-      SELECT TOP 1
-        @valimp = ABS(ADEUDO)
+      SELECT
+        @valimp = ABS(ROUND(ISNULL(SUM(ADEUDO), 0), 4))
       FROM adeudoFolio
       WHERE
         (
           UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd)
           OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@lineOrd)
         )
-        AND ADEUDO < 0
-      ORDER BY
-        CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd) THEN 0 ELSE 1 END,
-        ADEUDO ASC;
+        AND ADEUDO < 0;
     END
     ELSE
     BEGIN
@@ -1072,8 +1069,8 @@ BEGIN
           c.NDOC,
           rel.RELACION
       )
-      SELECT TOP 1
-        @valimp = ABS(ADEUDO)
+      SELECT
+        @valimp = ABS(ROUND(ISNULL(SUM(ADEUDO), 0), 4))
       FROM adeudoSel
       WHERE
         UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineUpc
@@ -1081,10 +1078,7 @@ BEGIN
           UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd)
           OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@lineOrd)
         )
-        AND ADEUDO < 0
-      ORDER BY
-        CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd) THEN 0 ELSE 1 END,
-        ADEUDO ASC;
+        AND ADEUDO < 0;
     END;
 
     IF @valimp IS NULL
@@ -1224,6 +1218,7 @@ BEGIN
   DECLARE @serviceType CHAR(2);
   DECLARE @total DECIMAL(18, 4);
   DECLARE @isCashOut BIT = 0;
+  DECLARE @hasNonCashForm BIT = 0;
 
   IF @idfolNorm = ''
     THROW 57070, 'IDFOL es requerido', 1;
@@ -1682,6 +1677,7 @@ BEGIN
   DECLARE @estado NVARCHAR(40);
   DECLARE @serviceType CHAR(2);
   DECLARE @isCashOut BIT = 0;
+  DECLARE @hasNonCashForm BIT = 0;
   DECLARE @total DECIMAL(18, 4);
   DECLARE @sumPagos DECIMAL(18, 4);
   DECLARE @cambio DECIMAL(18, 4) = 0;
@@ -1791,6 +1787,8 @@ BEGIN
   )
     THROW 57124, 'Las formas no efectivo requieren autorización/referencia', 1;
 
+  SET @hasNonCashForm = CASE WHEN EXISTS (SELECT 1 FROM @FORMAS WHERE FORM <> 'EFECTIVO') THEN 1 ELSE 0 END;
+
   BEGIN TRY
     IF @@TRANCOUNT = 0
     BEGIN
@@ -1824,7 +1822,12 @@ BEGIN
     SET @idfolNorm = @idfolActual;
     IF ISNULL(@idfolInicial, '') = ''
       SET @idfolInicial = @idfolActual;
-    SET @tipoVisibleFinal = CASE WHEN UPPER(ISNULL(@origenAut, 'CA')) = 'VF' THEN 'VF' ELSE 'CA' END;
+    SET @tipoVisibleFinal = CASE
+      WHEN UPPER(ISNULL(@origenAut, 'CA')) = 'VF'
+        OR (UPPER(ISNULL(@origenAut, 'CA')) = 'CA' AND @hasNonCashForm = 1)
+        THEN 'VF'
+      ELSE 'CA'
+    END;
     SET @folioActualUpper = UPPER(@idfolActual);
     SET @idfolVisibleNuevo = @idfolActual;
     SET @traVisibleNuevo = NULLIF(@traActual, '');

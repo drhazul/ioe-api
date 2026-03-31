@@ -38,6 +38,7 @@ export class PvCtrFolAsvrService {
     const requestedSuc = this.normalizeText(query?.suc ?? '');
     const requestedOpv = this.normalizeText(query?.opv ?? '');
     const search = this.normalizeText(query?.search ?? '');
+    const targetOpv = requestedOpv.length > 0 ? requestedOpv : actorOpv;
 
     const suc = requestedSuc || (isAdmin ? '' : actorSuc);
     const actorOpvUpper = this.normalizeUpper(actorOpv);
@@ -63,6 +64,11 @@ export class PvCtrFolAsvrService {
     if (!isAdmin && actorOpv.length == 0) {
       throw new BadRequestException(
         'No se pudo resolver OPV para consultar cotizaciones',
+      );
+    }
+    if (!isAdmin && requestedOpv.length > 0 && !requestedOpvIsActor) {
+      throw new ForbiddenException(
+        'No autorizado para consultar cotizaciones de otro OPV',
       );
     }
 
@@ -98,18 +104,11 @@ export class PvCtrFolAsvrService {
         ownParams.push(suc);
       }
 
-      if (isAdmin) {
-        if (requestedOpv.length > 0) {
-          ownWhere.push(
-            `(a.OPV = @${ownParams.length} OR a.OPVM = @${ownParams.length})`,
-          );
-          ownParams.push(requestedOpv);
-        }
-      } else {
+      if (targetOpv.length > 0) {
         ownWhere.push(
           `(a.OPV = @${ownParams.length} OR a.OPVM = @${ownParams.length})`,
         );
-        ownParams.push(actorOpv);
+        ownParams.push(targetOpv);
       }
 
       if (search.length > 0) {

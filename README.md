@@ -131,7 +131,7 @@ Opcionales:
 - unificación facturación sucursal JWT (2026-03-16): `preview/create` de `/facturacion/unificaciones` ya no fuerzan sucursal desde `user.suc` para usuarios con permisos de gestión (`FACTURA`/compat), evitando falsos bloqueos de "folios fuera de la sucursal autorizada".
 - REQF sin facturar (2026-03-16): `GET /facturacion/reqf/folios` requiere `REG_SINREQF` (o gestión `FACTURA`/compat) y filtra no-admin por sucursales autorizadas en `USR_MOD_SUC`; si no hay filas, aplica fallback legado a `user.suc`.
 - Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.
-- `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente.
+- `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente; los clientes administrativos pueden comandar `suc`/`opv` desde el frontend para evaluar el contexto de cada sucursal + OPV sin cambiar el contrato HTTP.
 - compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
 - `GET /pvctrfolasvr` (2026-03): la respuesta del listado incluye `RazonSocialReceptor` (join con `FACT_CLIENT_SHP`) para soporte de grilla en frontend.
 - `GET /pvctrfolasvr/:idfol` (2026-03): devuelve vista de lectura con `RazonSocialReceptor` y resuelve por `IDFOL` actual o `IDFOLINICIAL` para compatibilidad cuando el folio visible cambia de `CP` a `CA/VF`.
@@ -139,7 +139,7 @@ Opcionales:
 - trazabilidad UI paneles (2026-03-10): cotizaciones/devoluciones/PS usan anulación lógica con `PATCH /pvctrfolasvr/:idfol` (`ESTA='ANULADO'`) en lugar de eliminación física, habilitado solo para estado `PENDIENTE`.
 - paneles PV (2026-03-21): los listados operativos de cotizaciones/devoluciones/PS excluyen `ESTA='ANULADO'`; solo regresan `PENDIENTE`, `EDITANDO` y `PAGADO`.
 - `/pv/devoluciones/*` (flujo de devoluciones de cotizaciones/ventas/apartados)
-- `/ps/*` (modulo Pago de Servicios: panel, ticket, referencias, pago/finalizacion y terminar)
+- `/ps/*` (modulo Pago de Servicios: panel, ticket, referencias, pago/finalizacion y terminar): los endpoints consumen `suc` y `opv` en las consultas para que los administradores puedan replicar el contexto de una sucursal/usuario OPV específico.
 - `/retiros/*` (flujo de retiros parciales de caja)
 - `/catalogos/formas-retiro` (formas de pago para retiros desde `VW_PV_FORM_TIPOTRAN_DISTINCT`)
 - `/cajon-estado/*` (autorización supervisor + resumen diario de estado de cajón OPV)
@@ -208,7 +208,7 @@ Opcionales:
 - Referencia de error corregido (2026-03-03): `POST /ps/folios/:idFol/ticket/reference/folio` devolvía `400` con `No existe DAT_CTRL_CTAS_RES para validar referencia de folio`; `sp_ps_ticket_set_reference_folio` se depuró para tomar/validar la referencia desde `DAT_CTRL_CTAS` del cliente seleccionado.
 - Regla vigente (2026-03-03): `POST /ps/folios/:idFol/ticket/reference/folio` bloquea referencias duplicadas en el mismo ticket (`La referencia ya fue asignada a otra linea del ticket`).
 - Regla origen PS (2026-03-21): la primera referencia ligada define `ORIGEN_AUT` del folio (`CA`/`VF`); si aún no hay referencias ligadas (`ORD`), se permite adoptar el origen del primer vínculo. Si ya existen referencias, se conserva el origen y se rechaza mezcla `CA`/`VF`.
-- Corrección de cálculo (2026-03-03): `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_update_pvta` consolidan adeudo por `IDFOL/NDOC + RELACION` antes de validar; con esto se evita falso `400 La referencia seleccionada no tiene adeudo pendiente` cuando existen cargos y abonos mezclados en `DAT_CTRL_CTAS`.
+- Corrección de cálculo (2026-03-30): `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_update_pvta` consolidan adeudo por `IDFOL/NDOC + RELACION`, sumando todas las filas del mismo concepto antes de validar; así se evita falso `400 La referencia seleccionada no tiene adeudo pendiente` cuando un folio reparte la misma relación en varias filas (por ejemplo, diferencias de taller). Cuando la relación es `CA` y se paga con cualquier forma distinta de `EFECTIVO`, el cierre ahora cambia el folio visible final a `VF` para reflejar la forma de pago usada; los orígenes `VF` ya existentes mantienen su folio correspondiente.
 - Regla AD/AP/CR (2026-03-03): en `sp_ps_ticket_update_pvta`, para servicios de adeudo (`AD`,`AP`,`CR`) el `PVTA` por línea no puede exceder la deuda del folio referenciado y además se valida saldo acumulado por `ORD` considerando las tres claves (`AD/AP/CR`) del mismo ticket.
 - Referencia de integración (2026-03-03): el cierre PS dejó de depender de `PV_CTR_FOL_FORMTMP`; el flujo definitivo persiste en `PV_CTR_FOL_FORM` al finalizar.
 - Tabla ticket oficial PS: `PV_TICKET_LOG` (no `PV_TICKET_LOG_SVR`).
@@ -477,7 +477,7 @@ Opcionales:
 - trazabilidad UI (app): en pago de devolución no se permite agregar, editar ni eliminar formas en la pantalla.
 - trazabilidad UI (app, 2026-03-10): en pago devolución, frontend rehidrata siempre `formas` desde `preview.formasSugeridas` (origen) para devolver por mismo concepto en no-efectivo y preservar `aut/ref` para el cierre backend.
 - trazabilidad UI (app): cuando la devolución queda en `PAGADO`, app muestra candado de salida y al presionarlo manda `PATCH /pvctrfolasvr/:idfol` con `ESTA='MB51PROCES'`.
-- `GET /pv/devoluciones` devuelve solo folios en `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` para filtros por `OPV` y por `OPVM`; `MB51PROCES` se conserva para la salida operativa, no para el panel.
+- `GET /pv/devoluciones` devuelve solo folios en `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` para filtros por `OPV` y por `OPVM`; `MB51PROCES` se conserva para la salida operativa, no para el panel, pero los administradores pueden enviar `suc` y `opv` arbitrarios (dentro de las autorizaciones) para revisar otras sucursales/usuarios.
 - trazabilidad UI (app): desde panel, devoluciones en `PAGADO` abren directo la vista de pago.
 - trazabilidad UI (app, 2026-03): desde panel, devoluciones no `PAGADO` con selección previa (`linesSelected > 0` o alguna línea con `CTDD > 0` detectada en `GET /pv/devoluciones/:idfolDev/detalle`) abren directo la vista `/detalle`; sin selección previa, abren la vista de selección de artículos.
 - trazabilidad API/UI (app): la impresión de devolución se dispara con botón explícito y selector 58mm/80mm, consumiendo `GET /pv/devoluciones/:idfolDev/print-preview`.

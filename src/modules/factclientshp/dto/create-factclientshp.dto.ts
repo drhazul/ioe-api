@@ -86,11 +86,6 @@ export class CreateFactClientShpDto {
   @ApiPropertyOptional({ type: Number })
   @IsOptional()
   @IsNumber()
-  I_CRED?: number;
-
-  @ApiPropertyOptional({ type: Number })
-  @IsOptional()
-  @IsNumber()
   VF?: number;
 
   @ApiPropertyOptional({ type: Number })

@@ -111,6 +111,7 @@
 - Trazabilidad UI cotizaciones (2026-03-10): búsqueda por OPV desde `search` permite búsqueda cruzada entre OPV solo para folios con `AUT='CP'` y `ESTA='PENDIENTE'`.
 - Trazabilidad UI paneles (2026-03-10): cotizaciones/devoluciones/PS ejecutan anulación lógica vía `PATCH /pvctrfolasvr/:idfol` con `ESTA='ANULADO'` (sin `DELETE` físico), habilitada solo para filas en `PENDIENTE`.
 - Paneles PV (2026-03-21): los listados de cotizaciones/devoluciones/PS excluyen `ESTA='ANULADO'`; solo muestran `PENDIENTE`, `EDITANDO` y `PAGADO`.
+- Paneles PV (2026-03-30): `GET /pvctrfolasvr`, `GET /pv/devoluciones` y `GET /ps` (panel/consulta) admiten los parámetros `suc` y `opv`, por lo que el cliente admin puede pedir combinaciones autorizadas de sucursal + OPV/Supervisor sin cambiar contratos ni añadir endpoints.
 - `pvctrfolform`: `PV_CTR_FOL_FORM` (`IDF`, `IDFOL`, `FORM`, `IMPA`, `IMPP`, `IMPC`, `IMPD`, ...).
 - `pvctrords`: `PV_CTR_ORDS` (`IORD`, `IDFOL`, `ART`, `CTD`, `SUC`, `ESTATUS`, ...).
 - `pvctrordsdet`: `PV_CTR_ORDS_DET` (`IORDP`, `IORD`, `ART`, `JOB`, `ESF`, `CIL`, `EJE`).
@@ -125,7 +126,7 @@
 - Adeudos PS fuente primaria (2026-03): `sp_ps_adeudos_cliente` consulta `DAT_CTRL_CTAS` agrupando por `SUC/CLIENT/CTA/IDFOL`; `ADEUDOS_RES_JSON` se forma desde ese agregado con `ADEUDO < 0`.
 - Referencia folio PS (2026-03): `sp_ps_ticket_set_reference_folio` quedó depurado para no depender de `DAT_CTRL_CTAS_RES`; valida/toma el folio de referencia directamente desde `DAT_CTRL_CTAS` del cliente activo del folio PS.
 - Referencia folio PS (2026-03-21): la primera referencia ligada en el ticket define `ORIGEN_AUT` (`CA`/`VF`); si todavía no hay referencias (`ORD`) se permite adoptar el origen del primer vínculo. Cuando ya existen referencias ligadas, se conserva el origen y se rechaza mezcla `CA`/`VF`.
-- Cálculo adeudo PS (2026-03-03): `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_update_pvta` consolidan `DAT_CTRL_CTAS` por `IDFOL/NDOC + RELACION` para validar referencia y límite de importe sin falsos positivos por mezcla de cargos/abonos.
+- Cálculo adeudo PS (2026-03-30): `sp_ps_ticket_set_reference_folio` y `sp_ps_ticket_update_pvta` consolidan `DAT_CTRL_CTAS` por `IDFOL/NDOC + RELACION`, sumando todas las filas del mismo concepto antes de validar el importe; así se evita que diferencias de taller que aparecen en varias filas del mismo concepto queden bloqueadas por el tope previo de PVTA. Cuando la relación es `CA` y el pago se aplica con alguna forma que no es `EFECTIVO`, el cierre genera el folio visible final como `VF` para reflejar la forma de pago; el comportamiento de los orígenes `VF` ya existentes se respeta.
 - Regla AD/AP/CR (2026-03-03): `sp_ps_ticket_update_pvta` impide que `PVTA` por línea supere la deuda del folio referenciado y controla saldo acumulado por `ORD` sumando líneas `AD/AP/CR` del ticket.
 - Trazabilidad UI PS pago (2026-03): la app mueve el flujo de cierre a `PAGADO -> impresion -> TRANSMITIR`; el backend confirma `PAGADO` en `POST /ps/folios/:idFol/finalizar` y la salida a `TRANSMITIR` se mantiene con `PATCH /pvctrfolasvr/:idfol`.
 - Trazabilidad UI PS pago (2026-03): el modal de formas en app excluye `CREDITO/DEUDOR`; para formas no `EFECTIVO`, la referencia se captura reutilizando `ref_detalle_page.dart` de cotizaciones y se envía en `aut`.
@@ -553,7 +554,6 @@
 - Deben ser incrementales y de bajo riesgo.
 - No romper contratos HTTP ni modelos de base de datos.
 - Mantener rutas, nombres de propiedades y DTOs existentes.
-- Actualizar tests y Swagger si el cambio lo requiere.
 
 ## Cambios estructurales
 

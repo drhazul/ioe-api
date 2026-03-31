@@ -447,7 +447,6 @@ export class FactClientShpService {
       }
       partial.REGIMENFISCALRECEPTOR = regimenFiscal;
     }
-    if (dto.I_CRED !== undefined) partial.I_CRED = dto.I_CRED ?? null;
     if (dto.VF !== undefined) partial.VF = dto.VF ?? null;
     if (dto.ESTATUS !== undefined) partial.ESTATUS = dto.ESTATUS ?? null;
     if (dto.DATVAL !== undefined) partial.DATVAL = dto.DATVAL ?? null;

@@ -870,18 +870,15 @@ BEGIN
           c.IDFOL,
           c.NDOC
       )
-      SELECT TOP 1
-        @valimp = ABS(ADEUDO)
+      SELECT
+        @valimp = ABS(ROUND(ISNULL(SUM(ADEUDO), 0), 4))
       FROM adeudoFolio
       WHERE
         (
           UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd)
           OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@lineOrd)
         )
-        AND ADEUDO < 0
-      ORDER BY
-        CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd) THEN 0 ELSE 1 END,
-        ADEUDO ASC;
+        AND ADEUDO < 0;
     END
     ELSE
     BEGIN
@@ -912,8 +909,8 @@ BEGIN
           c.NDOC,
           rel.RELACION
       )
-      SELECT TOP 1
-        @valimp = ABS(ADEUDO)
+      SELECT
+        @valimp = ABS(ROUND(ISNULL(SUM(ADEUDO), 0), 4))
       FROM adeudoSel
       WHERE
         UPPER(LTRIM(RTRIM(ISNULL(RELACION, '')))) = @lineUpc
@@ -921,10 +918,7 @@ BEGIN
           UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd)
           OR UPPER(LTRIM(RTRIM(ISNULL(NDOC, '')))) = UPPER(@lineOrd)
         )
-        AND ADEUDO < 0
-      ORDER BY
-        CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(@lineOrd) THEN 0 ELSE 1 END,
-        ADEUDO ASC;
+        AND ADEUDO < 0;
     END;
 
     IF @valimp IS NULL
