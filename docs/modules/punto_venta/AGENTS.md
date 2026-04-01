@@ -39,6 +39,7 @@ Enlaces relacionados:
 - cierre `CA` fuerza `rqfac=false` y `REQF=0` antes de preview.
 - en `PAGADO`, app usa `PATCH /pvctrfolasvr/:idfol` para pasar a `MB51PROCES`.
 - Panel lista `PENDIENTE/EDITANDO/PAGADO`; `MB51PROCES` se usa solo en salida.
+- Panel seguridad (2026-04-01): para usuarios no admin, las consultas cruzadas por OPV (4 dígitos) aceptan `opv` distinto al usuario y devuelven solo folios de la misma `SUC` con `AUT='CP'` y `ESTA='PENDIENTE'`, comparando `OPV/OPVM` sin responder 403.
 - SP y transaccion:
 - `POST /pv/cotizaciones/:idfol/cierre` ejecuta `dbo.sp_pv_cotizacion_cerrar`; si falta, responder `409` e instalar `sql/sp_pv_cotizacion_cerrar_create.sql`.
 - `sp_pv_next_visible_folio` reserva folio visible `CP/CA/VF` (`SUC-YYYYMMDD-TIPO-####`).

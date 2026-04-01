@@ -20,6 +20,7 @@ import { ListFacturacionReqfFoliosQueryDto } from './dto/list-facturacion-reqf-f
 import { FacturacionUnificacionPreviewDto } from './dto/facturacion-unificacion-preview.dto';
 import { FacturacionUnificacionCreateDto } from './dto/facturacion-unificacion-create.dto';
 import { FacturacionUnificacionReverseDto } from './dto/facturacion-unificacion-reverse.dto';
+import { FacturacionIdFolValidateDto } from './dto/facturacion-idfol-validate.dto';
 
 @ApiTags('facturacion')
 @ApiBearerAuth('jwt-auth')
@@ -44,6 +45,14 @@ export class FacturacionController {
       idFol: query.idFol,
       tipoFact: query.tipoFact,
     }, user);
+  }
+
+  @Post('pendientes/validar-idfols')
+  validarPendientesPorListado(
+    @Body() dto: FacturacionIdFolValidateDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.validarIdFolsPendientes(dto.idFols, user);
   }
 
   @Get('reqf/folios')

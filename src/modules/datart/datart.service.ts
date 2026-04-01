@@ -756,6 +756,28 @@ export class DatArtService {
     return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
   }
 
+  private async ensureUpcAvailable(
+    suc: string,
+    art: string,
+    upc: string,
+    currentUpc?: string,
+  ) {
+    const normalizedUpc = upc.trim();
+    if (!normalizedUpc) return;
+
+    const conflict = await this.repo.findOne({
+      where: { SUC: suc, UPC: normalizedUpc },
+    });
+    if (
+      conflict &&
+      (conflict.ART !== art || conflict.UPC !== currentUpc)
+    ) {
+      throw new ConflictException(
+        `UPC ${normalizedUpc} ya está asignado al artículo ${conflict.ART} en la sucursal ${conflict.SUC}`,
+      );
+    }
+  }
+
   async create(dto: CreateDatArtDto) {
     const exists = await this.repo.exist({
       where: { SUC: dto.SUC, ART: dto.ART, UPC: dto.UPC },
@@ -765,6 +787,8 @@ export class DatArtService {
         `DAT_ART ${dto.SUC}-${dto.ART}-${dto.UPC} ya existe`,
       );
     }
+
+    await this.ensureUpcAvailable(dto.SUC, dto.ART, dto.UPC);
 
     const entity = this.repo.create({
       ...dto,
@@ -814,9 +838,19 @@ export class DatArtService {
 
   async update(suc: string, art: string, upc: string, dto: UpdateDatArtDto) {
     const row = await this.findOne(suc, art, upc);
+    const newUpc = dto.UPC?.trim();
+    if (newUpc && newUpc !== row.UPC) {
+      await this.ensureUpcAvailable(suc, art, newUpc, row.UPC);
+    }
+
     const { SUC, ART, UPC, ...rest } = dto as any;
-    const updated = this.repo.merge(row, rest);
-    return this.repo.save(updated);
+    const payload: Partial<DatArtEntity> = {
+      ...rest,
+      ...(newUpc ? { UPC: newUpc } : {}),
+    };
+
+    await this.repo.update({ SUC: suc, ART: art, UPC: upc }, payload);
+    return this.findOne(suc, art, newUpc ?? upc);
   }
 
   async remove(suc: string, art: string, upc: string) {

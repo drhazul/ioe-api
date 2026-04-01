@@ -30,6 +30,7 @@ Enlaces relacionados:
 ### Catalogos y maestros operativos
 
 - `datart`: `DAT_ART` (`SUC`, `ART`, `UPC`, `DES`, `TIPO`, `PVTA`, `CTOP`, `DEPA`, `SUBD`, `CLAS`, `SCLA`, `SCLA2`, ...).
+- Edición (2026-04): `PATCH /datart/:suc/:art/:upc` permite actualizar `UPC`; la API rechaza con `409` cuando el `UPC` ya está asignado a otro `ART` de la misma sucursal.
 - Trazabilidad app (2026-03): `ioe_app` agregó impresión de etiquetas en `datart_page.dart` (selección local por renglón/filtrados + impresión masiva), usando endpoints existentes de `datart` sin cambios de contrato API.
 - Regla EAN13 en app: para `UPC` mayor a 12 dígitos, frontend usa los 12 dígitos derechos para calcular dígito verificador y renderizar código de barras en etiqueta `76mm x 56mm` (una página por artículo).
 - Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` para resolver `SUC = @SUC` y `bloqNe=-1` para aplicar visibilidad `BLOQ IS NULL OR BLOQ <> -1` desde SQL/TypeORM; `ioe_app` usa estos parámetros en `detalle_cot`.
@@ -65,7 +66,8 @@ Enlaces relacionados:
 - facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` ahora acepta `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
 - facturación pendientes paginada (2026-03-13): el filtrado se aplica server-side sobre todo el universo (`ESTATUS IN ('PENDIENTE','CANCELACION PENDIENTE')`) y ordena por `FCN DESC`.
 - facturación pendientes paginada (2026-03-13): la respuesta incluye `data`, `total`, `page`, `pageSize`, `totalPages`, `hasPrevPage`, `hasNextPage`.
-- facturación paginación (2026-03-31): el pageSize por defecto de pendientes se ajusta a 60 (manteniendo tope 200) para reducir paginación.
+- facturación paginación (2026-03-31): el pageSize por defecto de pendientes se ajusta a 100 (manteniendo tope 200) para reducir paginación.
+- validación masiva por IDFOL (2026-04-01): `POST /facturacion/pendientes/validar-idfols` acepta `idFols` (máx. 500), normaliza duplicados/blancos y responde `validos` (solo ESTATUS `PENDIENTE`, respetando sucursal forzada en modo consulta) y `rechazados`; script `sql/2026-04-01_facturacion_validar_idfols.sql` crea el SP opcional.
 - facturación pendientes base SQL (2026-03-13): la consulta de listado parte de `SELECT FAC_SVR_SHAP.* FROM FAC_SVR_SHAP WHERE ESTATUS IN ('PENDIENTE','CANCELACION PENDIENTE') ORDER BY FCN DESC`; los filtros opcionales se agregan encima de esa base.
 - facturación pendientes formato IMPT (2026-03-15): el backend redondea `IMPT` a 2 decimales en la respuesta de `GET /facturacion/pendientes` para evitar variaciones por precisión.
 - validación facturación detalle (2026-03-14): `GET /facturacion/:idFol/validar` incorpora `detalleArticulos` (fuente `FACT_TICKET_SHP`) con columnas `IDFOL`, `UPC`, `Descripcion`, `ClaveProdServ`, `Unidad`, `Cantidad`, `ValorUnitario`, `PVTAT`, `Impuesto`, `Total`, además de `totalesDetalle` para UI.

@@ -852,6 +852,127 @@ export class FacturacionService {
     };
   }
 
+  async validarIdFolsPendientes(
+    idFols: string[],
+    user?: JwtPayload | null,
+  ) {
+    await this.assertFacturacionReadAccess(
+      user,
+      'validar lista de folios de facturación',
+    );
+
+    const uniqueIds = this.uniqueIdFols(idFols ?? []);
+    if (!uniqueIds.length) {
+      return { ok: true, total: 0, validos: [], rechazados: [] };
+    }
+    if (uniqueIds.length > 500) {
+      throw new BadRequestException('Máximo 500 IDFOL por validación.');
+    }
+
+    const normalizedForQuery: string[] = [];
+    for (const id of uniqueIds) {
+      if (id.length > 255) continue;
+      normalizedForQuery.push(id);
+    }
+
+    const canWrite = await this.hasFacturacionWriteAccess(user);
+    const forcedUserSuc = canWrite ? null : this.normalizeUpper(user?.suc ?? '');
+
+    const rows =
+      normalizedForQuery.length === 0
+        ? []
+        : await this.dataSource.query(
+            `${this.sqlServerStrictSetOptionsPrefix()}
+SET NOCOUNT ON;
+
+DECLARE @IdFols TABLE (IDFOL NVARCHAR(255) NOT NULL PRIMARY KEY);
+
+INSERT INTO @IdFols (IDFOL)
+SELECT DISTINCT UPPER(LTRIM(RTRIM([value])))
+FROM OPENJSON(@0)
+WHERE TRY_CONVERT(NVARCHAR(255), [value]) IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), [value]))) <> '';
+
+SELECT
+  i.IDFOL,
+  UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '')))) AS DB_IDFOL,
+  UPPER(LTRIM(RTRIM(ISNULL(f.ESTATUS, '')))) AS ESTATUS,
+  UPPER(LTRIM(RTRIM(ISNULL(f.SUC, '')))) AS SUC
+FROM @IdFols i
+LEFT JOIN dbo.FAC_SVR_SHAP f
+  ON UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '')))) = i.IDFOL;`,
+            [JSON.stringify(normalizedForQuery)],
+          );
+
+    const rowsMap = new Map<string, { estatus: string; suc: string }>();
+    for (const row of rows ?? []) {
+      const normalized = this.normalizeUpper(
+        (row as Record<string, unknown>).DB_IDFOL ??
+          (row as Record<string, unknown>).IDFOL ??
+          '',
+      );
+      if (!normalized) continue;
+      rowsMap.set(normalized, {
+        estatus: this.normalizeUpper(
+          (row as Record<string, unknown>).ESTATUS ?? '',
+        ),
+        suc: this.normalizeUpper((row as Record<string, unknown>).SUC ?? ''),
+      });
+    }
+
+    const rejected: { idFol: string; motivo: string }[] = [];
+    const valid: { idFol: string; suc: string }[] = [];
+
+    if (!canWrite && (!forcedUserSuc || forcedUserSuc === '000')) {
+      return {
+        ok: true,
+        total: uniqueIds.length,
+        validos: [],
+        rechazados: uniqueIds.map((idFol) => ({
+          idFol,
+          motivo: 'SUC_NO_AUTORIZADA',
+        })),
+      };
+    }
+
+    for (const idFol of uniqueIds) {
+      if (idFol.length > 255) {
+        rejected.push({ idFol, motivo: 'LONGITUD_MAYOR_255' });
+        continue;
+      }
+
+      const row = rowsMap.get(idFol);
+      if (!row) {
+        rejected.push({ idFol, motivo: 'NO_ENCONTRADO' });
+        continue;
+      }
+
+      if (
+        !canWrite &&
+        forcedUserSuc &&
+        forcedUserSuc !== '000' &&
+        row.suc !== forcedUserSuc
+      ) {
+        rejected.push({ idFol, motivo: 'SUC_NO_AUTORIZADA' });
+        continue;
+      }
+
+      if (row.estatus !== 'PENDIENTE') {
+        rejected.push({ idFol, motivo: 'ESTATUS_NO_PENDIENTE' });
+        continue;
+      }
+
+      valid.push({ idFol, suc: row.suc || '' });
+    }
+
+    return {
+      ok: true,
+      total: uniqueIds.length,
+      validos: valid,
+      rechazados: rejected,
+    };
+  }
+
   async listarFoliosReqf(
     input: ListarReqfFoliosInput = {},
     user?: JwtPayload | null,

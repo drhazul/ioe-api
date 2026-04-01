@@ -35,5 +35,9 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - `npm run start:dev`
 - `npm test`
 
+## Pruebas obligatorias
+- Ejecutar `npm test` antes de entregar cualquier cambio backend.
+- Cuando se coordinen cambios con el frontend (`ioe_app`), correr también `flutter analyze` y `flutter test` en ese proyecto.
+
 ## Documentacion viva
 - Mantén este índice y los README/AGENTS de módulo actualizados con cada cambio de contrato o proceso.

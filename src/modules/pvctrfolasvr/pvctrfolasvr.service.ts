@@ -46,6 +46,8 @@ export class PvCtrFolAsvrService {
     const requestedOpvIsActor =
       requestedOpvUpper.length > 0 && requestedOpvUpper === actorOpvUpper;
     const runOwnScope = isAdmin || !requestedOpv || requestedOpvIsActor;
+    const isCrossOpvQuery =
+      !isAdmin && requestedOpv.length > 0 && !requestedOpvIsActor;
 
     if (
       !isAdmin &&
@@ -66,7 +68,11 @@ export class PvCtrFolAsvrService {
         'No se pudo resolver OPV para consultar cotizaciones',
       );
     }
-    if (!isAdmin && requestedOpv.length > 0 && !requestedOpvIsActor) {
+    if (
+      isCrossOpvQuery &&
+      search.length === 0 &&
+      !this.looksLikeOpvSearch(requestedOpv)
+    ) {
       throw new ForbiddenException(
         'No autorizado para consultar cotizaciones de otro OPV',
       );
@@ -128,10 +134,10 @@ export class PvCtrFolAsvrService {
 
     if (shouldQueryCrossScope) {
       const crossParams: unknown[] = [];
-      const crossWhere: string[] = [
-        "a.AUT = 'CP'",
-        "a.ESTA = 'PENDIENTE'",
-      ];
+    const crossWhere: string[] = [
+      "a.AUT = 'CP'",
+      "a.ESTA = 'PENDIENTE'",
+    ];
 
       if (suc.length > 0) {
         crossWhere.push(`a.SUC = @${crossParams.length}`);
@@ -536,7 +542,9 @@ export class PvCtrFolAsvrService {
         ? this.normalizeText(input.requestedOpv)
         : '';
     if (crossByRequestedOpv) {
-      where.push(`a.OPV = @${input.params.length}`);
+      where.push(
+        `(a.OPV = @${input.params.length} OR a.OPVM = @${input.params.length})`,
+      );
       input.params.push(crossByRequestedOpv);
     }
 
@@ -544,7 +552,9 @@ export class PvCtrFolAsvrService {
     if (!search) return where;
 
     if (this.looksLikeOpvSearch(search) && !crossByRequestedOpv) {
-      where.push(`a.OPV = @${input.params.length}`);
+      where.push(
+        `(a.OPV = @${input.params.length} OR a.OPVM = @${input.params.length})`,
+      );
       input.params.push(search);
       return where;
     }

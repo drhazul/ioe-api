@@ -14,6 +14,7 @@
 - `src/config/database.module.ts`: conexión MSSQL con `TypeOrmModule.forRootAsync`.
 - `src/common/`: guards, decorators e interceptors compartidos.
 - `src/modules/`: módulos funcionales por dominio.
+- `datart` (2026-04): `PATCH /datart/:suc/:art/:upc` permite editar `UPC` y rechaza duplicados de `UPC` asignados a otro `ART` dentro de la misma sucursal.
 
 ## Documentación por módulos
 - Base de módulos: `docs/modules/base_modulos/AGENTS.md` (README: `docs/modules/base_modulos/README.md`)
@@ -33,6 +34,10 @@
 - No eliminar endpoints, entidades ni DTOs sin confirmación explícita.
 - No editar `dist/` ni `node_modules/`; no exponer secretos.
 - Evitar comandos destructivos.
+
+## Pruebas
+- Ejecutar `npm test` antes de entregar.
+- Cuando el cambio involucre al frontend `ioe_app`, coordinar y correr también `flutter analyze` y `flutter test`.
 
 ## Refactors
 - Incrementales y de bajo riesgo.

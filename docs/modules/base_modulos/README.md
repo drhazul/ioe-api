@@ -25,6 +25,7 @@ Enlaces relacionados:
 - `/usr-mod-suc`
 - Catalogos:
 - `/datart`, `/datcatreg`, `/datcatuso`, `/dat-almacen`, `/dat-cmov`
+- `PATCH /datart/:suc/:art/:upc` permite actualizar `UPC`; la API rechaza cuando el `UPC` ya está asignado a otro `ART` de la misma sucursal.
 - Alta masiva de artículos (`sp_art_masiva_validate_batch`/`sp_art_masiva_commit_batch`): las validaciones se aplican por combinación `SUC + ART` y `SUC + UPC`, de modo que el mismo `ART` o `UPC` puede coexistir en distintas sucursales sin bloquear la carga, mientras que las duplicaciones se detectan dentro de la misma sucursal.
 - Trazabilidad frontend (2026-03): `ioe_app` incorporó impresión de etiquetas en catálogo `DAT_ART` con selección local por renglón/filtrados y vista previa de impresión (PDF `76mm x 56mm`, una etiqueta por artículo), sin endpoints nuevos en API.
 - Regla EAN13 aplicada en app: de `UPC` se toman los 12 dígitos derechos (si excede) y se calcula dígito verificador para render de código de barras.
@@ -50,7 +51,8 @@ Enlaces relacionados:
 - compatibilidad facturación legacy (2026-03-13): `FacturacionService` detecta columnas de `FAC_SVR_SHAP` y resuelve `AUT` con fallback `TIPOVTA` (o `NULL`), además de fallback para `REQF/RQFAC`, `FormaPagoSAT` y `Exportacion`, evitando `500 Invalid column name 'AUT'`.
 - facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` acepta filtros server-side `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
 - facturación pendientes paginada (2026-03-13): la consulta ordena por `FCN DESC` sobre todo el conjunto y responde `{ data, total, page, pageSize, totalPages, hasPrevPage, hasNextPage }`.
-- facturación paginación (2026-03-31): el pageSize por defecto en `/facturacion/pendientes` sube a 60 registros (límite 200) para reducir navegación.
+- facturación paginación (2026-03-31): el pageSize por defecto en `/facturacion/pendientes` sube a 100 registros (límite 200) para reducir navegación.
+- validación masiva por IDFOL (2026-04-01): `POST /facturacion/pendientes/validar-idfols` acepta `idFols` (máx. 500), depura duplicados/blancos y devuelve `validos` (solo ESTATUS `PENDIENTE`, con control de sucursal para usuarios sin gestión) y `rechazados`; script opcional `sql/2026-04-01_facturacion_validar_idfols.sql` crea el SP de apoyo.
 - facturación pendientes base SQL (2026-03-13): el listado parte de `FAC_SVR_SHAP` con estatus `PENDIENTE`/`CANCELACION PENDIENTE` y orden `FCN DESC`; filtros opcionales se aplican sobre esa consulta base.
 - facturación pendientes formato IMPT (2026-03-15): `listarPendientes` normaliza `IMPT` a 2 decimales en la respuesta para consistencia de visualización en frontend.
 - validación de facturación con detalle (2026-03-14): `GET /facturacion/:idFol/validar` retorna `detalleArticulos` desde `FACT_TICKET_SHP` (`IDFOL`, `UPC`, `Descripcion`, `ClaveProdServ`, `Unidad`, `Cantidad`, `ValorUnitario`, `PVTAT`, `Impuesto`, `Total`) y `totalesDetalle` para el popup de validación en frontend.
