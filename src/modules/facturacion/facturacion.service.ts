@@ -659,7 +659,7 @@ export class FacturacionService {
         data: [],
         total: 0,
         page: 1,
-        pageSize: Math.min(Math.max(Number(input.pageSize ?? 20) || 20, 1), 200),
+        pageSize: Math.min(Math.max(Number(input.pageSize ?? 60) || 60, 1), 200),
         totalPages: 0,
         hasPrevPage: false,
         hasNextPage: false,
@@ -669,9 +669,9 @@ export class FacturacionService {
     const rawPage = Number(input.page ?? 1);
     const page =
       Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
-    const rawPageSize = Number(input.pageSize ?? 20);
+    const rawPageSize = Number(input.pageSize ?? 60);
     const pageSize = Math.min(
-      Math.max(Number.isFinite(rawPageSize) ? Math.floor(rawPageSize) : 20, 1),
+      Math.max(Number.isFinite(rawPageSize) ? Math.floor(rawPageSize) : 60, 1),
       200,
     );
     const offset = (page - 1) * pageSize;

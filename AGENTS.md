@@ -6,6 +6,7 @@
 - Backend NestJS (TypeScript) modular por feature (`controller -> service -> dto/entity`).
 - Persistencia con TypeORM sobre MSSQL (schema `dbo`), entidades/columnas en mayúsculas.
 - Seguridad: JWT, `RolesGuard` global, `AuditInterceptor` global, `ValidationPipe` (`whitelist + transform + forbid`).
+- Alcance de cambios: este AGENTS principal solo se actualiza cuando hay alteraciones de arquitectura, rutas base o incorporación/eliminación de módulos; las variaciones funcionales se documentan en los AGENTS/README del módulo afectado.
 
 ## Arquitectura y estructura real
 - `src/main.ts`: bootstrap, CORS (`CORS_ORIGINS`), Swagger en `/docs`.

@@ -8,6 +8,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Contratos HTTP estables para la app IOE.
 - Seguridad JWT con refresh y control por módulo/sucursal.
 - Procesos críticos en stored procedures para inventarios y PV.
+- Notas de documentación viva: este README se modifica solo por cambios de arquitectura, módulos o rutas principales; los ajustes funcionales se registran en los README/AGENTS del módulo correspondiente.
 
 ## Arquitectura
 - NestJS + TypeORM (`mssql`).
