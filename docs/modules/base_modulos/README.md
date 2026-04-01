@@ -1,0 +1,89 @@
+# Base de módulos (API)
+
+Navega a otros README/AGENTS solo cuando la tarea lo requiera.
+
+Enlaces relacionados:
+- README principal de la API: `README.md`
+- AGENTS de este módulo: `docs/modules/base_modulos/AGENTS.md`
+- Otros módulos: `docs/modules/core_seguridad/README.md`, `docs/modules/punto_venta/README.md`, `docs/modules/ordenes_trabajo/README.md`, `docs/modules/reloj_checador/README.md`
+
+## Modulos y endpoints principales
+
+- Salud:
+- `/health`, `/health/db`
+- Seguridad:
+- `/auth/login`, `/auth/refresh`, `/auth/change-password`, `/auth/logout-all`
+- `/me/profile`, `/me/front-menu`, `/me/datmodulos`, `/me/backend-perms`
+- Maestros:
+- `/roles`, `/deptos`, `/puestos`, `/users`, `/dat-suc`, `/datmodulos`
+- Validacion relevante: `/users` exige `USERNAME` con minimo 3 caracteres.
+- Alta usuarios (2026-03): si `PASSWORD` no se envía, backend genera una contraseña temporal aleatoria de 6 dígitos y marca `FORZAR_CAMBIO_PASS=1` para primer acceso.
+- Primer acceso (2026-03): login emite claim JWT `mustChangePassword` y el endpoint autenticado `POST /auth/change-password` permite actualizar contraseña y limpiar `FORZAR_CAMBIO_PASS=0`.
+- Accesos:
+- `/access/modulos`, `/access/grupos-modulo`, `/access/roles/:id/permisos-backend`
+- `/access/mod-front`, `/access/grupos-front`, `/access/roles/:id/enrolamientos-front`
+- `/usr-mod-suc`
+- Catalogos:
+- `/datart`, `/datcatreg`, `/datcatuso`, `/dat-almacen`, `/dat-cmov`
+- Alta masiva de artículos (`sp_art_masiva_validate_batch`/`sp_art_masiva_commit_batch`): las validaciones se aplican por combinación `SUC + ART` y `SUC + UPC`, de modo que el mismo `ART` o `UPC` puede coexistir en distintas sucursales sin bloquear la carga, mientras que las duplicaciones se detectan dentro de la misma sucursal.
+- Trazabilidad frontend (2026-03): `ioe_app` incorporó impresión de etiquetas en catálogo `DAT_ART` con selección local por renglón/filtrados y vista previa de impresión (PDF `76mm x 56mm`, una etiqueta por artículo), sin endpoints nuevos en API.
+- Regla EAN13 aplicada en app: de `UPC` se toman los 12 dígitos derechos (si excede) y se calcula dígito verificador para render de código de barras.
+- Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` (`SUC = @SUC`) y `bloqNe=-1` para resolver visibilidad con `BLOQ IS NULL OR BLOQ <> -1` en backend (compatibilidad con datos legacy en `NULL`).
+- `/dat-form` (CRUD de catalogo de formas de pago sobre `DAT_FORM`)
+- Inventarios:
+- `/conteos/*`, `/capturas/*`, `/datcontctrl`, `/datdetsvr`, `/datmb51`, `/dat-mb51/search`, `/dat-mb52/resumen`
+- Control de cuentas:
+- `/cat-ctas/*`, `/ctrl-ctas/config`, `/ctrl-ctas/catalog/*`, `/ctrl-ctas/consulta/*`
+- Compatibilidad histórica (2026-03): en `POST /ctrl-ctas/consulta/*`, API ejecuta SQL directo para estos reportes, normaliza rango `FCND` (completa faltantes con `1900-01-01` y `2100-12-31`) e incluye filas legacy con `SUC` nulo/vacío cuando hay filtro por sucursal.
+- Nota de integracion UI: la condicion para habilitar exportacion Excel en `Resumen por Deudor` (CTA unica o CLIENT seleccionado) se resuelve en frontend y no requiere cambios de API.
+- Nota de integracion UI: cuando hay CTA unica y no hay CLIENT seleccionado, frontend exporta `resumen-transaccion` y `detalle` para todos los CLIENT de esa consulta (consulta `detalle` por cliente en bloques de `idfols`), sin cambios de contrato.
+- Nota de integracion UI: el progreso de exportacion se maneja en un modal del frontend; no requiere cambios en API.
+- Nota de integracion UI: el filtro `!= 0` inicia desactivado por defecto en la pantalla de resumen para mostrar todos los registros (comportamiento solo frontend; el usuario puede activarlo manualmente).
+- Punto de venta:
+- `/factclientshp`, `/pvctrfolasvr`, `/pvctrfolform`, `/pvctrords`, `/pvctrordsdet`, `/pvticketlog`, `/refdetalle`
+- `/ordenes-trabajo/*` (panel/flujo ORD operativo: autorizar, enviar, recibir, entregar, garantía, cambio material, merma y escaneo)
+- trazabilidad UI ORDs/Home (2026-03-24): `ioe_app` expone páginas standalone para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar` desde Home; reutilizan las mismas validaciones y endpoints `/ordenes-trabajo/*`, sin mostrar el panel principal.
+- trazabilidad UI ORDs/Home (2026-03-24): la página directa de `Entregar` captura firma digital del cliente y reutiliza `POST /ordenes-trabajo/:iord/entregar` por cada ORD relacionada; no requiere cambios de contrato API, base de datos ni ejecución adicional de SP.
+- compatibilidad ORDs cliente/job (2026-03-30): `GET /ordenes-trabajo` filtra `client` por coincidencias en `CLIEN` y `NCLIENTE`; `GET /ordenes-trabajo/:iord/detalle` entrega `PV_CTR_ORDS_DET` ordenado como `OD`, `OI`, `ADD`.
+- trazabilidad API/UI ORDs (2026-03-30): además del `ORDER BY` SQL, `OrdenesTrabajoService` reordena `details` como defensa en memoria para que popup e impresión reciban siempre la misma secuencia.
+- `/facturacion/*` (pendientes/validar/emitir/refrescar-estado/reenviar-email/cancelar sobre `FAC_SVR_SHAP` + `FACT_TICKET_SHP`).
+- compatibilidad facturación legacy (2026-03-13): `FacturacionService` detecta columnas de `FAC_SVR_SHAP` y resuelve `AUT` con fallback `TIPOVTA` (o `NULL`), además de fallback para `REQF/RQFAC`, `FormaPagoSAT` y `Exportacion`, evitando `500 Invalid column name 'AUT'`.
+- facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` acepta filtros server-side `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
+- facturación pendientes paginada (2026-03-13): la consulta ordena por `FCN DESC` sobre todo el conjunto y responde `{ data, total, page, pageSize, totalPages, hasPrevPage, hasNextPage }`.
+- facturación pendientes base SQL (2026-03-13): el listado parte de `FAC_SVR_SHAP` con estatus `PENDIENTE`/`CANCELACION PENDIENTE` y orden `FCN DESC`; filtros opcionales se aplican sobre esa consulta base.
+- facturación pendientes formato IMPT (2026-03-15): `listarPendientes` normaliza `IMPT` a 2 decimales en la respuesta para consistencia de visualización en frontend.
+- validación de facturación con detalle (2026-03-14): `GET /facturacion/:idFol/validar` retorna `detalleArticulos` desde `FACT_TICKET_SHP` (`IDFOL`, `UPC`, `Descripcion`, `ClaveProdServ`, `Unidad`, `Cantidad`, `ValorUnitario`, `PVTAT`, `Impuesto`, `Total`) y `totalesDetalle` para el popup de validación en frontend.
+- validación de importes facturación (2026-03-14): la comparación `cabecera vs detalle` en `GET /facturacion/:idFol/validar` se redondea siempre a 2 decimales (`totales.cabecera`, `totales.detalle`, `totales.diferencia`) para depurar desfases de centavos.
+- prevención CFDI40108 en pendientes (2026-03-23): `FacturacionService` normaliza `factura.subtotal` al redondeo SAT de 2 decimales en `emitir`, y `GET /facturacion/:idFol/validar` expone `validaciones.subtotalSatCuadra/requiereAjusteSubtotalSat` para trazabilidad en UI.
+- nomenclatura CFDI Facturify (2026-03-27): el control `sql/2026-03-27_fact_cfdi_serie_control.sql` reserva `serie` con las primeras 4 letras de `RFCEMISOR` y un `folio` entero consecutivo global por serie (sin reinicio diario). La visual interna queda `JIFT-00001`, mientras que el payload a Facturify envía `factura.folio` como entero puro.
+- filtro de facturación con error (2026-03-27): `GET /facturacion/pendientes` soporta `estatus='CON ERROR'` para consultar registros con `CFDI_STATUS='ERROR'`, `CFDI_CANCEL_STATUS='ERROR'` o mensaje en `CFDI_ERROR_MSG`.
+- uso CFDI en timbrado (2026-03-23): `toFacturifyPayload` envía `receptor.uso_cfdi` desde `FAC_SVR_SHAP.UsoCfdi` (sin fallback a cliente), evitando default implícito `G03`.
+- sincronización uso CFDI en cierre VF (2026-03-23): `sp_fact_sync_folio_vf` toma `UsoCfdi` del cliente seleccionado del folio (`CLIEN` y preferencia por `SUC` del folio) al poblar `FAC_SVR_SHAP`.
+- almacenamiento CFDI con alternancia (2026-03-15): `saveCfdiArtifacts` intenta guardado en rutas candidatas (`CFDI_STORAGE_BASE_PATH`, `_ALT`, `_DEV/_PROD`, `_PATHS` y defaults por SO). Si falla una ruta, prueba la siguiente antes de devolver error.
+- conciliación de centavos en origen VF (2026-03-15): `sp_fact_sync_folio_vf` recalcula `FAC_SVR_SHAP.IMPT` desde el detalle insertado en `FACT_TICKET_SHP` usando la suma por línea `ROUND(PVTAT + ROUND(PVTAT*0.16,2),2)`; con esto cabecera/detalle quedan alineados desde el cierre.
+- saneamiento histórico facturación (2026-03-15): script `sql/2026-03-15_facturacion_reconcile_impt_from_detail.sql` ajusta `FAC_SVR_SHAP.IMPT` para folios `PENDIENTE`/`CANCELACION PENDIENTE` en base al detalle existente.
+- trazabilidad UI facturación (2026-03-15): el ajuste visual de la grilla (scroll horizontal visible, alineación encabezados/valores y `IMPT` a 2 decimales) se resolvió en `ioe_app` sin cambios de contrato API.
+- trazabilidad UI facturación tipografía (2026-03-15): `ioe_app` usa configuración visual por modal para ajustar escala global y fuentes por componente (AppBar, títulos, labels, body, botones, header/celdas), sin impacto en endpoints.
+- trazabilidad UI facturación columnas (2026-03-15): `ioe_app` agrega ajuste persistente de ancho por columna y separación entre campos (cache local `SharedPreferences`), además de separadores arrastrables en el encabezado; no cambia contrato API.
+- unificación facturación sucursal JWT (2026-03-16): `preview/create` de `/facturacion/unificaciones` ya no fuerzan sucursal desde `user.suc` para usuarios con permisos de gestión (`FACTURA`/compat), evitando falsos bloqueos de "folios fuera de la sucursal autorizada".
+- REQF sin facturar (2026-03-16): `GET /facturacion/reqf/folios` requiere `REG_SINREQF` (o gestión `FACTURA`/compat) y filtra no-admin por sucursales autorizadas en `USR_MOD_SUC`; si no hay filas, aplica fallback legado a `user.suc`.
+- Nota integración UI clientes (2026-03): en alta desde `ioe_app`, el modal puede enviar defaults `RFCEMISOR='SELECCIONAR'`, `USOCFDI='SELECCIONAR'`, `REGIMENFISCALRECEPTOR=0` (sentinela numérico) y `EMAILRECEPTOR='COLOCAR'`; el backend mantiene validación actual (no vacío/numérica) sin cambio de endpoint.
+- `GET /pvctrfolasvr` (optimizacion 2026-03) acepta `suc`, `opv`, `search` para listar cotizaciones de panel con filtro backend por `ESTA IN ('PENDIENTE','EDITANDO','PAGADO')` y busqueda por `IDFOL`/`IDFOLINICIAL`/cliente; los clientes administrativos pueden comandar `suc`/`opv` desde el frontend para evaluar el contexto de cada sucursal + OPV sin cambiar el contrato HTTP.
+- compatibilidad (2026-03): el query DTO del listado de cotizaciones acepta `_` opcional como cache-buster legacy para no rechazar clientes antiguos con `400`.
+- `GET /pvctrfolasvr` (2026-03): la respuesta del listado incluye `RazonSocialReceptor` (join con `FACT_CLIENT_SHP`) para soporte de grilla en frontend.
+- `GET /pvctrfolasvr/:idfol` (2026-03): devuelve vista de lectura con `RazonSocialReceptor` y resuelve por `IDFOL` actual o `IDFOLINICIAL` para compatibilidad cuando el folio visible cambia de `CP` a `CA/VF`.
+- trazabilidad UI cotizaciones (2026-03-10): cuando `search` se interpreta como OPV, frontend habilita búsqueda cruzada de otros OPV solo para folios con `AUT='CP'` y `ESTA='PENDIENTE'`.
+- trazabilidad UI paneles (2026-03-10): cotizaciones/devoluciones/PS usan anulación lógica con `PATCH /pvctrfolasvr/:idfol` (`ESTA='ANULADO'`) en lugar de eliminación física, habilitado solo para estado `PENDIENTE`.
+- paneles PV (2026-03-21): los listados operativos de cotizaciones/devoluciones/PS excluyen `ESTA='ANULADO'`; solo regresan `PENDIENTE`, `EDITANDO` y `PAGADO`.
+- `/pv/devoluciones/*` (flujo de devoluciones de cotizaciones/ventas/apartados)
+- `/ps/*` (modulo Pago de Servicios: panel, ticket, referencias, pago/finalizacion y terminar): los endpoints consumen `suc` y `opv` en las consultas para que los administradores puedan replicar el contexto de una sucursal/usuario OPV específico.
+- `/retiros/*` (flujo de retiros parciales de caja)
+- `/catalogos/formas-retiro` (formas de pago para retiros desde `VW_PV_FORM_TIPOTRAN_DISTINCT`)
+- `/cajon-estado/*` (autorización supervisor + resumen diario de estado de cajón OPV)
+- `/pv/refdetalle` (flujo PV de creacion/asignacion/eliminacion de referencias por folio)
+- `/pvticketlog/:id/precio` (edicion de `PVTA` con control de autorizacion `SUPERPV`)
+- `/dat-form` (GET lista, POST crea; por defecto lista solo activas, opcional `includeInactive=true`)
+- `/dat-form/:idform` (GET detalle, PATCH actualiza, DELETE elimina)
+- `/dat-form/:idform/estado` (PATCH para activar/inactivar forma de pago)
+- Clasificadores:
+- `/jrqdepa`, `/jrqsubd`, `/jrqclas`, `/jrqscla`, `/jrqscla2`, `/jrqguia`

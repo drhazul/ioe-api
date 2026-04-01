@@ -129,31 +129,38 @@ BEGIN
 
   -- UPC duplicado en batch (solo si viene)
   ;WITH DUPS AS (
-    SELECT UPC
+    SELECT SUC, UPC
     FROM dbo.JA_NVO_ART_CON
-    WHERE BatchId=@BatchId AND Status='PENDING' AND NULLIF(LTRIM(RTRIM(UPC)),'') IS NOT NULL
-    GROUP BY UPC
+    WHERE BatchId=@BatchId
+      AND Status='PENDING'
+      AND NULLIF(LTRIM(RTRIM(SUC)),'') IS NOT NULL
+      AND NULLIF(LTRIM(RTRIM(UPC)),'') IS NOT NULL
+    GROUP BY SUC, UPC
     HAVING COUNT(1) > 1
   )
   UPDATE T
   SET Status='ERROR', ErrorMsg='UPC duplicado en batch'
   FROM dbo.JA_NVO_ART_CON T
-  INNER JOIN DUPS D ON D.UPC = T.UPC
+  INNER JOIN DUPS D ON D.UPC = T.UPC AND D.SUC = T.SUC
   WHERE T.BatchId=@BatchId AND T.Status='PENDING';
 
   -- UPC ya existe en DAT_ART
   UPDATE T
   SET Status='ERROR', ErrorMsg='UPC ya existe en DAT_ART'
   FROM dbo.JA_NVO_ART_CON T
-  INNER JOIN dbo.DAT_ART A ON A.UPC = T.UPC
-  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.UPC)),'') IS NOT NULL;
+  INNER JOIN dbo.DAT_ART A ON A.UPC = T.UPC AND A.SUC = T.SUC
+  WHERE T.BatchId=@BatchId
+    AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.UPC)),'') IS NOT NULL;
 
   -- ART ya existe en DAT_ART (si viene informado)
   UPDATE T
   SET Status='ERROR', ErrorMsg='ART ya existe en DAT_ART'
   FROM dbo.JA_NVO_ART_CON T
-  INNER JOIN dbo.DAT_ART A ON A.ART = T.ART
-  WHERE T.BatchId=@BatchId AND T.Status='PENDING' AND NULLIF(LTRIM(RTRIM(T.ART)),'') IS NOT NULL;
+  INNER JOIN dbo.DAT_ART A ON A.ART = T.ART AND A.SUC = T.SUC
+  WHERE T.BatchId=@BatchId
+    AND T.Status='PENDING'
+    AND NULLIF(LTRIM(RTRIM(T.ART)),'') IS NOT NULL;
 
   -- Marcar pendientes como VALID
   UPDATE T

@@ -345,6 +345,19 @@ BEGIN
     SET @usoCfdi = UPPER(LTRIM(RTRIM(ISNULL(@usoCfdi, ''))));
 
     SET @tipoFact = CASE WHEN ISNULL(@tieneFormaCredito, 0) = 1 THEN 'CREDITO' ELSE 'INDIVIDUAL' END;
+    IF ISNULL(@tieneFormaCredito, 0) = 1
+    BEGIN
+      -- Crédito: CFDI requiere PPD + FormaPago '99' (por definir)
+      SET @metodoPago = 'PPD';
+      SET @formaSat = '99';
+    END
+    ELSE
+    BEGIN
+      IF @metodoPago IS NULL OR LTRIM(RTRIM(@metodoPago)) = ''
+        SET @metodoPago = 'PUE';
+    END;
+    IF @formaSat IS NULL OR LTRIM(RTRIM(@formaSat)) = ''
+      SET @formaSat = '99';
 
     IF OBJECT_ID('dbo.FACT_CLIENT_SHP') IS NOT NULL
       AND @clien IS NOT NULL

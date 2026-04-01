@@ -1670,6 +1670,12 @@ export class FacturacionService {
     return this.normalizeText(value).toUpperCase();
   }
 
+  // Normaliza razón social para CFDI sin eliminar apóstrofes ni caracteres válidos del SAT.
+  private normalizeSatName(value: unknown) {
+    const text = this.normalizeText(value).replace(/\s+/g, ' ');
+    return text || 'PUBLICO EN GENERAL';
+  }
+
   private round2(value: number) {
     return Math.round((value + Number.EPSILON) * 100) / 100;
   }
@@ -2396,14 +2402,29 @@ SET NUMERIC_ROUNDABORT OFF;`;
     const emisor = await this.resolveEmisor(rfcEmisor);
 
     const conceptosConTotalesSat = (full.detail || []).map((d) => {
-      const cantidad = round6(Number(d.Cantidad ?? 1));
-      const valorUnitario = round6(Number(d.ValorUnitario ?? d.PVTAT ?? 0));
+      const cantidadRaw = Number(d.Cantidad ?? 1);
+      const cantidad = round6(
+        Number.isFinite(cantidadRaw) && Math.abs(cantidadRaw) > 0
+          ? cantidadRaw
+          : 1,
+      );
+      const totalConceptoBase = Number.isFinite(Number(d.PVTAT))
+        ? Number(d.PVTAT)
+        : round6(
+            (Number(d.ValorUnitario ?? 0) || 0) * (cantidad || 1) -
+              (Number(d.Descuento ?? 0) || 0),
+          );
+      const totalConcepto = round2(totalConceptoBase);
+      const valorUnitario = round6(
+        cantidad > 0
+          ? totalConcepto / cantidad
+          : Number(d.ValorUnitario ?? totalConcepto ?? 0),
+      );
       const objetoImp = String(d.ObjetoImp ?? '02')
         .split('.')[0]
         .padStart(2, '0');
       const tasaIvaRaw = Number(d.IvaTasa ?? 0.16);
       const tasaIva = Number.isFinite(tasaIvaRaw) ? tasaIvaRaw : 0.16;
-      const totalConcepto = round2(Number(d.PVTAT ?? 0));
       const aplicaImpuesto = objetoImp === '02' && Math.abs(tasaIva) > 0;
       const impuestoConcepto = aplicaImpuesto
         ? round2(totalConcepto * tasaIva)
@@ -2441,6 +2462,12 @@ SET NUMERIC_ROUNDABORT OFF;`;
     );
 
     const email = String(c.EMAILRECEPTOR ?? '').trim();
+    const razonSocial = this.normalizeSatName(
+      c.RazonSocialReceptor ??
+        c.RAZONSOCIALRECEPTOR ??
+        h.RazonSocialReceptor ??
+        h.RAZONSOCIALRECEPTOR,
+    );
     const regimen = await this.resolveReceptorRegimen(c);
     const exportacionRaw = String(
       h.exportacion ?? h.Exportacion ?? '01',
@@ -2488,9 +2515,7 @@ SET NUMERIC_ROUNDABORT OFF;`;
         uuid: String(emisor?.uuid ?? ''),
       },
       receptor: {
-        razon_social: String(
-          h.RazonSocialReceptor ?? c.RAZONSOCIALRECEPTOR ?? 'PUBLICO EN GENERAL',
-        ),
+        razon_social: razonSocial,
         rfc: String(h.RfcReceptor ?? c.RFCRECEPTOR ?? ''),
         email: email || null,
         metodo_de_pago: String(h.MetodoDePago ?? 'PUE'),

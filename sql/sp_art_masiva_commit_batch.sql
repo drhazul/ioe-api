@@ -59,39 +59,44 @@ BEGIN
     -- ART duplicado en DAT_ART
     UPDATE T SET Status='ERROR', ErrorMsg='ART ya existe en DAT_ART'
     FROM dbo.JA_NVO_ART_CON T
-    INNER JOIN dbo.DAT_ART A ON A.ART = T.ART
+    INNER JOIN dbo.DAT_ART A ON A.ART = T.ART AND A.SUC = T.SUC
     WHERE T.BatchId=@BatchId AND T.Status='VALID';
 
     -- UPC duplicado en DAT_ART
     UPDATE T SET Status='ERROR', ErrorMsg='UPC ya existe en DAT_ART'
     FROM dbo.JA_NVO_ART_CON T
-    INNER JOIN dbo.DAT_ART A ON A.UPC = T.UPC
+    INNER JOIN dbo.DAT_ART A ON A.UPC = T.UPC AND A.SUC = T.SUC
     WHERE T.BatchId=@BatchId AND T.Status='VALID';
 
     -- ART duplicado dentro del batch
+    -- ART duplicado dentro del batch
     ;WITH DUPS_ART AS (
-      SELECT ART
+      SELECT SUC, ART
       FROM dbo.JA_NVO_ART_CON
       WHERE BatchId=@BatchId AND Status='VALID'
-      GROUP BY ART
+        AND NULLIF(LTRIM(RTRIM(SUC)),'') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(ART)),'') IS NOT NULL
+      GROUP BY SUC, ART
       HAVING COUNT(1) > 1
     )
     UPDATE T SET Status='ERROR', ErrorMsg='ART duplicado en batch'
     FROM dbo.JA_NVO_ART_CON T
-    INNER JOIN DUPS_ART D ON D.ART = T.ART
+    INNER JOIN DUPS_ART D ON D.ART = T.ART AND D.SUC = T.SUC
     WHERE T.BatchId=@BatchId AND T.Status='VALID';
 
     -- UPC duplicado dentro del batch
     ;WITH DUPS_UPC AS (
-      SELECT UPC
+      SELECT SUC, UPC
       FROM dbo.JA_NVO_ART_CON
       WHERE BatchId=@BatchId AND Status='VALID'
-      GROUP BY UPC
+        AND NULLIF(LTRIM(RTRIM(SUC)),'') IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(UPC)),'') IS NOT NULL
+      GROUP BY SUC, UPC
       HAVING COUNT(1) > 1
     )
     UPDATE T SET Status='ERROR', ErrorMsg='UPC duplicado en batch'
     FROM dbo.JA_NVO_ART_CON T
-    INNER JOIN DUPS_UPC D ON D.UPC = T.UPC
+    INNER JOIN DUPS_UPC D ON D.UPC = T.UPC AND D.SUC = T.SUC
     WHERE T.BatchId=@BatchId AND T.Status='VALID';
 
     IF EXISTS (
