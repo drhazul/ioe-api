@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { DataSource, QueryFailedError } from 'typeorm';
@@ -121,6 +122,7 @@ type PrintOrdHeader = {
 export class PvCotizacionesCierreService {
   private static readonly CTA_CTRL_CTAS_CARGO_CREDITO = '101001002';
   private static readonly CMOV_CARGO_CREDITO_CLIENTE = 602;
+  private readonly logger = new Logger(PvCotizacionesCierreService.name);
   private static readonly NDOC_BASE = 6000000;
   private static readonly FORMAS_CARGO_CTRL_CTAS = new Set([
     'CREDITO',
@@ -346,6 +348,52 @@ export class PvCotizacionesCierreService {
       });
 
       return result;
+    } catch (error) {
+      throw this.mapCloseError(error);
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async retryMb51(idfolRaw: string, user: JwtPayload) {
+    const idfol = this.normalizeIdfol(idfolRaw);
+    const opv = this.normalizeText(user?.username) || null;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+
+    try {
+      const ctx = await this.resolveContext(
+        queryRunner,
+        idfol,
+        user,
+        undefined,
+        false,
+        false, // Validamos estado manualmente para permitir PAGADO/MB51PROCES/TRANSMITIR
+      );
+      const estado = this.normalizeUpper(ctx.esta ?? '');
+      if (
+        estado !== 'PAGADO' &&
+        estado !== 'MB51PROCES' &&
+        estado !== 'TRANSMITIR'
+      ) {
+        throw new ConflictException(
+          `Reintento MB51 no permitido en estado ${ctx.esta ?? 'N/D'}. Solo PAGADO/MB51PROCES/TRANSMITIR.`,
+        );
+      }
+
+      const result = await this.executeMb51Transmission(queryRunner, {
+        idfol: ctx.idfol,
+        user: opv,
+      });
+
+      const estadoResult = this.normalizeUpper(ctx.esta ?? '') || 'PAGADO';
+      return {
+        ok: true,
+        idfol: ctx.idfol,
+        delta: result.delta,
+        afterCount: result.afterCount,
+        estado: estadoResult,
+      };
     } catch (error) {
       throw this.mapCloseError(error);
     } finally {
@@ -1775,7 +1823,7 @@ export class PvCotizacionesCierreService {
       idfol: string;
       user: string | null;
     },
-  ) {
+  ): Promise<{ delta: number; afterCount: number }> {
     const procedureName = 'dbo.sp_mb51_transmitir_folio';
     const exists = await this.procedureExists(executor, procedureName);
     if (!exists) {
@@ -1784,14 +1832,48 @@ export class PvCotizacionesCierreService {
       );
     }
 
-    await executor.query(
-      `
-      EXEC dbo.sp_mb51_transmitir_folio
-        @IDFOL = @0,
-        @USER = @1
-      `,
-      [input.idfol, input.user],
+    const before = await executor.query(
+      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202)`,
+      [input.idfol],
     );
+
+    try {
+      await executor.query(
+        `
+        EXEC dbo.sp_mb51_transmitir_folio
+          @IDFOL = @0,
+          @USER = @1
+        `,
+        [input.idfol, input.user],
+      );
+    } catch (err) {
+      this.logger.error(`MB51 transmit error for ${input.idfol}`, err as any);
+      throw err;
+    }
+
+    const after = await executor.query(
+      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202)`,
+      [input.idfol],
+    );
+
+    const beforeCount = Number(before?.[0]?.c ?? 0);
+    const afterCount = Number(after?.[0]?.c ?? 0);
+    const delta = afterCount - beforeCount;
+
+    if (afterCount === 0) {
+      const msg = `MB51 transmit completed but no rows inserted for ${input.idfol}. Revisa MB51_CONFLICT_LOG o CTOP en DAT_ART.`;
+      this.logger.warn(msg);
+      throw new ConflictException(msg);
+    }
+
+    if (delta <= 0) {
+      const msg = `MB51 transmit idempotent for ${input.idfol}: afterCount=${afterCount}, delta=${delta}.`;
+      this.logger.warn(msg);
+    } else {
+      this.logger.log(`MB51 transmit inserted ${delta} rows for ${input.idfol}`);
+    }
+
+    return { delta, afterCount };
   }
 
   private mapCloseError(error: unknown) {

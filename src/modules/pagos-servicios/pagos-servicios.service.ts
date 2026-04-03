@@ -46,17 +46,20 @@ export class PagosServiciosService {
 
   async listFolios(query: ListPsFoliosQueryDto, user: JwtPayload) {
     try {
-      const estadosPanelPermitidos = new Set([
-        'PENDIENTE',
-        'EDITANDO',
-        'PAGADO',
-      ]);
       const isAdmin = this.isAdmin(user);
       const actorSuc = this.normalize(user?.suc ?? '');
       const actorOpv = this.normalize(user?.username ?? '');
       const requestedSuc = this.normalize(query.suc ?? '');
       const requestedOpv = this.normalize(query.opv ?? '');
       const esta = this.normalize(query.esta ?? 'ALL').toUpperCase() || 'ALL';
+      const estadosPanelPermitidos = new Set([
+        'PENDIENTE',
+        'EDITANDO',
+        'PAGADO',
+      ]);
+      if (esta === 'CERRADO_PS') {
+        estadosPanelPermitidos.add('CERRADO_PS');
+      }
       const search = this.normalize(query.search ?? '');
 
       if (!isAdmin && actorSuc.length === 0) {

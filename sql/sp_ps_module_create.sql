@@ -2292,7 +2292,7 @@ BEGIN
     END;
 
     UPDATE dbo.PV_CTR_FOL_ASVR
-    SET ESTA = 'TRANSMITIR',
+    SET ESTA = 'CERRADO_PS',
         FCNM = GETDATE()
     WHERE IDFOL = @idfolNorm;
 
@@ -2310,7 +2310,7 @@ BEGIN
 
     SELECT
       @idfolNorm AS IDFOL,
-      'TRANSMITIR' AS ESTA,
+      'CERRADO_PS' AS ESTA,
       CAST(1 AS BIT) AS OK;
   END TRY
   BEGIN CATCH

@@ -52,6 +52,7 @@ Enlaces relacionados:
 - genera `NDOC` en transacción (lock + max), base `N6000001+`, usando `COL_LENGTH` para evitar errores cuando la columna falta.
 - valida suma de formas (`sum(impp)` <= total salvo efectivo con cambio) y referencias `REF_DETALLE.ESTATUS='PROCESADO'` usadas.
 - actualiza `PV_CTR_FOL_ASVR` (`ESTA='PAGADO'`, `IMPT`, `AUT='CA'|'VF'`), `PV_CTR_ORDS.ESTATUS=2` y ejecuta `dbo.sp_mb51_transmitir_folio` para stock MB51.
+- compatibilidad de homologación MB51 (2026-04): si existe trigger legacy que transforma `MB51PROCES` a `TRANSMITIR`, aplicar `sql/2026-04-03_mb51proceso_homologacion.sql` para conservar `MB51PROCES` en salida operativa.
 - sincronización VF: `sp_fact_sync_folio_vf` en transacción cuando `tipotran='VF'` y `REQF=1`; si no cumple, limpia cabecera/detalle en `FAC_SVR_SHAP/FACT_TICKET_SHP`.
 - `Tipofact='CREDITO'` si alguna forma `CREDITO`; de lo contrario `INDIVIDUAL`.
 - fecha de proceso actual para `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, cargos `DAT_CTRL_CTAS`.
@@ -82,6 +83,7 @@ Enlaces relacionados:
 - `src/modules/pagos-servicios/dto/*`
 - Script SQL:
 - `sql/sp_ps_module_create.sql` (catalogos `PV_DAT_PS` y `DAT_REF_GTO` + SPs `sp_ps_*`).
+- `sql/2026-04-03_ps_cerrado_ps_estado.sql` (agrega `CERRADO_PS` a homologación/check y migra cierres PS legacy en `TRANSMITIR`).
 - Endpoints:
 - `GET /ps/folios?suc&esta&search`
 - `POST /ps/folios`
@@ -108,7 +110,8 @@ Enlaces relacionados:
 - fecha de cierre se toma del sistema para `PV_CTR_FOL_FORM.FCN`, `PV_CTR_FOL_ASVR.FCNM` y movimientos `DAT_CTRL_CTAS`.
 - `CLSD` se resuelve con `DAT_CMOV.CMOV` (`RELACION=<UPC servicio>`, `TIPO='ABONO'`); sin mapeo se rechaza.
 - app mantiene formas en local hasta finalizar; botonería `Finalizar`/`Imprimir` en ancho completo.
-- formas no `EFECTIVO` requieren referencia/aut y no pueden exceder faltante; candado al quedar `PAGADO` lleva a `TRANSMITIR` vía `PATCH /pvctrfolasvr/:idfol`.
+- formas no `EFECTIVO` requieren referencia/aut y no pueden exceder faltante; candado al quedar `PAGADO` lleva a `CERRADO_PS` vía `PATCH /pvctrfolasvr/:idfol`.
+- compatibilidad PS (2026-04): backend/UI aceptan `TRANSMITIR` como estado cerrado legacy para folios históricos, pero el cierre operativo vigente de PS usa `CERRADO_PS`.
 - impresión PS: vouchers por forma no `EFECTIVO`, segundo PDF, línea de recorte `RESUMEN DE ORDS` / `ORDS`.
 - Panel PS: folios `PAGADO` abren directo pago.
 - Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen, pago reutiliza formas origen y exige misma forma para no `CREDITO/DEUDOR`, sincroniza facturación con `sp_fact_sync_folio_vf`, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.

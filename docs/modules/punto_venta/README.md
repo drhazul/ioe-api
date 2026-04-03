@@ -16,6 +16,7 @@ Enlaces relacionados:
 - `src/modules/pagos-servicios/dto/*`
 - Script SQL:
 - `sql/sp_ps_module_create.sql` (crea/siembra `PV_DAT_PS`, `DAT_REF_GTO` y SPs `sp_ps_*`).
+- `sql/2026-04-03_ps_cerrado_ps_estado.sql` (habilita estado `CERRADO_PS` para cierre operativo PS y migra folios legacy `TRANSMITIR` del módulo).
 - Endpoints:
 - `GET /ps/folios?suc&esta&search`
 - `POST /ps/folios`
@@ -46,10 +47,11 @@ Enlaces relacionados:
 - trazabilidad UI (app, 2026-03): el modal PS de formas excluye `CREDITO` y `DEUDOR`; para formas no `EFECTIVO`, el valor `aut` se asigna reutilizando `ref_detalle_page.dart` de cotizaciones y queda en campo de solo lectura.
 - trazabilidad UI (app, 2026-03): una forma distinta de `EFECTIVO` no puede superar el restante por pagar (`total - pagado`) antes de finalizar.
 - trazabilidad UI (app, 2026-03): en detalle PS, `Procesar servicio` se movió al AppBar.
-- trazabilidad UI (app, 2026-03): en detalle PS, servicios AD/AP/CR requieren cliente seleccionado (CLIEN != 1) y, si ESTA IN ('PAGADO','TRANSMITIR'), el body queda bloqueado y solo queda disponible la navegación de salida.
+- trazabilidad UI (app, 2026-03): en detalle PS, servicios AD/AP/CR requieren cliente seleccionado (CLIEN != 1) y, si ESTA IN ('PAGADO','CERRADO_PS','TRANSMITIR'), el body queda bloqueado y solo queda disponible la navegación de salida.
 - trazabilidad API (2026-03): `sp_ps_ticket_add_service` y capa Nest validan `AD/AP/CR` con cliente (`CLIEN > 1`) y devuelven `Seleccione Cliente` si no se cumple.
 - trazabilidad API/UI (2026-03): `GET /ps/clientes/:client/adeudos/:idFol/detalle` devuelve todos los registros `DAT_CTRL_CTAS` del folio para mostrarlos en popup tabular desde detalle PS.
-- trazabilidad UI (app, 2026-03): en pago PS, AppBar usa flecha mientras `ESTA != PAGADO`; en `PAGADO` cambia a candado para salida a `TRANSMITIR`. En panel PS, filas `PAGADO` navegan directo a `/ps/:idFol/pago`.
+- trazabilidad UI (app, 2026-03): en pago PS, AppBar usa flecha mientras `ESTA != PAGADO`; en `PAGADO` cambia a candado para salida a `CERRADO_PS`. En panel PS, filas `PAGADO` navegan directo a `/ps/:idFol/pago`.
+- compatibilidad PS (2026-04): backend/UI aceptan `TRANSMITIR` como estado cerrado legacy para folios históricos, pero el cierre operativo vigente de PS usa `CERRADO_PS`.
 - trazabilidad UI (app, 2026-03): en impresión de ticket PS, si existen formas no `EFECTIVO`, la app agrega al final voucher `SOPORTE RECEPCION PAGO` por cada forma no efectivo usando datos de `FORMAS_JSON`, totales y contexto del folio.
 - trazabilidad UI (app, 2026-03): el voucher PS incluye espacio en blanco para firma y renglón `Firma cliente` después de `FCN`.
 - trazabilidad UI (app, 2026-03): en PS, el voucher se imprime en un segundo PDF; al cerrar la vista previa del ticket principal, la app solicita confirmación y luego abre la vista previa del voucher.
@@ -208,6 +210,7 @@ Enlaces relacionados:
 - Tablas y campos que actualiza:
 - `PV_CTR_FOL_ASVR`: `ESTA='PAGADO'` al finalizar cierre (`MB51PROCES` se aplica después en `PATCH` desde frontend al salir), `IMPT=TOTAL`, `AUT='CA'|'VF'` (y `REQF`/campo equivalente si existe).
 - transmisión MB51/stock (2026-03): al finalizar cierre de cotización, backend ejecuta `dbo.sp_mb51_transmitir_folio` para insertar renglones en `DAT_MB51` y ajustar `DAT_ART.STOCK` por resumen de `ART+SUC`; el estado del folio se mantiene en `PAGADO`.
+- compatibilidad de homologación MB51 (2026-04): para ambientes con trigger legacy que convierte `MB51PROCES` a `TRANSMITIR`, ejecutar `sql/2026-04-03_mb51proceso_homologacion.sql` para conservar `MB51PROCES` como estado operativo de salida.
 - en `CP -> CA/VF`, `sp_pv_cotizacion_cerrar` genera nuevo `IDFOL` visible, conserva `IDFOLINICIAL` y religa `PV_TICKET_LOG`, `PV_CTR_ORDS` y `REF_DETALLE` al folio final dentro de la misma transacción.
 - `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`): insercion transaccional de formas definitivas (`IDF`, `IDFOL`, `FORM`, `IMPP`, `AUT`, ...). En `CREDITO/DEUDOR` guarda `AUT=IDFOL`. `IMPD` se persiste por forma aplicada (`IMPP-IMPC`; en no-efectivo coincide con `IMPP`).
 - sincronización facturación VF (2026-03): en cierre `tipotran='VF'`, `sp_pv_cotizacion_cerrar` exige e invoca `dbo.sp_fact_sync_folio_vf` dentro de la misma transacción para upsert de cabecera `FAC_SVR_SHAP` y rebuild de detalle `FACT_TICKET_SHP` del folio final.

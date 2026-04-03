@@ -13,7 +13,8 @@ export class ListPsFoliosQueryDto {
   suc?: string;
 
   @ApiPropertyOptional({
-    description: 'Estado a consultar: PENDIENTE | EDITANDO | PAGADO | ALL',
+    description:
+      'Estado a consultar: PENDIENTE | EDITANDO | PAGADO | CERRADO_PS | ALL',
   })
   @Transform(({ value }) => toTrimmedString(value))
   @IsOptional()
