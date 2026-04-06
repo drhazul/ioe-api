@@ -1,0 +1,24 @@
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER TRIGGER dbo.trg_fact_client_shp_preserve_suc_on_update
+ON dbo.FACT_CLIENT_SHP
+AFTER UPDATE
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  IF TRIGGER_NESTLEVEL() > 1 RETURN;
+  IF NOT UPDATE(SUC) RETURN;
+
+  UPDATE tgt
+     SET tgt.SUC = del.SUC
+  FROM dbo.FACT_CLIENT_SHP AS tgt
+  INNER JOIN inserted AS ins ON ins.IDC = tgt.IDC
+  INNER JOIN deleted AS del ON del.IDC = ins.IDC
+  WHERE ISNULL(LTRIM(RTRIM(CONVERT(varchar(20), ins.SUC))), '')
+        <> ISNULL(LTRIM(RTRIM(CONVERT(varchar(20), del.SUC))), '');
+END;
+GO

@@ -261,9 +261,7 @@ export class OrdenesTrabajoService {
   async getDetail(iordRaw: string, user: JwtPayload) {
     const iord = this.requireIord(iordRaw);
     const scope = await this.resolveSucScope(user, null);
-    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
     await this.assertOrdTypeAccessByIord(iord, user, scope);
-    await this.markAsEditandoIfNeeded(iord, roleCode, scope);
 
     const rows = await this.dataSource.query(
       `
@@ -315,10 +313,7 @@ export class OrdenesTrabajoService {
     const actor = this.auditActor(user);
     const commentsValue = this.normalizeText(dto.comentarios);
     const tipoValueRaw = this.normalizeUpper(dto.tipo);
-    const tipoValue =
-      !tipoValueRaw || tipoValueRaw === 'TALLADO' || tipoValueRaw === 'BISELADO'
-        ? tipoValueRaw || null
-        : null;
+    const tipoValue = tipoValueRaw ? this.normalizeOrdTipo(tipoValueRaw) : '';
     if (tipoValueRaw && !tipoValue) {
       throw new BadRequestException(
         'El tipo de ORD debe ser TALLADO o BISELADO',
@@ -339,6 +334,7 @@ export class OrdenesTrabajoService {
         laborValue,
         user,
         scope,
+        tipoValue || null,
       );
     }
     const rows = Array.isArray(dto.details) ? dto.details : [];
@@ -370,7 +366,10 @@ export class OrdenesTrabajoService {
       `
       UPDATE dbo.PV_CTR_ORDS
       SET
-        ESTSEGU = 3.1,
+        ESTSEGU = CASE
+          WHEN TRY_CONVERT(FLOAT, ESTSEGU) = 2 THEN 3.1
+          ELSE ESTSEGU
+        END,
         ESTATUS = 2,
         LABOR = CASE WHEN @1 IS NULL THEN LABOR ELSE @1 END,
         COMAD = CASE WHEN @2 IS NULL THEN COMAD ELSE LEFT(@2, 2000) END,
@@ -378,7 +377,7 @@ export class OrdenesTrabajoService {
         FCNMOD = GETDATE()
       WHERE IORD = @0
       `,
-      [iord, laborValue, commentsValue, tipoValue],
+      [iord, laborValue, commentsValue, tipoValue || null],
     );
 
     if (rows.length) {
@@ -412,7 +411,7 @@ export class OrdenesTrabajoService {
     await this.auditMutation('ORD_GUARDAR_DETALLE', user, ip, {
       iord,
       labor: laborValue,
-      tipo: tipoValue,
+      tipo: tipoValue || null,
       comentarios: commentsValue,
       rowsUpdated: rows.length,
       actor,
@@ -674,8 +673,8 @@ export class OrdenesTrabajoService {
       auditAction: 'ORD_REGRESAR_INCIDENCIA_LOTE',
       fallbackError:
         'No se pudo regresar por incidencia. Verifique estado, motivo y permisos.',
-      singleMessage: '1 ORD cambiada a estatus 9.1',
-      pluralMessagePrefix: 'ORDs cambiadas a estatus 9.1',
+      singleMessage: '1 ORD actualizada con incidencia (estatus 9)',
+      pluralMessagePrefix: 'ORDs actualizadas con incidencia (estatus 9)',
       notFoundMessage:
         'No fue posible procesar las ORDs para regreso por incidencia',
       extraSqlParams: '@TIPOM=@1,',
@@ -704,8 +703,10 @@ export class OrdenesTrabajoService {
       auditAction: 'ORD_REGRESAR_TIENDA_LOTE',
       fallbackError:
         'No se pudo regresar a tienda. Verifique estado y permisos.',
-      singleMessage: '1 ORD cambiada a estatus 10',
-      pluralMessagePrefix: 'ORDs cambiadas a estatus 10',
+      singleMessage:
+        '1 ORD recibida en tienda (estatus 9.1/9.2 según TIPOM, o 10 sin incidencia)',
+      pluralMessagePrefix:
+        'ORDs recibidas en tienda (estatus 9.1/9.2 según TIPOM, o 10 sin incidencia)',
       notFoundMessage:
         'No fue posible procesar las ORDs para regresar a tienda',
     });
@@ -1688,7 +1689,7 @@ export class OrdenesTrabajoService {
     if (this.isAdmin(user)) {
       if (panelMode === 'anulados') return [4];
       if (panelMode === 'entregadas') return [11];
-      return [2, 3, 3.1, 5, 6, 7, 8, 9, 9.1, 9.2, 10, 12];
+      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 10, 12];
     }
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
@@ -1700,10 +1701,10 @@ export class OrdenesTrabajoService {
     }
 
     if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER') {
-      return [2, 3, 3.1, 5, 6, 7, 8, 9, 9.1, 9.2, 10, 12];
+      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 10, 12];
     }
     if (roleCode === 'ANALISTA_ORD' || roleCode === 'ANALISTA') {
-      return [2, 3, 3.1, 5, 6, 7, 8, 9, 9.1, 9.2, 10, 12];
+      return [2, 3, 3.1, 5, 9.1, 9.2, 10, 12];
     }
     if (
       roleCode === 'ENC_MAQUILA' ||
@@ -1711,7 +1712,7 @@ export class OrdenesTrabajoService {
       roleCode === 'ENC_BISEL' ||
       roleCode === 'ENCARGADO_BISELADO'
     ) {
-      return [5, 7, 8, 9, 9.1, 9.2];
+      return [7, 8, 9];
     }
     return [];
   }
@@ -1773,6 +1774,7 @@ export class OrdenesTrabajoService {
   ) {
     if (panelMode !== 'operativo') return false;
     if (this.isAdmin(user)) return true;
+
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return (
       roleCode === 'JEF_TALLER' ||
@@ -1859,7 +1861,8 @@ export class OrdenesTrabajoService {
     scope: SucScope,
     sucOverride?: string | null,
   ) {
-    const requestedSuc = this.normalizeUpper(sucOverride ?? scope.requestedSuc);
+    const requestedSucRaw = this.normalizeText(sucOverride ?? scope.requestedSuc);
+    const requestedSuc = requestedSucRaw ? requestedSucRaw.toUpperCase() : null;
     const rows = await this.dataSource.query(
       `
       WITH raw AS (
@@ -1928,7 +1931,8 @@ export class OrdenesTrabajoService {
   }
 
   private async resolveLaboratoriosLegacy(sucOverride?: string | null) {
-    const requestedSuc = this.normalizeUpper(sucOverride);
+    const requestedSucRaw = this.normalizeText(sucOverride);
+    const requestedSuc = requestedSucRaw ? requestedSucRaw.toUpperCase() : null;
     const rows = await this.dataSource.query(
       `
       WITH raw AS (
@@ -1968,8 +1972,12 @@ export class OrdenesTrabajoService {
         const id = this.toInt((row as Record<string, unknown>)['ID']) ?? 0;
         const lab =
           this.normalizeText((row as Record<string, unknown>)['LAB']) ?? '';
-        const tipoLab =
+        const tipoLabRaw =
           this.normalizeText((row as Record<string, unknown>)['TIPOLAB']) ?? '';
+        const tipoLab =
+          this.normalizeOrdTipo(tipoLabRaw) ||
+          this.normalizeUpper(tipoLabRaw) ||
+          '';
         const suc =
           this.normalizeText((row as Record<string, unknown>)['SUC']) ?? '';
         if (id <= 0 || !lab) return null;
@@ -1988,14 +1996,17 @@ export class OrdenesTrabajoService {
     labor: number,
     user: JwtPayload,
     scope: SucScope,
+    ordTipoOverride?: string | null,
   ) {
     const roleCode = await this.resolveRoleCode(user);
     const ord = await this.fetchOrdLaboratorioContext(iord, scope, roleCode);
-    this.assertOrdTipoMatchesRole(roleCode, ord.tipo, iord);
+    const effectiveTipo =
+      this.normalizeOrdTipo(ordTipoOverride) || this.normalizeOrdTipo(ord.tipo);
+    this.assertOrdTipoMatchesRole(roleCode, effectiveTipo || ord.tipo, iord);
     const laboratorios = await this.resolveLaboratorios(scope, ord.suc);
-    if (this.isLaboratorioDisponible(laboratorios, labor, ord.tipo)) return;
+    if (this.isLaboratorioDisponible(laboratorios, labor, effectiveTipo)) return;
     throw new BadRequestException(
-      `El laboratorio ${labor} no está habilitado para la sucursal ${ord.suc || 'N/D'} y tipo ${ord.tipo || 'N/D'} de la ORD ${iord}.`,
+      `El laboratorio ${labor} no está habilitado para la sucursal ${ord.suc || 'N/D'} y tipo ${effectiveTipo || ord.tipo || 'N/D'} de la ORD ${iord}.`,
     );
   }
 
@@ -2046,11 +2057,13 @@ export class OrdenesTrabajoService {
     labor: number,
     tipoRaw: string,
   ) {
-    const tipo = this.normalizeUpper(tipoRaw);
+    const tipo = this.normalizeOrdTipo(tipoRaw);
     return laboratorios.some(
       (item) =>
         item.id === labor &&
-        (!tipo || this.normalizeUpper(item.tipoLab) === tipo),
+        (!tipo ||
+          !this.normalizeOrdTipo(item.tipoLab) ||
+          this.normalizeOrdTipo(item.tipoLab) === tipo),
     );
   }
 
@@ -2087,7 +2100,9 @@ export class OrdenesTrabajoService {
     return {
       iord: this.normalizeUpper(row.IORD ?? iord),
       suc: this.normalizeUpper(row.SUC ?? ''),
-      tipo: this.normalizeUpper(row.TIPO ?? ''),
+      tipo:
+        this.normalizeOrdTipo(row.TIPO ?? '') ||
+        this.normalizeUpper(row.TIPO ?? ''),
     };
   }
 
@@ -2140,7 +2155,9 @@ export class OrdenesTrabajoService {
     return records.map((row) => ({
       iord: this.normalizeUpper(row.IORD ?? ''),
       suc: this.normalizeUpper(row.SUC ?? ''),
-      tipo: this.normalizeUpper(row.TIPO ?? ''),
+      tipo:
+        this.normalizeOrdTipo(row.TIPO ?? '') ||
+        this.normalizeUpper(row.TIPO ?? ''),
     }));
   }
 
@@ -2291,40 +2308,6 @@ export class OrdenesTrabajoService {
     return allowed;
   }
 
-  private async markAsEditandoIfNeeded(
-    iord: string,
-    roleCodeRaw: string,
-    scope: SucScope,
-  ) {
-    const roleCode = this.normalizeUpper(roleCodeRaw);
-    if (roleCode !== 'ANALISTA_ORD' && roleCode !== 'ANALISTA') return;
-
-    await this.dataSource.query(
-      `
-      UPDATE o
-      SET
-        o.ESTSEGU = 3.1,
-        o.ESTATUS = 2,
-        o.FCNMOD = GETDATE()
-      FROM dbo.PV_CTR_ORDS o
-      ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
-      WHERE o.IORD = @0
-        AND TRY_CONVERT(FLOAT, o.ESTSEGU) = 3
-        AND TRY_CONVERT(INT, o.ESTATUS) = 2
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
-        AND ${this.buildOrdRequestedSucSql('o', '@5')}
-      `,
-      [
-        iord,
-        scope.isAdmin ? 1 : 0,
-        scope.allowedSucsCsv,
-        roleCode,
-        scope.homeSuc,
-        scope.requestedSuc,
-      ],
-    );
-  }
-
   private canEditOrdDetail(user: JwtPayload, roleCodeRaw: string) {
     if (this.isAdmin(user)) return true;
     const roleCode = this.normalizeUpper(roleCodeRaw);
@@ -2344,6 +2327,14 @@ export class OrdenesTrabajoService {
       roleCode === 'ANALISTA_ORD' ||
       roleCode === 'ANALISTA'
     );
+  }
+
+  private normalizeOrdTipo(value: unknown) {
+    const tipo = this.normalizeUpper(value);
+    if (!tipo) return '';
+    if (tipo === 'TALLADO' || tipo === 'TALLER') return 'TALLADO';
+    if (tipo === 'BISELADO' || tipo === 'BISEL') return 'BISELADO';
+    return '';
   }
 
   private resolveOrdTipoScope(roleCodeRaw: string) {
@@ -2392,7 +2383,9 @@ export class OrdenesTrabajoService {
     if (!row) {
       throw new NotFoundException(`No existe ORD ${iord} o no tiene acceso`);
     }
-    const actualTipo = this.normalizeUpper(row.TIPO ?? '');
+    const actualTipo =
+      this.normalizeOrdTipo(row.TIPO ?? '') ||
+      this.normalizeUpper(row.TIPO ?? '');
     if (actualTipo === requiredTipo) return;
 
     throw new ForbiddenException(
@@ -2461,7 +2454,7 @@ export class OrdenesTrabajoService {
   ) {
     const requiredTipo = this.resolveOrdTipoScope(roleCodeRaw);
     if (!requiredTipo) return;
-    const actualTipo = this.normalizeUpper(ordTipoRaw);
+    const actualTipo = this.normalizeOrdTipo(ordTipoRaw);
     if (actualTipo === requiredTipo) return;
 
     throw new ForbiddenException(
@@ -2519,7 +2512,7 @@ export class OrdenesTrabajoService {
     }
 
     const invalid = records
-      .filter((row) => this.normalizeUpper(row.TIPO ?? '') !== requiredTipo)
+      .filter((row) => this.normalizeOrdTipo(row.TIPO ?? '') !== requiredTipo)
       .map((row) => this.normalizeUpper(row.IORD ?? ''))
       .filter((value) => value.length > 0);
     if (!invalid.length) return;

@@ -7,6 +7,11 @@ Enlaces relacionados:
 - AGENTS de este módulo: `docs/modules/punto_venta/AGENTS.md`
 - Otros módulos: `docs/modules/base_modulos/README.md`, `docs/modules/core_seguridad/README.md`, `docs/modules/ordenes_trabajo/README.md`
 
+## Facturación: edición fiscal de cliente (2026-04-06)
+- Endpoint involucrado: `PATCH /factclientshp/:id`.
+- Regla backend: la edición fiscal conserva la `SUC` original de `FACT_CLIENT_SHP` (no se reasigna por contexto JWT).
+- Refuerzo DB: `sql/2026-04-06_fact_client_shp_preserve_suc_update.sql` crea/actualiza trigger `dbo.trg_fact_client_shp_preserve_suc_on_update`.
+
 ## Pago de Servicios PS (nuevo flujo 2026-03)
 
 - Modulo NestJS:
@@ -129,13 +134,13 @@ Enlaces relacionados:
 
 - Flujo frontend: confirmacion de alta y luego modal de busqueda/seleccion de cliente por sucursal del usuario.
 - Endpoints usados por la app:
-- `GET /factclientshp` (listado de clientes; app filtra por SUC).
+- `GET /factclientshp?suc=<SUC>` (listado de clientes de la sucursal activa del panel).
 - compat admin multi-sucursal (2026-03-21): `FactClientShpService.isAdmin` reconoce `username='ADMIN'` y/o `ADMIN_ROLE_IDS`/`ADMIN_NIVELES`; evita limitar `GET /factclientshp` a `user.suc` cuando admin selecciona otra sucursal en paneles PV.
-- `POST /pvctrfolasvr/auto` (creacion de folio).
+- `POST /pvctrfolasvr/auto` (creacion de folio `CP`; admite `SUC/OPV` opcionales para admin y valida que no-admin no creen fuera de su contexto JWT).
 - `PATCH /pvctrfolasvr/:idfol` (asignacion de `CLIEN` al folio creado).
 - Correccion backend (2026-02): `PV_CTR_FOL_ASVR.CLIEN` se mapea como `float` en TypeORM para evitar `500 EPARAM` cuando el cliente excede el rango `int32`.
 - Compatibilidad facturación (2026-03): `FAC_SVR_SHAP.CLIEN` se ajusta a `FLOAT` para alinearlo con `PV_CTR_FOL_ASVR.CLIEN` y permitir IDs grandes (ej. `10460540001`) sin truncamiento/overflow.
-- No hay cambios de contrato API en este ajuste.
+- Ajuste de contrato backward-compatible: `POST /pvctrfolasvr/auto` mantiene el payload anterior y agrega `SUC/OPV` opcionales.
 
 ## Edicion de precio PV en detalle de cotizacion
 

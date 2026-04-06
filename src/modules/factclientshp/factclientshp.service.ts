@@ -451,11 +451,8 @@ export class FactClientShpService {
     if (dto.ESTATUS !== undefined) partial.ESTATUS = dto.ESTATUS ?? null;
     if (dto.DATVAL !== undefined) partial.DATVAL = dto.DATVAL ?? null;
     if (dto.MOD !== undefined) partial.MOD = dto.MOD ?? null;
-    if (isAdmin) {
-      if (dto.SUC !== undefined) partial.SUC = dto.SUC ?? null;
-    } else {
-      partial.SUC = suc;
-    }
+    // Regla de facturación: al editar datos fiscales se conserva la SUC original.
+    // No se permite reasignar sucursal en updates de FACT_CLIENT_SHP.
     if (dto.DESCUENTOAPLI !== undefined)
       partial.DESCUENTOAPLI = dto.DESCUENTOAPLI ?? null;
 

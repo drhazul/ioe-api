@@ -56,5 +56,7 @@ Enlaces relacionados:
 - trazabilidad UI/Home (app, 2026-03-24): los accesos Home abren páginas standalone (no el panel) replicando la mecánica de validación/captura de los popups del panel; backend reutiliza los mismos endpoints.
 - trazabilidad UI/Home (app, 2026-03-24): `Entregar` directa captura firma digital y usa `POST /ordenes-trabajo/:iord/entregar` por cada ORD; sin cambios backend/SQL.
 - trazabilidad API/UI ORDs (2026-03-30): `OrdenesTrabajoService.getDetail` reordena `details` en memoria como defensa extra aunque SQL ya venga ordenado.
+- trazabilidad API/UI ORDs (2026-04-05): para `GET /ordenes-trabajo/asignar/colaboradores`, el contrato se mantiene (`suc` por query); la corrección de sucursal para admin se implementa en frontend enviando la sucursal seleccionada del panel, sin cambios de SP.
+- fix incidencia ORDs (2026-04-05): `sp_ordenes_trabajo_regresar_incidencia_lote` restituye parámetro `@TIPOM` (motivo `DAT_ORD_TMOV`) y persiste `PV_CTR_ORDS.TIPOM` en transición `9 -> 9.1`; corrige error SQL de argumentos al ejecutar `POST /ordenes-trabajo/regresar-incidencia/lote`.
 - catálogo estados ORD (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT`; script `sql/2026-03-22_dat_est_ord_esta_float.sql`.
 

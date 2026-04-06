@@ -7,6 +7,10 @@ Enlaces relacionados:
 - README de este módulo: `docs/modules/punto_venta/README.md`
 - Otros AGENTS: `docs/modules/base_modulos/AGENTS.md`, `docs/modules/core_seguridad/AGENTS.md`, `docs/modules/ordenes_trabajo/AGENTS.md`
 
+## Facturación: edición fiscal de cliente (2026-04-06)
+- `PATCH /factclientshp/:id` no debe cambiar `SUC` en updates de datos fiscales.
+- El backend ignora reasignación de sucursal en update y base de datos refuerza la regla con trigger `trg_fact_client_shp_preserve_suc_on_update`.
+
 ## Punto de venta: cierre transaccional de cotizacion (implementado)
 - Controller/Service:
 - `src/modules/pvctrfolasvr/pv-cotizaciones-cierre.controller.ts`
@@ -118,11 +122,11 @@ Enlaces relacionados:
 
 ## Punto de venta: alta de cotizacion desde panel (trazabilidad app)
 - Flujo frontend: confirmacion de alta -> modal de cliente filtrado por SUC.
-- `GET /factclientshp` lista clientes; para admin multi-sucursal no debe limitar por `user.suc` (usa reglas `isAdmin` `ADMIN_ROLE_IDS/ADMIN_NIVELES`).
-- `POST /pvctrfolasvr/auto` crea folio `CP`.
+- `GET /factclientshp?suc=<SUC>` lista clientes por la sucursal activa del panel; para admin multi-sucursal no debe limitar por `user.suc` (usa reglas `isAdmin` `ADMIN_ROLE_IDS/ADMIN_NIVELES`).
+- `POST /pvctrfolasvr/auto` crea folio `CP`; para admin permite recibir `SUC/OPV` explícitos del panel y para no-admin valida que no puedan operar fuera de su contexto JWT.
 - `PATCH /pvctrfolasvr/:idfol` asigna `CLIEN`.
 - `PV_CTR_FOL_ASVR.CLIEN` y `FAC_SVR_SHAP.CLIEN` se mapearon a `FLOAT` para soportar IDs grandes (> int32) y evitar `EPARAM`.
-- Sin cambios de contrato API.
+- Contrato API compatible hacia atrás: `POST /pvctrfolasvr/auto` mantiene payload previo y agrega `SUC/OPV` opcionales.
 
 ## Estado de Cajón OPV (implementado 2026-03)
 - Módulo NestJS:

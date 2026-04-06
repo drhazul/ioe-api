@@ -16,6 +16,9 @@
 - `src/modules/`: módulos funcionales por dominio.
 - `datart` (2026-04): `PATCH /datart/:suc/:art/:upc` permite editar `UPC` y rechaza duplicados de `UPC` asignados a otro `ART` dentro de la misma sucursal.
 - Punto de venta / Pago de Servicios (2026-04): la salida operativa de folios pagados usa `ESTA='CERRADO_PS'` (compatibilidad de lectura para históricos en `TRANSMITIR`).
+- Facturación / Cliente fiscal (2026-04-06): en `PATCH /factclientshp/:id` la `SUC` del cliente se mantiene inmutable durante updates; no se sobreescribe por `user.suc` ni por payload de edición fiscal.
+- Ordenes de trabajo / Asignar (2026-04-05): `GET /ordenes-trabajo/asignar/colaboradores` mantiene contrato con `suc` por query; la corrección de sucursal para admin se resuelve en frontend enviando la sucursal seleccionada del panel (sin cambio de SP).
+- Ordenes de trabajo / Incidencia (2026-04-05): se corrigió en DB `sp_ordenes_trabajo_regresar_incidencia_lote` para incluir `@TIPOM` y persistir `PV_CTR_ORDS.TIPOM`; elimina error de “too many arguments specified” en `POST /ordenes-trabajo/regresar-incidencia/lote`.
 
 ## Documentación por módulos
 - Base de módulos: `docs/modules/base_modulos/AGENTS.md` (README: `docs/modules/base_modulos/README.md`)

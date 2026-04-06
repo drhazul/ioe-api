@@ -338,13 +338,45 @@ export class PvCtrFolAsvrService {
   }
 
   async createAuto(dto: CreatePvCtrFolAsvrAutoDto, user: JwtPayload) {
-    const suc = (user?.suc ?? '').trim();
-    if (!suc) throw new ForbiddenException('Usuario sin sucursal');
+    const isAdmin = this.isAdmin(user);
+    const actorSuc = this.normalizeText(user?.suc ?? '');
+    const actorOpv =
+      this.normalizeText(user?.username ?? '') ||
+      this.normalizeText(String(user?.sub ?? ''));
 
-    const opv = (user?.username ?? '').trim() || String(user?.sub ?? '');
+    const requestedSuc = this.normalizeText(dto?.SUC ?? '');
+    const requestedOpv = this.normalizeText(dto?.OPV ?? '');
+    const suc = requestedSuc || actorSuc;
+    const opv = requestedOpv || actorOpv;
+
+    if (!isAdmin && actorSuc.length === 0) {
+      throw new ForbiddenException('Usuario sin sucursal');
+    }
+    if (!isAdmin && actorOpv.length === 0) {
+      throw new BadRequestException('OPV requerida');
+    }
+    if (
+      !isAdmin &&
+      requestedSuc &&
+      this.normalizeUpper(requestedSuc) !== this.normalizeUpper(actorSuc)
+    ) {
+      throw new ForbiddenException(
+        'No autorizado para crear cotizaciones en otra sucursal',
+      );
+    }
+    if (
+      !isAdmin &&
+      requestedOpv &&
+      this.normalizeUpper(requestedOpv) !== this.normalizeUpper(actorOpv)
+    ) {
+      throw new ForbiddenException(
+        'No autorizado para crear cotizaciones con otro OPV',
+      );
+    }
+    if (!suc) throw new ForbiddenException('Usuario sin sucursal');
     if (!opv) throw new BadRequestException('OPV requerida');
 
-    const ter = (dto?.TER ?? '').trim() || null;
+    const ter = this.normalizeText(dto?.TER ?? '') || null;
 
     let result: any[];
     try {
