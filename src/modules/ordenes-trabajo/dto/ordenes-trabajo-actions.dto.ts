@@ -6,6 +6,7 @@ import {
   IsArray,
   IsBoolean,
   IsDefined,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -64,6 +65,13 @@ export class CambioMaterialDto {
   @Length(3, 255)
   motivo!: string;
 
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  motr?: number;
+
   @ApiPropertyOptional({ example: 3 })
   @IsOptional()
   @Type(() => Number)
@@ -75,6 +83,13 @@ export class CambioMaterialDto {
   @IsString()
   @Length(0, 255)
   docDif?: string;
+
+  @ApiPropertyOptional({ example: 1, enum: [0.5, 1] })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @IsIn([0.5, 1])
+  ctdCM?: number;
 }
 
 export class MermaOrdDto {
@@ -89,11 +104,94 @@ export class MermaOrdDto {
   @Length(3, 255)
   motivo!: string;
 
+  @ApiPropertyOptional({ example: 10 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  motr?: number;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  crearNuevaOrd?: boolean;
+
+  @ApiPropertyOptional({ example: 'ART-NUEVO-001' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  artNuevo?: string;
+
+  @ApiPropertyOptional({ example: 1, enum: [0.5, 1] })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @IsIn([0.5, 1])
+  ctdCM?: number;
+}
+
+export class CambioMermaContextDto {
+  @ApiProperty({ example: 1, enum: [1, 2] })
+  @Type(() => Number)
+  @IsNumber()
+  @IsIn([1, 2])
+  tipo!: number;
+}
+
+export class PrepararCambioMermaDto {
+  @ApiProperty({ example: 1, enum: [1, 2] })
+  @Type(() => Number)
+  @IsNumber()
+  @IsIn([1, 2])
+  tipo!: number;
+
+  @ApiPropertyOptional({ example: 1, enum: [0.5, 1] })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @IsIn([0.5, 1])
+  ctdCM?: number;
+}
+
+export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto {
+  @ApiPropertyOptional({ example: 'ART-NUEVO-001' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  artNuevo?: string;
+
+  @ApiPropertyOptional({ example: 'Cambio por graduación especial' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  motivo?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  motr?: number;
+
+  @ApiPropertyOptional({ example: 3 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  labor?: number;
+
+  @ApiPropertyOptional({ example: 'DIF-ORD-20260322-001' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  docDif?: string;
+
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
   crearNuevaOrd?: boolean;
 }
+
+export class CrearCambioMermaDto extends PrepararCambioMermaDto {}
 
 export class ScanOrdDto {
   @ApiProperty({ example: 'IORD-20260322-001' })

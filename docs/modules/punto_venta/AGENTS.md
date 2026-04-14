@@ -9,7 +9,7 @@ Enlaces relacionados:
 
 ## Facturación: edición fiscal de cliente (2026-04-06)
 - `PATCH /factclientshp/:id` no debe cambiar `SUC` en updates de datos fiscales.
-- El backend ignora reasignación de sucursal en update y base de datos refuerza la regla con trigger `trg_fact_client_shp_preserve_suc_on_update`.
+- El backend ignora reasignación de sucursal en update (sin trigger de reversa, para permitir cambios manuales controlados en BD).
 
 ## Punto de venta: cierre transaccional de cotizacion (implementado)
 - Controller/Service:
@@ -55,7 +55,7 @@ Enlaces relacionados:
 - compatibilidad columnas: usa `CMOV` o `CLSD`; llena `FCND/RTXT` si existen.
 - genera `NDOC` en transacción (lock + max), base `N6000001+`, usando `COL_LENGTH` para evitar errores cuando la columna falta.
 - valida suma de formas (`sum(impp)` <= total salvo efectivo con cambio) y referencias `REF_DETALLE.ESTATUS='PROCESADO'` usadas.
-- actualiza `PV_CTR_FOL_ASVR` (`ESTA='PAGADO'`, `IMPT`, `AUT='CA'|'VF'`), `PV_CTR_ORDS.ESTATUS=2` y ejecuta `dbo.sp_mb51_transmitir_folio` para stock MB51.
+- actualiza `PV_CTR_FOL_ASVR` (`ESTA='PAGADO'`, `IMPT`, `AUT='CA'|'VF'`), `PV_CTR_ORDS.ESTATUS=2`, sincroniza `PV_CTR_ORDS.RQFAC` con `REQF/RQFAC` del folio y ejecuta `dbo.sp_mb51_transmitir_folio` para stock MB51.
 - compatibilidad de homologación MB51 (2026-04): si existe trigger legacy que transforma `MB51PROCES` a `TRANSMITIR`, aplicar `sql/2026-04-03_mb51proceso_homologacion.sql` para conservar `MB51PROCES` en salida operativa.
 - sincronización VF: `sp_fact_sync_folio_vf` en transacción cuando `tipotran='VF'` y `REQF=1`; si no cumple, limpia cabecera/detalle en `FAC_SVR_SHAP/FACT_TICKET_SHP`.
 - `Tipofact='CREDITO'` si alguna forma `CREDITO`; de lo contrario `INDIVIDUAL`.

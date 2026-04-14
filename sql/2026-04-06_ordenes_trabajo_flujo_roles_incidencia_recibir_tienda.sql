@@ -487,8 +487,8 @@ BEGIN
     UPDATE o
     SET
       o.ESTSEGU = CASE
-        WHEN TRY_CONVERT(INT, o.TIPOM) = 1 THEN 9.2
-        WHEN TRY_CONVERT(INT, o.TIPOM) = 2 THEN 9.1
+        WHEN TRY_CONVERT(INT, o.TIPOM) = 1 THEN 9.1
+        WHEN TRY_CONVERT(INT, o.TIPOM) = 2 THEN 9.2
         ELSE 10
       END,
       o.ESTATUS = 2,

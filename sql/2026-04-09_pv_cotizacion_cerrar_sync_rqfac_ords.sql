@@ -1,3 +1,9 @@
+/*
+  2026-04-09
+  Fix cierre cotización: sincronizar PV_CTR_ORDS.RQFAC al cerrar cotización.
+  Correctivo histórico: alinear transmitidos con REQF/RQFAC de folio.
+*/
+GO
 CREATE OR ALTER PROCEDURE dbo.sp_pv_cotizacion_cerrar
   @IDFOL NVARCHAR(255),
   @SUC NVARCHAR(255) = NULL,
@@ -835,5 +841,40 @@ BEGIN
     THROW;
   END CATCH
 END;
-GO
 
+
+GO
+PRINT 'Iniciando correctivo historico RQFAC en PV_CTR_ORDS...';
+
+DECLARE @reqfExpr NVARCHAR(64) = N'0';
+IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'REQF') IS NOT NULL
+  SET @reqfExpr = N'ISNULL(TRY_CONVERT(INT, f.REQF), 0)';
+ELSE IF COL_LENGTH('dbo.PV_CTR_FOL_ASVR', 'RQFAC') IS NOT NULL
+  SET @reqfExpr = N'ISNULL(TRY_CONVERT(INT, f.RQFAC), 0)';
+
+DECLARE @sql NVARCHAR(MAX) = N'
+;WITH folio_latest AS (
+  SELECT
+    UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '''')))) AS IDFOL_NORM,
+    ' + @reqfExpr + N' AS REQF_VALUE,
+    ROW_NUMBER() OVER (
+      PARTITION BY UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, ''''))))
+      ORDER BY ISNULL(f.FCNM, f.FCN) DESC
+    ) AS RN
+  FROM dbo.PV_CTR_FOL_ASVR f
+)
+UPDATE o
+SET
+  o.RQFAC = fl.REQF_VALUE,
+  o.FCNMOD = GETDATE()
+FROM dbo.PV_CTR_ORDS o
+INNER JOIN folio_latest fl
+  ON fl.RN = 1
+ AND UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '''')))) = fl.IDFOL_NORM
+WHERE TRY_CONVERT(INT, o.ESTATUS) = 2
+  AND ISNULL(TRY_CONVERT(INT, o.RQFAC), 0) <> fl.REQF_VALUE;
+
+SELECT @@ROWCOUNT AS filas_actualizadas;';
+
+EXEC sys.sp_executesql @sql;
+GO

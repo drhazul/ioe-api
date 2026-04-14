@@ -1338,13 +1338,29 @@ export class PvCotizacionesCierreService {
   }
 
   private async updateOrdenesStatus(executor: SqlExecutor, idfol: string) {
+    const columns = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
+    const rqfacColumn = this.pickFirstExistingColumn(columns, ['REQF', 'RQFAC']);
+    let rqfac = 0;
+    if (rqfacColumn) {
+      const folioRows = await executor.query(
+        `
+        SELECT TOP 1 ISNULL(TRY_CONVERT(INT, [${rqfacColumn}]), 0) AS RQFAC
+        FROM dbo.PV_CTR_FOL_ASVR
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@0, ''))))
+        ORDER BY ISNULL(FCNM, FCN) DESC
+        `,
+        [idfol],
+      );
+      rqfac = this.toInt((folioRows?.[0] ?? {})['RQFAC']) ?? 0;
+    }
+
     await executor.query(
       `
       UPDATE dbo.PV_CTR_ORDS
-      SET ESTATUS = @1
+      SET ESTATUS = @1, RQFAC = @2
       WHERE IDFOL = @0
       `,
-      [idfol, 2],
+      [idfol, 2, rqfac],
     );
   }
 

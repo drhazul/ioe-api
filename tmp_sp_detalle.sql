@@ -1,0 +1,74 @@
+
+CREATE   PROCEDURE dbo.sp_ordenes_trabajo_detalle
+  @IORD NVARCHAR(255),
+  @IS_ADMIN BIT = 0,
+  @ALLOWED_SUCS NVARCHAR(MAX) = NULL,
+  @SUC NVARCHAR(10) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @allowed TABLE (SUC NVARCHAR(10) PRIMARY KEY);
+  INSERT INTO @allowed (SUC)
+  SELECT DISTINCT UPPER(LTRIM(RTRIM(value)))
+  FROM STRING_SPLIT(ISNULL(@ALLOWED_SUCS, ''), ',')
+  WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> '';
+
+  DECLARE @headerJson NVARCHAR(MAX);
+  DECLARE @detailsJson NVARCHAR(MAX);
+
+  SELECT @headerJson = (
+    SELECT TOP 1
+      o.*,
+      e.TIPO AS ESTSEGU_DESC
+    FROM dbo.PV_CTR_ORDS o
+    LEFT JOIN dbo.DAT_EST_ORD e
+      ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, o.ESTSEGU)
+    LEFT JOIN dbo.DAT_LAB lab
+      ON TRY_CONVERT(INT, lab.ID) = TRY_CONVERT(INT, o.LABOR)
+    WHERE o.IORD = @IORD
+      AND (
+        @SUC IS NULL
+        OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@SUC)
+        OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) = UPPER(@SUC)
+      )
+      AND (
+        @IS_ADMIN = 1
+        OR NOT EXISTS (SELECT 1 FROM @allowed)
+        OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (SELECT SUC FROM @allowed)
+        OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) IN (SELECT SUC FROM @allowed)
+      )
+    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+  );
+
+  IF @headerJson IS NULL
+  BEGIN
+    SELECT
+      CAST(NULL AS NVARCHAR(MAX)) AS HEADER_JSON,
+      CAST('[]' AS NVARCHAR(MAX)) AS DETAILS_JSON;
+    RETURN;
+  END;
+
+  SELECT @detailsJson = (
+    SELECT
+      d.*
+    FROM dbo.PV_CTR_ORDS_DET d
+    WHERE d.IORD = @IORD
+    ORDER BY
+      CASE UPPER(LTRIM(RTRIM(ISNULL(d.JOB, ''))))
+        WHEN 'OD' THEN 0
+        WHEN 'OI' THEN 1
+        WHEN 'ADD' THEN 2
+        ELSE 3
+      END,
+      CASE WHEN TRY_CONVERT(BIGINT, d.IORDP) IS NULL THEN 1 ELSE 0 END,
+      TRY_CONVERT(BIGINT, d.IORDP),
+      d.ART
+    FOR JSON PATH
+  );
+
+  SELECT
+    @headerJson AS HEADER_JSON,
+    ISNULL(@detailsJson, '[]') AS DETAILS_JSON;
+END;
+

@@ -1,4 +1,4 @@
-CREATE OR ALTER PROCEDURE dbo.sp_pv_cotizacion_cerrar
+CREATE   PROCEDURE dbo.sp_pv_cotizacion_cerrar
   @IDFOL NVARCHAR(255),
   @SUC NVARCHAR(255) = NULL,
   @TIPOTRAN NVARCHAR(10),
@@ -738,11 +738,7 @@ BEGIN
     UPDATE dbo.PV_CTR_ORDS
     SET
       IDFOL = @idfolVisibleNuevo,
-      ESTATUS = 2,
-      RQFAC = CASE
-        WHEN @tipotranNorm = 'CA' THEN 0
-        ELSE CASE WHEN @RQFAC = 1 THEN 1 ELSE 0 END
-      END
+      ESTATUS = 2
     WHERE IDFOL = @idfolActual;
 
     IF OBJECT_ID('dbo.REF_DETALLE') IS NOT NULL
@@ -835,5 +831,4 @@ BEGIN
     THROW;
   END CATCH
 END;
-GO
 

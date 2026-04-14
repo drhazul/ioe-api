@@ -17,11 +17,15 @@ import {
   AssignLaboratorioBatchDto,
   AssignOrdBatchDto,
   CambioMaterialDto,
+  CambioMermaContextDto,
+  CrearCambioMermaDto,
   EntregarOrdDto,
   GarantiaOrdDto,
   MermaOrdDto,
+  PrepararCambioMermaDto,
   RecibirOrdDto,
   RegresarIncidenciaBatchDto,
+  SolicitarAutorizacionCambioMermaDto,
   SendOrdBatchDto,
   SaveOrdDetalleDto,
   ScanOrdDto,
@@ -45,6 +49,14 @@ export class OrdenesTrabajoController {
     return this.service.list(query, user);
   }
 
+  @Get('motivos-movimiento')
+  listMotivosMovimiento(
+    @Query('tipo') tipo: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.listMotivosMovimiento(tipo, user);
+  }
+
   @Get(':iord')
   getByIord(@Param('iord') iord: string, @CurrentUser() user: JwtPayload) {
     return this.service.getByIord(iord, user);
@@ -53,6 +65,50 @@ export class OrdenesTrabajoController {
   @Get(':iord/detalle')
   getDetail(@Param('iord') iord: string, @CurrentUser() user: JwtPayload) {
     return this.service.getDetail(iord, user);
+  }
+
+  @Get(':iord/cambio-merma/context')
+  getCambioMermaContext(
+    @Param('iord') iord: string,
+    @Query() query: CambioMermaContextDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.getCambioMermaContext(iord, query, user);
+  }
+
+  @Post(':iord/cambio-merma/preparar')
+  prepararCambioMerma(
+    @Param('iord') iord: string,
+    @Body() dto: PrepararCambioMermaDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.prepararCambioMerma(iord, dto, user, this.requestIp(req));
+  }
+
+  @Post(':iord/cambio-merma/solicitar-autorizacion')
+  solicitarAutorizacionCambioMerma(
+    @Param('iord') iord: string,
+    @Body() dto: SolicitarAutorizacionCambioMermaDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.solicitarAutorizacionCambioMerma(
+      iord,
+      dto,
+      user,
+      this.requestIp(req),
+    );
+  }
+
+  @Post(':iord/cambio-merma/crear')
+  crearCambioMerma(
+    @Param('iord') iord: string,
+    @Body() dto: CrearCambioMermaDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.crearCambioMerma(iord, dto, user, this.requestIp(req));
   }
 
   @Post(':iord/autorizar')
