@@ -71,6 +71,9 @@ Enlaces relacionados:
 - `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` aceptan `@MOTR` y `@CTD_C_M`, calculan diferencia económica sobre la fracción afectada y limpian `selCtrlOrd` al cerrar el proceso.
 - cálculo económico `Subtotal/IVA/Total` del contexto cambio/merma usa `DAT_SUC.IVA_INTEGRADO` + factor fiscal del folio (`PV_CTR_FOL_ASVR.REQF`/`RQFAC`) y tipo (`AUT/ORIGEN_AUT`), sin inferir `tipotran` por patrón de `IDFOL`.
 - staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` almacena captura temporal (artículo, motivo, laboratorio, docdif, `CTD_C_M`, bandera crear derivada) antes de la creación definitiva.
+- ajuste fiscal folio (2026-04-19): contexto/API y SPs priorizan `REQF` del folio con fallback explícito a `RQFAC` (`PV_CTR_FOL_ASVR`) para homologar el cálculo al momento de crear nueva ORD.
+- staging UX (2026-04-19): `context` devuelve `hasStagingRecord` para habilitar UI de captura solo cuando ya existe registro temporal.
+- costo alineado (2026-04-19): `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` usan costo de ORD original al calcular importes de la nueva ORD, evitando diferencias de precio.
   - el panel resuelve `ASIGNADO` como etiqueta legible de `PV_OPV` (`NOMB + APELM + APELP`) y mantiene `ASIGN_ID` como valor crudo para filtros/acciones.
   - recepción unificada: se elimina destino (`TALLER/ANALISTA`) y backend fija recepción operativa a `ESTSEGU=7`.
   - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) solo para `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER` (admin conserva acceso total).

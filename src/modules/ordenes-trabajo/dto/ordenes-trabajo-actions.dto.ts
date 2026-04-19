@@ -189,6 +189,13 @@ export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto 
   @IsOptional()
   @IsBoolean()
   crearNuevaOrd?: boolean;
+
+  @ApiPropertyOptional({ example: 200 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  pvtaNuevo?: number;
 }
 
 export class CrearCambioMermaDto extends PrepararCambioMermaDto {}

@@ -56,6 +56,9 @@ Enlaces relacionados:
 - staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` es obligatorio para la captura temporal previa a la creación definitiva.
 - los SPs de cambio/merma calculan diferencia económica usando precio real de origen (`PV_TICKET_LOG`) y aplican afectación contable solo si la diferencia sobre `CTD_C_M` es distinta de cero.
 - cálculo de `Subtotal/IVA/Total` en contexto cambio/merma se alinea con cotizaciones/pago usando `DAT_SUC.IVA_INTEGRADO` + `PV_CTR_FOL_ASVR.REQF/RQFAC` y tipo `AUT/ORIGEN_AUT`; no inferir `tipotran` por patrón textual de `IDFOL`.
+- cálculo fiscal folio (2026-04-19): para `REQF` se debe usar fallback `RQFAC` desde `PV_CTR_FOL_ASVR` tanto en contexto/API como en SPs de creación, evitando dependencia de `PV_CTR_ORDS.RQFAC` cuando venga `NULL`.
+- staging UX/API (2026-04-19): `GET .../cambio-merma/context` expone `hasStagingRecord` para que frontend bloquee captura/autorización hasta insertar staging en `PV_ORD_CAMBIO_MERMA_TMP`.
+- costo nueva ORD (2026-04-19): contexto y SPs de creación igualan costo de nueva ORD al costo base de la ORD original para evitar diferencias de precio.
 - recepción unificada sin destino (`TALLER/ANALISTA`): backend fija recepción operativa a `ESTSEGU=7`.
 - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) restringidos a `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER`; admin conserva acceso total.
 - trazabilidad UI (app): en modal de envío se retira botón `Agregar ORD`; la captura manual agrega por `Enter` en el campo `ORD` (sin cambios de contrato API).

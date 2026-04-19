@@ -377,6 +377,8 @@ export class OrdenesTrabajoService {
       user,
       tipo,
     );
+    const stagingBefore = await this.fetchCambioMermaStagingIfAny(iord, tipo);
+    this.assertCambioMermaStagingUnlocked(iord, stagingBefore);
     const selCtrlOrd = this.toInt(original.row.selCtrlOrd);
     if (!this.isSelCtrlOrdEditable(selCtrlOrd)) {
       throw new BadRequestException(
@@ -391,6 +393,10 @@ export class OrdenesTrabajoService {
       ctdOriginal,
     );
     this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    const pvtaOriginal = await this.resolveCambioMermaOriginalUnitPrice(
+      iord,
+      original.row,
+    );
 
     await this.upsertCambioMermaStaging(
       iord,
@@ -403,6 +409,8 @@ export class OrdenesTrabajoService {
         docDif: this.normalizeText(original.row.DOCDIF),
         ctdCM,
         crearNuevaOrd: true,
+        pvtaNuevo: pvtaOriginal,
+        diferenciaEconomica: null,
       },
       this.auditActor(user),
     );
@@ -422,13 +430,20 @@ export class OrdenesTrabajoService {
       tipo,
     );
     const staging = await this.fetchCambioMermaStaging(iord, tipo);
+    const context = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      updatedOriginal.row,
+      staging,
+    );
+    await this.syncCambioMermaStagingDiferencia(
+      iord,
+      tipo,
+      this.toFloat(context.diferenciaEconomica),
+      this.auditActor(user),
+    );
     return {
-      ...(await this.buildCambioMermaContextResponse(
-        iord,
-        tipo,
-        updatedOriginal.row,
-        staging,
-      )),
+      ...context,
       message: 'Nueva ORD en edición/captura',
     };
   }
@@ -452,6 +467,8 @@ export class OrdenesTrabajoService {
       user,
       tipo,
     );
+    const stagingBefore = await this.fetchCambioMermaStagingIfAny(iord, tipo);
+    this.assertCambioMermaStagingUnlocked(iord, stagingBefore);
     const selCtrlOrd = this.toInt(original.row.selCtrlOrd);
     if (!this.isSelCtrlOrdEditable(selCtrlOrd)) {
       throw new BadRequestException(
@@ -493,6 +510,19 @@ export class OrdenesTrabajoService {
     const labor =
       dto.labor == null ? this.toInt(original.row.LABOR) : this.toInt(dto.labor);
     const crearNuevaOrd = dto.crearNuevaOrd == null ? true : dto.crearNuevaOrd;
+    const suc = this.normalizeText(original.row.SUC) ?? '';
+    let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
+    if (pvtaNuevo == null && tipo === 1 && artNuevo) {
+      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
+      pvtaNuevo = this.toFloat(artInfo?.pvta);
+    }
+    if (pvtaNuevo == null) {
+      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(iord, original.row);
+    }
+    if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
+      throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
+    }
+    pvtaNuevo = this.roundMoney(pvtaNuevo);
 
     await this.upsertCambioMermaStaging(
       iord,
@@ -506,6 +536,8 @@ export class OrdenesTrabajoService {
           this.normalizeText(dto.docDif) ?? this.normalizeText(original.row.DOCDIF),
         ctdCM,
         crearNuevaOrd,
+        pvtaNuevo,
+        diferenciaEconomica: null,
       },
       this.auditActor(user),
     );
@@ -533,13 +565,20 @@ export class OrdenesTrabajoService {
       tipo,
     );
     const staging = await this.fetchCambioMermaStaging(iord, tipo);
+    const context = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      updatedOriginal.row,
+      staging,
+    );
+    await this.syncCambioMermaStagingDiferencia(
+      iord,
+      tipo,
+      this.toFloat(context.diferenciaEconomica),
+      this.auditActor(user),
+    );
     return {
-      ...(await this.buildCambioMermaContextResponse(
-        iord,
-        tipo,
-        updatedOriginal.row,
-        staging,
-      )),
+      ...context,
       autoAutorizada,
       message: autoAutorizada
         ? 'Autorización aplicada. ORD lista para crear nueva derivada.'
@@ -579,13 +618,34 @@ export class OrdenesTrabajoService {
         `No existe captura temporal para la ORD ${iord}.`,
       );
     }
+    const nvaIordStaging = this.normalizeText(staging.NVA_IORD);
+    if (nvaIordStaging) {
+      throw new BadRequestException(
+        `La ORD ${iord} ya generó una nueva ORD (${nvaIordStaging}). No se permite recrear.`,
+      );
+    }
 
     const ctdOriginal = this.toFloat(original.row.CTD) ?? 0;
     const ctdCM = this.resolveCtdCM(staging.CTD_C_M, dto.ctdCM, ctdOriginal);
     this.assertCtdCMCompatible(ctdCM, ctdOriginal);
 
+    const suc = this.normalizeText(original.row.SUC) ?? '';
     const artOriginal = this.normalizeText(original.row.ART) ?? '';
     const artNuevo = this.normalizeText(staging.ART_NUEVO) ?? artOriginal;
+
+    let pvtaNuevo = this.toFloat(staging.PVTA_NUEVO);
+    if (pvtaNuevo == null && tipo === 1 && artNuevo) {
+      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
+      pvtaNuevo = this.toFloat(artInfo?.pvta);
+    }
+    if (pvtaNuevo == null) {
+      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(iord, original.row);
+    }
+    if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
+      throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
+    }
+    pvtaNuevo = this.roundMoney(pvtaNuevo);
+
     const motivo = await this.resolveMovimientoMotrAndLabel(
       tipo,
       this.normalizeText(staging.MOTIVO) ?? undefined,
@@ -620,12 +680,13 @@ export class OrdenesTrabajoService {
           this.normalizeText(staging.DOCDIF),
           motivo.id,
           ctdCM,
+          pvtaNuevo,
         ],
         user,
         ip,
         'Cambio de material aplicado',
         'ORD_CAMBIO_MATERIAL',
-        '@ART_NUEVO=@1,@MOTIVO=@2,@LABOR=@3,@DOCDIF=@4,@MOTR=@5,@CTD_C_M=@6,',
+        '@ART_NUEVO=@1,@MOTIVO=@2,@LABOR=@3,@DOCDIF=@4,@MOTR=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,',
       );
     } else {
       const crearNuevaOrd =
@@ -640,17 +701,24 @@ export class OrdenesTrabajoService {
           motivo.id,
           artNuevo,
           ctdCM,
+          pvtaNuevo,
         ],
         user,
         ip,
         'Merma procesada',
         'ORD_MERMA',
-        '@CANTIDAD_MERMA=@1,@MOTIVO=@2,@CREAR_NUEVA_ORD=@3,@MOTR=@4,@ART_NUEVO=@5,@CTD_C_M=@6,',
+        '@CANTIDAD_MERMA=@1,@MOTIVO=@2,@CREAR_NUEVA_ORD=@3,@MOTR=@4,@ART_NUEVO=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,',
       );
     }
 
     await this.forceEstatus2FromActionData(result.data);
-    await this.clearCambioMermaStaging(iord, tipo);
+    await this.markCambioMermaStagingCreated(
+      iord,
+      tipo,
+      this.normalizeText(result.data.IORD_NUEVA),
+      this.toFloat(result.data.DIFERENCIA_ECONOMICA),
+      this.auditActor(user),
+    );
     await this.resetSelCtrlOrdByIords([
       iord,
       this.normalizeText(result.data.IORD_NUEVA),
@@ -660,6 +728,7 @@ export class OrdenesTrabajoService {
       iord,
       tipo,
       ctdCM,
+      pvtaNuevo,
       result: result.data,
     });
 
@@ -2497,6 +2566,15 @@ export class OrdenesTrabajoService {
     const iord = this.requireIord(iordRaw);
     const scope = await this.resolveSucScope(user, null);
     const roleCode = await this.resolveRoleCode(user);
+    const hasFolioRqfac = await this.hasColumn('PV_CTR_FOL_ASVR', 'RQFAC');
+    const rqfacFolioSql = hasFolioRqfac
+      ? `COALESCE(
+            TRY_CONVERT(INT, f.REQF),
+            TRY_CONVERT(INT, f.RQFAC)
+          ) AS REQF_FOLIO,
+          TRY_CONVERT(INT, f.RQFAC) AS RQFAC_FOLIO`
+      : `TRY_CONVERT(INT, f.REQF) AS REQF_FOLIO,
+          CAST(NULL AS INT) AS RQFAC_FOLIO`;
 
     const rows = await this.dataSource.query(
       `
@@ -2506,6 +2584,7 @@ export class OrdenesTrabajoService {
         LTRIM(RTRIM(ISNULL(deAuto.TIPO, ''))) AS DESAUTO,
         LTRIM(RTRIM(ISNULL(fol.AUT_FOLIO, ''))) AS AUT_FOLIO,
         TRY_CONVERT(INT, fol.REQF_FOLIO) AS REQF_FOLIO,
+        TRY_CONVERT(INT, fol.RQFAC_FOLIO) AS RQFAC_FOLIO,
         TRY_CONVERT(INT, ds.IVA_INTEGRADO) AS IVA_INTEGRADO
       FROM dbo.PV_CTR_ORDS o
       LEFT JOIN dbo.DAT_EST_ORD deFlujo
@@ -2515,7 +2594,7 @@ export class OrdenesTrabajoService {
       OUTER APPLY (
         SELECT TOP 1
           LTRIM(RTRIM(ISNULL(f.AUT, ''))) AS AUT_FOLIO,
-          TRY_CONVERT(INT, f.REQF) AS REQF_FOLIO
+          ${rqfacFolioSql}
         FROM dbo.PV_CTR_FOL_ASVR f
         WHERE UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, ''))))
         ORDER BY ISNULL(f.FCNM, f.FCN) DESC
@@ -2584,7 +2663,10 @@ export class OrdenesTrabajoService {
       SELECT TOP 1
         t.IORD,
         t.TIPOM,
+        t.NVA_IORD,
         t.ART_NUEVO,
+        TRY_CONVERT(FLOAT, t.PVTA_NUEVO) AS PVTA_NUEVO,
+        TRY_CONVERT(FLOAT, t.DIFERENCIA_ECONOMICA) AS DIFERENCIA_ECONOMICA,
         t.MOTR,
         t.MOTIVO,
         t.LABOR,
@@ -2634,7 +2716,10 @@ export class OrdenesTrabajoService {
       artOriginal,
       originalArtInfo?.pvta ?? 0,
     );
-    const precioNuevo = nuevoArtInfo?.pvta ?? precioOriginal;
+    const precioNuevoDefault = nuevoArtInfo?.pvta ?? precioOriginal;
+    const precioNuevo = this.roundMoney(
+      this.toFloat(stagingRow?.PVTA_NUEVO) ?? precioNuevoDefault,
+    );
 
     const tipoTran = this.resolveCambioMermaTipoTran(
       originalRow.TIPOTRAN ??
@@ -2647,9 +2732,9 @@ export class OrdenesTrabajoService {
     );
     const rqfac = this.resolveCambioMermaRqfac(originalRow);
     const ivaIntegrado = this.toInt(originalRow.IVA_INTEGRADO);
-
-    const originalBase = this.roundMoney(precioOriginal * ctdCM);
-    const nuevoBase = this.roundMoney(precioNuevo * ctdCM);
+    const ctdCalculo = ctdOriginal > 0 ? ctdOriginal : ctdCM;
+    const originalBase = this.roundMoney(precioOriginal * ctdCalculo);
+    const nuevoBase = this.roundMoney(precioNuevo * ctdCalculo);
 
     const montosOriginal = this.calculateFinanceByIva(originalBase, {
       tipoTran,
@@ -2682,14 +2767,19 @@ export class OrdenesTrabajoService {
       '';
     const crearNuevaOrd =
       this.toInt(stagingRow?.CREAR_NUEVA_ORD) === 0 ? false : true;
+    const hasStagingRecord = stagingRow != null;
+    const nvaIord = this.normalizeText(stagingRow?.NVA_IORD) ?? '';
+    const hasCreatedOrd = nvaIord.length > 0;
 
     return {
       ok: true,
       tipo,
       selCtrlOrd,
-      editable,
+      hasStagingRecord,
+      hasCreatedOrd,
+      editable: editable && !hasCreatedOrd,
       blockedByAuthorization: selCtrlOrd === 14,
-      canCreateNewOrd: selCtrlOrd === 16,
+      canCreateNewOrd: selCtrlOrd === 16 && !hasCreatedOrd,
       subtotalOriginal: montosOriginal.subtotal,
       ivaOriginal: montosOriginal.iva,
       totalOriginal: montosOriginal.total,
@@ -2711,6 +2801,7 @@ export class OrdenesTrabajoService {
           this.normalizeText(originalRow.DESCART) ??
           this.normalizeText(originalRow.DESCRT) ??
           null,
+        CTD: ctdOriginal,
         PVTAT_BASE: precioOriginal,
         CTD_C_M: ctdCM,
         SUBTOTAL: montosOriginal.subtotal,
@@ -2731,7 +2822,7 @@ export class OrdenesTrabajoService {
           this.normalizeText(originalRow.DESCART) ??
           this.normalizeText(originalRow.DESCRT) ??
           '',
-        CTD: ctdCM,
+        CTD: ctdCalculo,
         PVTA: precioNuevo,
         PVTAR: precioNuevo,
         TIPO: this.normalizeText(originalRow.TIPO) ?? '',
@@ -2753,6 +2844,7 @@ export class OrdenesTrabajoService {
           '',
         DOCDIF: docDif,
         CTD_C_M: ctdCM,
+        NVA_IORD: nvaIord,
         CREAR_NUEVA_ORD: crearNuevaOrd ? 1 : 0,
         SUBTOTAL: montosNuevo.subtotal,
         IVA: montosNuevo.iva,
@@ -2835,6 +2927,63 @@ export class OrdenesTrabajoService {
     return this.roundMoney(value);
   }
 
+  private async resolveCambioMermaOriginalUnitPrice(
+    iord: string,
+    originalRow: Record<string, unknown>,
+  ) {
+    const suc = this.normalizeText(originalRow.SUC) ?? '';
+    const idfol = this.normalizeText(originalRow.IDFOL) ?? '';
+    const artOriginal = this.normalizeText(originalRow.ART) ?? '';
+    const originalArtInfo = await this.resolveArticuloDatArt(suc, artOriginal);
+    return this.resolveTicketLogUnitPrice(
+      iord,
+      idfol,
+      artOriginal,
+      originalArtInfo?.pvta ?? 0,
+    );
+  }
+
+  private async syncCambioMermaStagingDiferencia(
+    iord: string,
+    tipo: number,
+    diferenciaEconomica: number | null,
+    actor: string,
+  ) {
+    if (!(await this.hasColumn('PV_ORD_CAMBIO_MERMA_TMP', 'DIFERENCIA_ECONOMICA'))) {
+      return;
+    }
+    await this.dataSource.query(
+      `
+      UPDATE t
+      SET
+        DIFERENCIA_ECONOMICA = @2,
+        USER_MOD = @3,
+        FCN_MOD = GETDATE()
+      FROM dbo.PV_ORD_CAMBIO_MERMA_TMP t
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(t.IORD, '')))) = UPPER(@0)
+        AND TRY_CONVERT(INT, t.TIPOM) = @1
+      `,
+      [
+        iord,
+        tipo,
+        diferenciaEconomica,
+        actor,
+      ],
+    );
+  }
+
+  private assertCambioMermaStagingUnlocked(
+    iord: string,
+    stagingRow: Record<string, unknown> | null,
+  ) {
+    const nvaIord = this.normalizeText(stagingRow?.NVA_IORD);
+    if (nvaIord) {
+      throw new BadRequestException(
+        `La ORD ${iord} ya tiene nueva ORD creada (${nvaIord}). CTD_C_M y MOTR quedan bloqueados.`,
+      );
+    }
+  }
+
   private normalizeCambioMermaTipo(value: unknown) {
     const tipo = this.toInt(value);
     if (tipo !== 1 && tipo !== 2) {
@@ -2910,6 +3059,8 @@ export class OrdenesTrabajoService {
     tipo: number,
     draft: {
       artNuevo: string | null;
+      pvtaNuevo: number | null;
+      diferenciaEconomica: number | null;
       motr: number | null;
       motivo: string | null;
       labor: number | null;
@@ -2928,19 +3079,23 @@ export class OrdenesTrabajoService {
       WHEN MATCHED THEN
         UPDATE SET
           ART_NUEVO = @2,
-          MOTR = @3,
-          MOTIVO = @4,
-          LABOR = @5,
-          DOCDIF = @6,
-          CTD_C_M = @7,
-          CREAR_NUEVA_ORD = @8,
-          USER_MOD = @9,
+          PVTA_NUEVO = @3,
+          DIFERENCIA_ECONOMICA = @4,
+          MOTR = @5,
+          MOTIVO = @6,
+          LABOR = @7,
+          DOCDIF = @8,
+          CTD_C_M = @9,
+          CREAR_NUEVA_ORD = @10,
+          USER_MOD = @11,
           FCN_MOD = GETDATE()
       WHEN NOT MATCHED THEN
         INSERT (
           IORD,
           TIPOM,
           ART_NUEVO,
+          PVTA_NUEVO,
+          DIFERENCIA_ECONOMICA,
           MOTR,
           MOTIVO,
           LABOR,
@@ -2962,6 +3117,8 @@ export class OrdenesTrabajoService {
           @7,
           @8,
           @9,
+          @10,
+          @11,
           GETDATE(),
           GETDATE()
         );
@@ -2970,6 +3127,8 @@ export class OrdenesTrabajoService {
         iord,
         tipo,
         draft.artNuevo,
+        draft.pvtaNuevo,
+        draft.diferenciaEconomica,
         draft.motr,
         draft.motivo,
         draft.labor,
@@ -2978,6 +3137,32 @@ export class OrdenesTrabajoService {
         draft.crearNuevaOrd ? 1 : 0,
         actor,
       ],
+    );
+  }
+
+  private async markCambioMermaStagingCreated(
+    iord: string,
+    tipo: number,
+    nvaIord: string | null,
+    diferenciaEconomica: number | null,
+    actor: string,
+  ) {
+    if (!(await this.hasColumn('PV_ORD_CAMBIO_MERMA_TMP', 'NVA_IORD'))) {
+      return;
+    }
+    await this.dataSource.query(
+      `
+      UPDATE t
+      SET
+        NVA_IORD = @2,
+        DIFERENCIA_ECONOMICA = COALESCE(@3, t.DIFERENCIA_ECONOMICA),
+        USER_MOD = @4,
+        FCN_MOD = GETDATE()
+      FROM dbo.PV_ORD_CAMBIO_MERMA_TMP t
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(t.IORD, '')))) = UPPER(@0)
+        AND TRY_CONVERT(INT, t.TIPOM) = @1
+      `,
+      [iord, tipo, nvaIord, diferenciaEconomica, actor],
     );
   }
 
@@ -3051,10 +3236,10 @@ export class OrdenesTrabajoService {
 
   private resolveCambioMermaRqfac(row: Record<string, unknown>) {
     return (
-      this.toInt(row.RQFAC) ??
-      this.toInt(row.REQF) ??
+      this.toInt(row.REQF_FOLIO) ??
       this.toInt(row.RQFAC_FOLIO) ??
-      this.toInt(row.REQF_FOLIO)
+      this.toInt(row.REQF) ??
+      this.toInt(row.RQFAC)
     );
   }
 
@@ -3123,6 +3308,24 @@ export class OrdenesTrabajoService {
         WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @0
         `,
           [tableName.trim()],
+        )
+      ).length > 0
+    );
+  }
+
+  private async hasColumn(tableName: string, columnName: string) {
+    if (!tableName.trim() || !columnName.trim()) return false;
+    return (
+      (
+        await this.dataSource.query(
+          `
+        SELECT 1
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = @0
+          AND COLUMN_NAME = @1
+        `,
+          [tableName.trim(), columnName.trim()],
         )
       ).length > 0
     );
