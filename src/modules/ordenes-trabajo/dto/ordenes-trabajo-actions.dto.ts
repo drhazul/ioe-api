@@ -151,14 +151,6 @@ export class PrepararCambioMermaDto {
   @IsNumber({ maxDecimalPlaces: 4 })
   @IsIn([0.5, 1])
   ctdCM?: number;
-}
-
-export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto {
-  @ApiPropertyOptional({ example: 'ART-NUEVO-001' })
-  @IsOptional()
-  @IsString()
-  @Length(0, 255)
-  artNuevo?: string;
 
   @ApiPropertyOptional({ example: 'Cambio por graduación especial' })
   @IsOptional()
@@ -172,6 +164,29 @@ export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto 
   @IsNumber()
   @Min(1)
   motr?: number;
+}
+
+export class ActualizarArticuloCambioMermaDto extends CambioMermaContextDto {
+  @ApiProperty({ example: 'ART-NUEVO-001' })
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  artNuevo!: string;
+
+  @ApiPropertyOptional({ example: 200 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  pvtaNuevo?: number;
+}
+
+export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto {
+  @ApiPropertyOptional({ example: 'ART-NUEVO-001' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  artNuevo?: string;
 
   @ApiPropertyOptional({ example: 3 })
   @IsOptional()
@@ -197,6 +212,8 @@ export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto 
   @Min(0)
   pvtaNuevo?: number;
 }
+
+export class RetrabajoCambioMermaDto extends CambioMermaContextDto {}
 
 export class CrearCambioMermaDto extends PrepararCambioMermaDto {}
 

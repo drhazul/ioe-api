@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { ListOrdenesTrabajoQueryDto } from './dto/list-ordenes-trabajo-query.dto';
 import {
+  ActualizarArticuloCambioMermaDto,
   AssignLaboratorioBatchDto,
   AssignOrdBatchDto,
   CambioMaterialDto,
@@ -25,6 +26,7 @@ import {
   PrepararCambioMermaDto,
   RecibirOrdDto,
   RegresarIncidenciaBatchDto,
+  RetrabajoCambioMermaDto,
   SolicitarAutorizacionCambioMermaDto,
   SendOrdBatchDto,
   SaveOrdDetalleDto,
@@ -86,6 +88,21 @@ export class OrdenesTrabajoController {
     return this.service.prepararCambioMerma(iord, dto, user, this.requestIp(req));
   }
 
+  @Post(':iord/cambio-merma/actualizar-articulo')
+  actualizarArticuloCambioMerma(
+    @Param('iord') iord: string,
+    @Body() dto: ActualizarArticuloCambioMermaDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.actualizarArticuloCambioMerma(
+      iord,
+      dto,
+      user,
+      this.requestIp(req),
+    );
+  }
+
   @Post(':iord/cambio-merma/solicitar-autorizacion')
   solicitarAutorizacionCambioMerma(
     @Param('iord') iord: string,
@@ -94,6 +111,36 @@ export class OrdenesTrabajoController {
     @Req() req: any,
   ) {
     return this.service.solicitarAutorizacionCambioMerma(
+      iord,
+      dto,
+      user,
+      this.requestIp(req),
+    );
+  }
+
+  @Post(':iord/cambio-merma/autorizar')
+  autorizarCambioMerma(
+    @Param('iord') iord: string,
+    @Body() dto: CambioMermaContextDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.autorizarCambioMerma(
+      iord,
+      dto,
+      user,
+      this.requestIp(req),
+    );
+  }
+
+  @Post(':iord/cambio-merma/retrabajo')
+  retrabajoCambioMerma(
+    @Param('iord') iord: string,
+    @Body() dto: RetrabajoCambioMermaDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.retrabajoCambioMerma(
       iord,
       dto,
       user,
