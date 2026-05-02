@@ -14,6 +14,9 @@ Enlaces relacionados:
   - `src/modules/ordenes-trabajo/ordenes-trabajo.controller.ts`
   - `src/modules/ordenes-trabajo/ordenes-trabajo.service.ts`
   - `src/modules/ordenes-trabajo/dto/*`
+- SQL:
+  - `sql/2026-03-22_ordenes_trabajo_module_create.sql`
+  - `sql/2026-04-23_ordenes_trabajo_estado_ord_mod_front.sql`
 - Endpoints:
   - `GET /ordenes-trabajo` (panel con filtros server-side y paginación)
   - `GET /ordenes-trabajo/motivos-movimiento?tipo=1|2` (catálogo de motivos para cambio material/merma desde `DAT_ORD_MOTM`)
@@ -61,7 +64,7 @@ Enlaces relacionados:
 - Reglas clave:
   - `IORD` mantiene identidad de orden y `IDFOL` no se rompe.
   - cambio material crea nueva ORD, anula original, relaciona `REEORD`, copia `PV_CTR_ORDS_DET`, registra MB51 y diferencia contable cuando aplica.
-  - merma crea nueva ORD en el cierre final, anula la original, registra MB51 y conserva `CTD_C_M` como referencia contable.
+  - merma crea nueva ORD en el cierre final, anula la original, registra MB51 y conserva `CTD_C_M` como referencia contable. La nueva ORD derivada debe quedar sin colaborador asignado (`ASIGN=NULL`).
   - selección/escaneo se resuelven en API y no dependen de flags legacy (`SEL`, `selCtrlOrd`, `selCtrOrdT`, `selEnt`).
   - `enviar/lote` exige que cada ORD del lote esté en `ESTSEGU=3 (NUEVA AUTORIZADA)` y con `LABOR` asignado; al confirmar, aplica transición masiva a `ESTSEGU=5 (ENTREGADA A MAQ O BISEL)` respetando alcance por sucursal.
   - `recibir/lote` exige `ESTSEGU=5 (ENTREGADA A MAQ O BISEL)` y aplica transición masiva a `ESTSEGU=7 (RECIBIDA A TALLER)`.
@@ -70,8 +73,12 @@ Enlaces relacionados:
   - `regresar-tienda/lote` aplica mapeo fijo por `TIPOM`: `TIPOM=1 (CAMBIO DE ARTICULO) -> ESTSEGU=9.1`, `TIPOM=2 (MERMA DE ART Y CAMBIO) -> ESTSEGU=9.2`, sin `TIPOM` válido -> `ESTSEGU=10`.
   - `:iord/cambio-material` y `:iord/merma` permanecen retrocompatibles para ejecución directa, validan flujo/tipo del origen (`9.1/TIPOM=1` para cambio, `9.2/TIPOM=2` para merma) y validan `CTD_C_M` (`1|0.5`).
 - `:iord/cambio-merma/context|preparar|solicitar-autorizacion|retrabajo|autorizar` controla el flujo interno con `selCtrlOrd` (`NULL/0/13/14/15`) sin romper `ESTSEGU=9.1/9.2` hasta la autorización final.
+- garantía (2026-04-29): `POST /ordenes-trabajo/:iord/garantia` cambia de `ESTSEGU=11` a `ESTSEGU=9.3`; el panel `entregadas` conserva solo lectura de lista y `VER_DETALLE` para `admin` y `JEF_TALLER`.
+- aplicar merma/cambio (2026-04-29): `POST /ordenes-trabajo/:iord/aplicar-merma-cambio` valida `ESTSEGU=9.3`, exige `TIPOM (1|2)` + `MOTR` y redirige el flujo a `9.1/9.2` para continuar con el proceso ya existente de cambio/merma.
 - `:iord/cambio-merma/solicitar-autorizacion` mueve siempre el caso a `selCtrlOrd=14`; `:iord/cambio-merma/retrabajo` lo devuelve a `15`; `:iord/cambio-merma/autorizar` crea la nueva ORD, ejecuta el SP final, registra MB51/diferencia y anula la original.
 - `admin`, `ANALISTA_INV` e `INVJEF` son los únicos perfiles que pueden ejecutar `:iord/cambio-merma/autorizar` y `:iord/cambio-merma/retrabajo`.
+- afectación final (2026-04-22): `sp_ordenes_trabajo_registrar_mb51` ya no usa clase genérica; cambio material registra `204/205`, merma registra `456/455/457`, y `DAT_MB51.CTOT` se calcula con `DAT_ART.CTOP`. Todos los renglones MB51 del caso se concentran bajo `DOCP = IDFOL` original.
+- diferencia contable (2026-04-22): `sp_ordenes_trabajo_registrar_ctrl_ctas_diff` usa `DAT_CAT_CTAS.CTA=101001001` (`RELACION='AD'`), `DAT_CMOV` `801/802` para cargo/abono y genera `NDOC` consecutivo registrado también en `DAT_CTR_DOC`. La UI y los PDFs deben mostrar la diferencia sellada/contable basada en `CTD_C_M`, no el total completo de la nueva ORD.
 - el panel ORDs entrega a `ANALISTA_INV` e `INVJEF` solo la cola de revisión con `selCtrlOrd=14`; el resto de roles conserva su matriz operativa actual.
 - `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` aceptan `@MOTR` y `@CTD_C_M`, calculan diferencia económica sobre la fracción afectada y cierran el proceso dejando la original relacionada por `REEORD`.
 - cálculo económico `Subtotal/IVA/Total` del contexto cambio/merma usa `DAT_SUC.IVA_INTEGRADO` + factor fiscal del folio (`PV_CTR_FOL_ASVR.REQF`/`RQFAC`) y tipo (`AUT/ORIGEN_AUT`), sin inferir `tipotran` por patrón de `IDFOL`.
@@ -79,7 +86,11 @@ Enlaces relacionados:
 - ajuste fiscal folio (2026-04-19): contexto/API y SPs priorizan `REQF` del folio con fallback explícito a `RQFAC` (`PV_CTR_FOL_ASVR`) para homologar el cálculo al momento de crear nueva ORD.
 - staging UX (2026-04-19): `context` devuelve `hasStagingRecord` para habilitar UI de captura solo cuando ya existe registro temporal.
 - costo alineado (2026-04-19): `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` usan costo de ORD original al calcular importes de la nueva ORD, evitando diferencias de precio.
-  - el panel resuelve `ASIGNADO` como etiqueta legible de `PV_OPV` (`NOMB + APELM + APELP`) y mantiene `ASIGN_ID` como valor crudo para filtros/acciones.
+- el panel resuelve `ASIGNADO` como etiqueta legible de `PV_OPV` (`NOMB + APELM + APELP`) y mantiene `ASIGN_ID` como valor crudo para filtros/acciones.
+- el panel también resuelve `OPV` con `USUARIO.NOMBRE`, exponiendo `OPV_ID` como valor crudo cuando existe relación.
+- `panelMode='estado'` devuelve catálogo completo de `DAT_EST_ORD`, solo habilita `VER_DETALLE` y reemplaza operativamente a los módulos front legacy de `anuladas`/`entregadas`.
+- `saveDetail` acepta `hrEnt` (`HH:MM`) y lo guarda en `PV_CTR_ORDS.HR_ENT`.
+- `ANULAR` queda limitado a `admin`/`JEF_TALLER`; las anulaciones exitosas continúan registrándose en `AUDIT_LOG`.
   - recepción unificada: se elimina destino (`TALLER/ANALISTA`) y backend fija recepción operativa a `ESTSEGU=7`.
   - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) solo para `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER` (admin conserva acceso total).
   - trazabilidad UI (app): en modal de envío se elimina botón `Agregar ORD`; la captura manual agrega por `Enter` en el `TextField` `ORD`.

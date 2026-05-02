@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { ListOrdenesTrabajoQueryDto } from './dto/list-ordenes-trabajo-query.dto';
 import {
+  AplicarMermaCambioDto,
   ActualizarArticuloCambioMermaDto,
   AssignLaboratorioBatchDto,
   AssignOrdBatchDto,
@@ -350,6 +351,16 @@ export class OrdenesTrabajoController {
     @Req() req: any,
   ) {
     return this.service.garantia(iord, dto, user, this.requestIp(req));
+  }
+
+  @Post(':iord/aplicar-merma-cambio')
+  aplicarMermaCambio(
+    @Param('iord') iord: string,
+    @Body() dto: AplicarMermaCambioDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.aplicarMermaCambio(iord, dto, user, this.requestIp(req));
   }
 
   @Post(':iord/cambio-material')

@@ -13,6 +13,9 @@ Enlaces relacionados:
 - `src/modules/ordenes-trabajo/ordenes-trabajo.controller.ts`
 - `src/modules/ordenes-trabajo/ordenes-trabajo.service.ts`
 - `src/modules/ordenes-trabajo/dto/*`
+- SQL asociado:
+- `sql/2026-03-22_ordenes_trabajo_module_create.sql`
+- `sql/2026-04-23_ordenes_trabajo_estado_ord_mod_front.sql`
 - Endpoints:
 - `GET /ordenes-trabajo`
 - `GET /ordenes-trabajo/motivos-movimiento?tipo=1|2` (catálogo `DAT_ORD_MOTM` para cambio material/merma)
@@ -52,10 +55,17 @@ Enlaces relacionados:
 - `recibir/lote` valida acceso por sucursal, exige `ESTSEGU=5` y aplica transición a `ESTSEGU=7`.
 - `entregar/lote` valida acceso por sucursal, exige `ESTSEGU=10` y aplica transición a `ESTSEGU=11`.
 - `regresar-incidencia/lote` valida `ESTSEGU=8` con colaborador asignado, exige motivo `DAT_ORD_TMOV.IDT` y actualiza `TIPOM`; el panel entrega `ASIGNADO` como label de `PV_OPV` (`NOMB + APELM + APELP`).
+- `GET /ordenes-trabajo` soporta `panelMode='estado'` para consulta solo lectura; `flowStatusOptions` toma estados desde `DAT_EST_ORD`, `OPV` se resuelve con `USUARIO.NOMBRE` y el home debe usar módulo `DAT_JAO_ORD_ESTADO`.
+- garantía 9.3 (2026-04-29): `POST /ordenes-trabajo/:iord/garantia` ahora mueve `ESTSEGU` de `11` a `9.3`; el panel `entregadas` queda restringido a `admin`/`JEF_TALLER` y solo expone `VER_DETALLE`.
+- aplicar merma/cambio (2026-04-29): nuevo `POST /ordenes-trabajo/:iord/aplicar-merma-cambio` exige `ESTSEGU=9.3`, valida `TIPOM (1|2)` y `MOTR` (`DAT_ORD_MOTM`) y enruta a `9.1/9.2` para continuar el mismo flujo de cambio/merma.
+- `POST /ordenes-trabajo/:iord/detalle/guardar` acepta `hrEnt='HH:MM'` y actualiza `PV_CTR_ORDS.HR_ENT` conservando la fecha existente de entrega cuando aplica.
+- `ANULAR` queda restringido a `admin` y `JEF_TALLER`; la mutación sigue auditando en `AUDIT_LOG` con acción `ORD_ANULAR_LOTE`.
 - `cambio-material` valida `ESTSEGU=9.1` y `TIPOM=1`; `merma` valida `ESTSEGU=9.2` y `TIPOM=2`; ambos validan `CTD_C_M` (`1|0.5`) en DTO/service/SP.
 - `cambio-merma/context|preparar|solicitar-autorizacion|retrabajo|autorizar` implementa semáforo interno `selCtrlOrd` (`NULL/0/13/14/15`), con `14` en revisión, `15` retrabajo y `Autorizar` como cierre final.
 - `cambio-merma/solicitar-autorizacion` fija siempre `selCtrlOrd=14`; `cambio-merma/retrabajo` devuelve el caso a `15`; `cambio-merma/autorizar` crea la nueva ORD, ejecuta SP final, registra MB51/diferencia y anula la original.
 - solo `admin`, `ANALISTA_INV` e `INVJEF` pueden ejecutar `cambio-merma/autorizar`.
+- movimientos finales (2026-04-22): MB51 debe usar `DAT_CMOV` (`204/205` para cambio, `456/455/457` para merma) y `CTOT = CTDA * DAT_ART.CTOP`; no volver a usar `CLSM='ORD'` ni `CTOT=ABS(CTDA)`. Todo el caso debe quedar bajo `DOCP = IDFOL` original.
+- control de cuentas (2026-04-22): la diferencia se registra con `CTA=101001001` (`DAT_CAT_CTAS`, relación `AD`), `CMOV/CLSD=801|802` y `NDOC` consecutivo basado en `DAT_CMOV` + `DAT_CTR_DOC`. Para cambio/merma, todos los movimientos MB51 deben usar `DOCP = IDFOL` original. La nueva ORD derivada debe quedar sin colaborador asignado y la UI/PDF deben mostrar la diferencia contable sellada basada en `CTD_C_M`.
 - la cola del panel para `ANALISTA_INV` e `INVJEF` se filtra por `selCtrlOrd=14`, sin alterar el resto de matrices operativas.
 - catálogo de motivos de movimiento: `DAT_ORD_MOTM` (`IDM`, `MOTM`, `TIPO`, `RESPONSABLE`) + `@MOTR` en SPs para trazar motivo seleccionado.
 - staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` es obligatorio para la captura temporal previa a la creación definitiva.

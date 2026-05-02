@@ -1,11 +1,8 @@
 /*
-  2026-03-30
-  Ajustes ORDs:
-  - El filtro @CLIENT del panel busca por CLIEN y NCLIENTE.
-  - La búsqueda general @SEARCH también considera NCLIENTE.
-  - El detalle ORD siempre regresa JOB en orden OD, OI, ADD.
+  2026-04-27
+  ORDs panel: filtro Cliente robusto por CLIEN (normalizado) y NCLIENTE.
+  Evita fallo por diferencia de tipo de dato en PV_CTR_ORDS (CLIEN vs NCLIENTE).
 */
-
 SET ANSI_NULLS ON;
 GO
 SET QUOTED_IDENTIFIER ON;
@@ -43,7 +40,7 @@ BEGIN
   IF @PAGESIZE > 25 SET @PAGESIZE = 25;
 
   SET @PANEL_MODE = LOWER(LTRIM(RTRIM(ISNULL(@PANEL_MODE, 'operativo'))));
-  IF @PANEL_MODE NOT IN ('operativo', 'anulados', 'entregadas')
+  IF @PANEL_MODE NOT IN ('operativo', 'estado', 'anulados', 'entregadas')
     SET @PANEL_MODE = 'operativo';
 
   SET @ROLE_CODE = UPPER(LTRIM(RTRIM(ISNULL(@ROLE_CODE, ''))));
@@ -77,7 +74,15 @@ BEGIN
   DECLARE @allowedStatus TABLE (ESTSEGU FLOAT PRIMARY KEY);
   DECLARE @ALLOW_NULL_ESTSEGU BIT = 0;
 
-  IF @PANEL_MODE = 'anulados'
+  IF @PANEL_MODE = 'estado'
+  BEGIN
+    IF @IS_ADMIN = 1 OR @ROLE_CODE IN ('JEF_TALLER', 'ANALISTA_ORD', 'ANALISTA')
+      INSERT INTO @allowedStatus (ESTSEGU)
+      SELECT DISTINCT TRY_CONVERT(FLOAT, ESTA)
+      FROM dbo.DAT_EST_ORD
+      WHERE TRY_CONVERT(FLOAT, ESTA) IS NOT NULL;
+  END
+  ELSE IF @PANEL_MODE = 'anulados'
   BEGIN
     IF @IS_ADMIN = 1 OR @ROLE_CODE IN ('JEF_TALLER', 'TALLER')
       INSERT INTO @allowedStatus (ESTSEGU) VALUES (4);
@@ -111,7 +116,23 @@ BEGIN
       o.IORD,
       o.IDFOL,
       o.TIPO,
-      o.OPV,
+      LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), ''))) AS OPV_ID,
+      COALESCE(
+        NULLIF(LTRIM(RTRIM(ISNULL(uopv.NOMBRE, ''))), ''),
+        NULLIF(
+          LTRIM(
+            RTRIM(
+              CONCAT(
+                ISNULL(opv.NOMB, ''),
+                CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(opv.APELP, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(ISNULL(opv.APELP, ''))) END,
+                CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(opv.APELM, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(ISNULL(opv.APELM, ''))) END
+              )
+            )
+          ),
+          ''
+        ),
+        LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
+      ) AS OPV,
       o.FCNS,
       o.FCNM,
       o.CLIEN,
@@ -156,6 +177,10 @@ BEGIN
     ) docdifx
     LEFT JOIN dbo.DAT_EST_ORD e
       ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, o.ESTSEGU)
+    LEFT JOIN dbo.USUARIO uopv
+      ON TRY_CONVERT(INT, uopv.IDUSUARIO) = TRY_CONVERT(INT, o.OPV)
+    LEFT JOIN dbo.PV_OPV opv
+      ON LTRIM(RTRIM(ISNULL(CAST(opv.IDOPV AS NVARCHAR(100)), ''))) = LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
     LEFT JOIN dbo.DAT_LAB lab
       ON TRY_CONVERT(INT, lab.ID) = TRY_CONVERT(INT, o.LABOR)
     WHERE
@@ -230,94 +255,3 @@ BEGIN
       AND TRY_CONVERT(INT, o.ESTATUS) = 2
       AND (
         EXISTS (
-          SELECT 1
-          FROM @allowedStatus a
-          WHERE a.ESTSEGU = TRY_CONVERT(FLOAT, o.ESTSEGU)
-        )
-        OR (
-          @ALLOW_NULL_ESTSEGU = 1
-          AND TRY_CONVERT(FLOAT, o.ESTSEGU) IS NULL
-        )
-      )
-  )
-  SELECT *
-  FROM base
-  WHERE RN > @offset
-    AND RN <= (@offset + @PAGESIZE)
-  ORDER BY RN;
-END;
-GO
-
-CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_detalle
-  @IORD NVARCHAR(255),
-  @IS_ADMIN BIT = 0,
-  @ALLOWED_SUCS NVARCHAR(MAX) = NULL,
-  @SUC NVARCHAR(10) = NULL
-AS
-BEGIN
-  SET NOCOUNT ON;
-
-  DECLARE @allowed TABLE (SUC NVARCHAR(10) PRIMARY KEY);
-  INSERT INTO @allowed (SUC)
-  SELECT DISTINCT UPPER(LTRIM(RTRIM(value)))
-  FROM STRING_SPLIT(ISNULL(@ALLOWED_SUCS, ''), ',')
-  WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> '';
-
-  DECLARE @headerJson NVARCHAR(MAX);
-  DECLARE @detailsJson NVARCHAR(MAX);
-
-  SELECT @headerJson = (
-    SELECT TOP 1
-      o.*,
-      e.TIPO AS ESTSEGU_DESC
-    FROM dbo.PV_CTR_ORDS o
-    LEFT JOIN dbo.DAT_EST_ORD e
-      ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, o.ESTSEGU)
-    LEFT JOIN dbo.DAT_LAB lab
-      ON TRY_CONVERT(INT, lab.ID) = TRY_CONVERT(INT, o.LABOR)
-    WHERE o.IORD = @IORD
-      AND (
-        @SUC IS NULL
-        OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@SUC)
-        OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) = UPPER(@SUC)
-      )
-      AND (
-        @IS_ADMIN = 1
-        OR NOT EXISTS (SELECT 1 FROM @allowed)
-        OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (SELECT SUC FROM @allowed)
-        OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) IN (SELECT SUC FROM @allowed)
-      )
-    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
-  );
-
-  IF @headerJson IS NULL
-  BEGIN
-    SELECT
-      CAST(NULL AS NVARCHAR(MAX)) AS HEADER_JSON,
-      CAST('[]' AS NVARCHAR(MAX)) AS DETAILS_JSON;
-    RETURN;
-  END;
-
-  SELECT @detailsJson = (
-    SELECT
-      d.*
-    FROM dbo.PV_CTR_ORDS_DET d
-    WHERE d.IORD = @IORD
-    ORDER BY
-      CASE UPPER(LTRIM(RTRIM(ISNULL(d.JOB, ''))))
-        WHEN 'OD' THEN 0
-        WHEN 'OI' THEN 1
-        WHEN 'ADD' THEN 2
-        ELSE 3
-      END,
-      CASE WHEN TRY_CONVERT(BIGINT, d.IORDP) IS NULL THEN 1 ELSE 0 END,
-      TRY_CONVERT(BIGINT, d.IORDP),
-      d.ART
-    FOR JSON PATH
-  );
-
-  SELECT
-    @headerJson AS HEADER_JSON,
-    ISNULL(@detailsJson, '[]') AS DETAILS_JSON;
-END;
-GO

@@ -10,6 +10,7 @@ import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { ListOrdenesTrabajoQueryDto } from './dto/list-ordenes-trabajo-query.dto';
 import {
+  AplicarMermaCambioDto,
   ActualizarArticuloCambioMermaDto,
   AssignLaboratorioBatchDto,
   AssignOrdBatchDto,
@@ -54,8 +55,14 @@ type CambioMermaOriginalContext = {
 export class OrdenesTrabajoService {
   private static readonly MODULE_CODES = [
     'DAT_JAO_ORD',
+    'DAT_JAO_ORD_ESTADO',
     'DAT_JAO_ORD_ANULADAS',
     'DAT_JAO_ORD_ENTREGADAS',
+    'DAT_JAO_ORD_GARANTIA',
+    'DAT_JAO_ORD_GARANTIAS',
+    'DAT_JAO_ORD_TRABAJO_TERMINADO',
+    'DAT_JAO_ORD_TERMINADO',
+    'DAT_JAO_ORD_FINALIZAR',
     'DAT_JAO_ORDS',
     'DAT_JAO_TALLER',
     'DAT_JAO_BISEL',
@@ -133,7 +140,7 @@ export class OrdenesTrabajoService {
       roleCode,
       panelMode,
     );
-    const allowedStatusCodes = this.resolveAllowedStatusCodes(
+    const allowedStatusCodes = await this.resolveAllowedStatusCodes(
       user,
       roleCode,
       panelMode,
@@ -149,7 +156,7 @@ export class OrdenesTrabajoService {
     );
     const laboratorios = await this.resolveLaboratorios(scope);
     const incidenciaOptions = await this.resolveIncidenciaOptions();
-    if (this.shouldDeferEntregadasPanel(query, panelMode, scope.isAdmin)) {
+    if (this.shouldDeferPanel(query, panelMode, scope.isAdmin)) {
       return {
         ok: true,
         page,
@@ -229,15 +236,23 @@ export class OrdenesTrabajoService {
     const asignLabels = await this.resolveOpvLabels(
       rawItems.map((item) => item.ASIGN),
     );
+    const opvLabels = await this.resolveUsuarioLabels(
+      rawItems.map((item) => item.OPV_ID ?? item.OPV),
+    );
     const items = rawItems.map((item) => {
       const asignId = this.normalizeText(item.ASIGN);
       const asignLabel = asignId == null ? null : asignLabels.get(asignId);
-      if (asignLabel == null) return item;
+      const opvId = this.normalizeText(item.OPV_ID ?? item.OPV);
+      const opvLabel = opvId == null ? null : opvLabels.get(opvId);
+      if (asignLabel == null && opvLabel == null) return item;
       return {
         ...item,
-        ASIGN_ID: asignId,
-        ASIGN_LABEL: asignLabel,
-        ASIGN: asignLabel,
+        ...(asignId == null ? {} : { ASIGN_ID: asignId }),
+        ...(asignLabel == null
+          ? {}
+          : { ASIGN_LABEL: asignLabel, ASIGN: asignLabel }),
+        ...(opvId == null ? {} : { OPV_ID: opvId }),
+        ...(opvLabel == null ? {} : { OPV_LABEL: opvLabel, OPV: opvLabel }),
       };
     });
     items.sort((a, b) => {
@@ -866,6 +881,7 @@ export class OrdenesTrabajoService {
     await this.assertOrdTypeAccessByIord(iord, user, scope);
     const actor = this.auditActor(user);
     const commentsValue = this.normalizeText(dto.comentarios);
+    const hrEntValue = this.normalizeHourMinute(dto.hrEnt);
     const tipoValueRaw = this.normalizeUpper(dto.tipo);
     const tipoValue = tipoValueRaw ? this.normalizeOrdTipo(tipoValueRaw) : '';
     if (tipoValueRaw && !tipoValue) {
@@ -928,10 +944,27 @@ export class OrdenesTrabajoService {
         LABOR = CASE WHEN @1 IS NULL THEN LABOR ELSE @1 END,
         COMAD = CASE WHEN @2 IS NULL THEN COMAD ELSE LEFT(@2, 2000) END,
         TIPO = CASE WHEN @3 IS NULL THEN TIPO ELSE @3 END,
+        HR_ENT = CASE
+          WHEN @4 IS NULL THEN HR_ENT
+          ELSE TRY_CONVERT(
+            DATETIME,
+            CONVERT(
+              VARCHAR(10),
+              COALESCE(
+                TRY_CONVERT(DATE, HR_ENT),
+                TRY_CONVERT(DATE, FCNEN),
+                TRY_CONVERT(DATE, FCNM),
+                CONVERT(DATE, GETDATE())
+              ),
+              23
+            ) + ' ' + @4 + ':00',
+            120
+          )
+        END,
         FCNMOD = GETDATE()
       WHERE IORD = @0
       `,
-      [iord, laborValue, commentsValue, tipoValue || null],
+      [iord, laborValue, commentsValue, tipoValue || null, hrEntValue],
     );
 
     if (rows.length) {
@@ -966,6 +999,7 @@ export class OrdenesTrabajoService {
       iord,
       labor: laborValue,
       tipo: tipoValue || null,
+      hrEnt: hrEntValue,
       comentarios: commentsValue,
       rowsUpdated: rows.length,
       actor,
@@ -1423,15 +1457,61 @@ export class OrdenesTrabajoService {
       requiredFlowLabel: 'ENTREGADA A CLIENTE',
       okMessage: 'ORD válida para garantía',
     });
+    const motivo =
+      this.normalizeText(dto.motivo) ?? 'Garantía registrada (flujo 9.3)';
     return this.executeSimpleAction(
       'sp_ordenes_trabajo_garantia',
       iordRaw,
-      [this.normalizeText(dto.motivo)],
+      [motivo],
       user,
       ip,
-      'Garantia registrada',
+      'Garantía registrada',
       'ORD_GARANTIA',
       '@MOTIVO=@1,',
+    );
+  }
+
+  async aplicarMermaCambio(
+    iordRaw: string,
+    dto: AplicarMermaCambioDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
+    const tipom = Math.trunc(Number(dto.tipom ?? 0));
+    if (tipom !== 1 && tipom !== 2) {
+      throw new BadRequestException(
+        'tipom debe ser 1 (CAMBIO DE ARTICULO) o 2 (MERMA DE ART Y CAMBIO)',
+      );
+    }
+    if (tipom === 1) {
+      await this.assertActionPermission('CAMBIO_MATERIAL', user);
+    } else {
+      await this.assertActionPermission('MERMA', user);
+    }
+    await this.validateOrdByRequiredFlow(iordRaw, user, {
+      requiredFlow: 9.3,
+      requiredFlowLabel: 'GARANTÍA APLICADA',
+      okMessage: 'ORD válida para aplicar merma o cambio',
+    });
+    const motivo = await this.resolveMovimientoMotrAndLabel(
+      tipom,
+      undefined,
+      dto.motr,
+    );
+    const tipomLabel =
+      tipom === 1 ? 'CAMBIO DE ARTICULO' : 'MERMA DE ART Y CAMBIO';
+    const obs = `Aplicar merma/cambio (TIPOM=${tipom} ${tipomLabel}, MOTR=${motivo.id} ${motivo.label})`;
+    return this.executeSimpleAction(
+      'sp_ordenes_trabajo_aplicar_merma_cambio',
+      iordRaw,
+      [tipom, motivo.id, obs],
+      user,
+      ip,
+      tipom === 1
+        ? 'Flujo 9.1 listo para cambio material'
+        : 'Flujo 9.2 listo para merma',
+      'ORD_APLICAR_MERMA_CAMBIO',
+      '@TIPOM=@1,@MOTR=@2,@OBS=@3,',
     );
   }
 
@@ -2055,7 +2135,7 @@ export class OrdenesTrabajoService {
 
     const allowedByAction: Record<string, string[]> = {
       AUTORIZAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      ANULAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      ANULAR: ['JEF_TALLER'],
       ENVIAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
       ASIGNAR: [
         'JEF_TALLER',
@@ -2092,7 +2172,7 @@ export class OrdenesTrabajoService {
         'ENCARGADO_BISELADO',
       ],
       ENTREGAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      GARANTIA: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      GARANTIA: ['JEF_TALLER'],
       CAMBIO_MATERIAL: [
         'JEF_TALLER',
         'TALLER',
@@ -2231,6 +2311,66 @@ export class OrdenesTrabajoService {
     return out;
   }
 
+  private async resolveUsuarioLabels(idsRaw: unknown[]) {
+    const ids = [
+      ...new Set(idsRaw.map((item) => this.normalizeText(item) ?? '')),
+    ].filter((item) => item.length > 0);
+    if (!ids.length) {
+      return new Map<string, string>();
+    }
+    const placeholders = ids.map((_, idx) => `@${idx}`).join(',');
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        LTRIM(RTRIM(ISNULL(CAST(u.IDUSUARIO AS NVARCHAR(100)), ''))) AS IDUSUARIO,
+        LTRIM(RTRIM(ISNULL(u.NOMBRE, ''))) AS NOMBRE
+      FROM dbo.USUARIO u
+      WHERE LTRIM(RTRIM(ISNULL(CAST(u.IDUSUARIO AS NVARCHAR(100)), ''))) IN (${placeholders})
+      `,
+      ids,
+    );
+    const out = new Map<string, string>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const rec = row as Record<string, unknown>;
+      const idusuario = this.normalizeText(rec.IDUSUARIO);
+      const nombre = this.normalizeText(rec.NOMBRE);
+      if (!idusuario || !nombre) continue;
+      out.set(idusuario, nombre);
+    }
+    const missingIds = ids.filter((id) => !out.has(id));
+    if (!missingIds.length) {
+      return out;
+    }
+    const fallbackPlaceholders = missingIds.map((_, idx) => `@${idx}`).join(',');
+    const fallbackRows = await this.dataSource.query(
+      `
+      SELECT
+        LTRIM(RTRIM(ISNULL(CAST(o.IDOPV AS NVARCHAR(100)), ''))) AS IDOPV,
+        LTRIM(RTRIM(ISNULL(o.NOMB, ''))) AS NOMB,
+        LTRIM(RTRIM(ISNULL(o.APELP, ''))) AS APELP,
+        LTRIM(RTRIM(ISNULL(o.APELM, ''))) AS APELM
+      FROM dbo.PV_OPV o
+      WHERE LTRIM(RTRIM(ISNULL(CAST(o.IDOPV AS NVARCHAR(100)), ''))) IN (${fallbackPlaceholders})
+      `,
+      missingIds,
+    );
+    for (const row of Array.isArray(fallbackRows) ? fallbackRows : []) {
+      const rec = row as Record<string, unknown>;
+      const idopv = this.normalizeText(rec.IDOPV);
+      if (!idopv || out.has(idopv)) continue;
+      const label = this.composeOpvLabel({
+        idopv,
+        nomb: this.normalizeText(rec.NOMB),
+        apelp: this.normalizeText(rec.APELP),
+        apelm: this.normalizeText(rec.APELM),
+      });
+      if (label) {
+        out.set(idopv, label);
+      }
+    }
+    return out;
+  }
+
   private isAdmin(user?: JwtPayload | null) {
     const roleId = Number(user?.roleId ?? 0);
     if (roleId === 1) return true;
@@ -2272,19 +2412,20 @@ export class OrdenesTrabajoService {
 
   private normalizePanelMode(
     value?: string,
-  ): 'operativo' | 'anulados' | 'entregadas' {
+  ): 'operativo' | 'estado' | 'anulados' | 'entregadas' {
     const raw = this.normalizeUpper(value ?? '');
+    if (raw === 'ESTADO') return 'estado';
     if (raw === 'ANULADOS') return 'anulados';
     if (raw === 'ENTREGADAS') return 'entregadas';
     return 'operativo';
   }
 
-  private shouldDeferEntregadasPanel(
+  private shouldDeferPanel(
     query: ListOrdenesTrabajoQueryDto,
-    panelMode: 'operativo' | 'anulados' | 'entregadas',
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
     isAdmin: boolean,
   ) {
-    if (panelMode !== 'entregadas') return false;
+    if (panelMode !== 'entregadas' && panelMode !== 'estado') return false;
     const hasManualCriteria =
       this.normalizeText(query.iord) != null ||
       this.normalizeText(query.idfol) != null ||
@@ -2304,33 +2445,41 @@ export class OrdenesTrabajoService {
     return !hasManualCriteria;
   }
 
-  private resolveAllowedStatusCodes(
+  private async resolveAllowedStatusCodes(
     user: JwtPayload,
     roleCodeRaw: string,
-    panelMode: 'operativo' | 'anulados' | 'entregadas',
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
   ) {
     if (this.isAdmin(user)) {
+      if (panelMode === 'estado') return this.resolveAllFlowStatusCodes();
       if (panelMode === 'anulados') return [4];
       if (panelMode === 'entregadas') return [11];
-      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 10, 12];
+      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 9.3, 10, 12];
     }
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
+    if (panelMode === 'estado') {
+      return roleCode === 'JEF_TALLER' ||
+          roleCode === 'ANALISTA_ORD' ||
+          roleCode === 'ANALISTA'
+        ? this.resolveAllFlowStatusCodes()
+        : [];
+    }
     if (panelMode === 'anulados') {
       return roleCode === 'JEF_TALLER' || roleCode === 'TALLER' ? [4] : [];
     }
     if (panelMode === 'entregadas') {
-      return roleCode === 'JEF_TALLER' || roleCode === 'TALLER' ? [11] : [];
+      return roleCode === 'JEF_TALLER' ? [11] : [];
     }
 
     if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER') {
-      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 10, 12];
+      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 9.3, 10, 12];
     }
     if (roleCode === 'ANALISTA_ORD' || roleCode === 'ANALISTA') {
-      return [2, 3, 3.1, 5, 9.1, 9.2, 10, 12];
+      return [2, 3, 3.1, 5, 9.1, 9.2, 9.3, 10, 12];
     }
     if (roleCode === 'ANALISTA_INV' || roleCode === 'INVJEF') {
-      return [9.1, 9.2];
+      return [9.1, 9.2, 9.3];
     }
     if (
       roleCode === 'ENC_MAQUILA' ||
@@ -2338,9 +2487,26 @@ export class OrdenesTrabajoService {
       roleCode === 'ENC_BISEL' ||
       roleCode === 'ENCARGADO_BISELADO'
     ) {
-      return [7, 8, 9];
+      return [7, 8, 9, 9.1, 9.2, 9.3];
     }
     return [];
+  }
+
+  private async resolveAllFlowStatusCodes() {
+    const rows = await this.dataSource.query(`
+      SELECT DISTINCT TRY_CONVERT(FLOAT, ESTA) AS ESTA
+      FROM dbo.DAT_EST_ORD
+      WHERE TRY_CONVERT(FLOAT, ESTA) IS NOT NULL
+      ORDER BY TRY_CONVERT(FLOAT, ESTA)
+    `);
+    const set = new Set<number>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const value = this.toFloat((row as Record<string, unknown>).ESTA);
+      if (value != null) {
+        set.add(value);
+      }
+    }
+    return [...set].sort((a, b) => a - b);
   }
 
   private async resolveFlowStatusOptions(
@@ -2396,7 +2562,7 @@ export class OrdenesTrabajoService {
   private shouldIncludeNullFlow(
     user: JwtPayload,
     roleCodeRaw: string,
-    panelMode: 'operativo' | 'anulados' | 'entregadas',
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
   ) {
     if (panelMode !== 'operativo') return false;
     if (this.isAdmin(user)) return true;
@@ -2860,9 +3026,16 @@ export class OrdenesTrabajoService {
     );
     const rqfac = this.resolveCambioMermaRqfac(originalRow);
     const ivaIntegrado = this.toInt(originalRow.IVA_INTEGRADO);
-    const ctdCalculo = ctdOriginal > 0 ? ctdOriginal : ctdCM;
-    const originalBase = this.roundMoney(precioOriginal * ctdCalculo);
-    const nuevoBase = this.roundMoney(precioNuevo * ctdCalculo);
+    const ctdCalculoOrd = ctdOriginal > 0 ? ctdOriginal : ctdCM;
+    const ctdCalculoContable = ctdCM > 0 ? ctdCM : ctdCalculoOrd;
+    const originalBase = this.roundMoney(precioOriginal * ctdCalculoOrd);
+    const nuevoBase = this.roundMoney(precioNuevo * ctdCalculoOrd);
+    const originalBaseContable = this.roundMoney(
+      precioOriginal * ctdCalculoContable,
+    );
+    const nuevoBaseContable = this.roundMoney(
+      precioNuevo * ctdCalculoContable,
+    );
 
     const montosOriginal = this.calculateFinanceByIva(originalBase, {
       tipoTran,
@@ -2874,8 +3047,25 @@ export class OrdenesTrabajoService {
       ivaIntegrado,
       rqfac,
     });
+    const montosOriginalContable = this.calculateFinanceByIva(
+      originalBaseContable,
+      {
+        tipoTran,
+        ivaIntegrado,
+        rqfac,
+      },
+    );
+    const montosNuevoContable = this.calculateFinanceByIva(nuevoBaseContable, {
+      tipoTran,
+      ivaIntegrado,
+      rqfac,
+    });
+    const diferenciaEconomicaCalculada = this.roundMoney(
+      montosNuevoContable.total - montosOriginalContable.total,
+    );
     const diferenciaEconomica = this.roundMoney(
-      montosNuevo.total - montosOriginal.total,
+      this.toFloat(stagingRow?.DIFERENCIA_ECONOMICA) ??
+        diferenciaEconomicaCalculada,
     );
     const generaAfectacionContable = Math.abs(diferenciaEconomica) >= 0.009;
 
@@ -2941,6 +3131,9 @@ export class OrdenesTrabajoService {
         SUBTOTAL: montosOriginal.subtotal,
         IVA: montosOriginal.iva,
         TOTAL: montosOriginal.total,
+        SUBTOTAL_CONTABLE: montosOriginalContable.subtotal,
+        IVA_CONTABLE: montosOriginalContable.iva,
+        TOTAL_CONTABLE: montosOriginalContable.total,
         USR_AUT_CYM: this.normalizeText(originalRow.USR_AUT_CYM) ?? null,
         FCN_AUT_CYM: originalRow.FCN_AUT_CYM ?? null,
       },
@@ -2958,7 +3151,7 @@ export class OrdenesTrabajoService {
           this.normalizeText(originalRow.DESCART) ??
           this.normalizeText(originalRow.DESCRT) ??
           '',
-        CTD: ctdCalculo,
+        CTD: ctdCalculoOrd,
         PVTA: precioNuevo,
         PVTAR: precioNuevo,
         TIPO: this.normalizeText(originalRow.TIPO) ?? '',
@@ -2985,6 +3178,9 @@ export class OrdenesTrabajoService {
         SUBTOTAL: montosNuevo.subtotal,
         IVA: montosNuevo.iva,
         TOTAL: montosNuevo.total,
+        SUBTOTAL_CONTABLE: montosNuevoContable.subtotal,
+        IVA_CONTABLE: montosNuevoContable.iva,
+        TOTAL_CONTABLE: montosNuevoContable.total,
         DIFERENCIA_ECONOMICA: diferenciaEconomica,
         FINALIZADA: finalized ? 1 : 0,
       },
@@ -4180,7 +4376,7 @@ export class OrdenesTrabajoService {
   private resolveAllowedActions(
     user: JwtPayload,
     roleCodeRaw: string,
-    panelMode: 'operativo' | 'anulados' | 'entregadas',
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
   ) {
     const operationalActions = [
       'VER_DETALLE',
@@ -4200,15 +4396,19 @@ export class OrdenesTrabajoService {
       'SCAN_RECIBIR',
       'SCAN_ENTREGAR',
     ];
+    const operationalActionsNoAnular = operationalActions.filter(
+      (action) => action !== 'ANULAR',
+    );
 
     if (this.isAdmin(user)) {
+      if (panelMode === 'estado') return ['VER_DETALLE'];
       if (panelMode === 'anulados') return ['VER_DETALLE'];
       if (panelMode === 'entregadas') return ['VER_DETALLE', 'GARANTIA'];
       return operationalActions;
     }
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    const nonStoreReceiveActions = operationalActions.filter(
+    const nonStoreReceiveActions = operationalActionsNoAnular.filter(
       (action) => action !== 'REGRESAR_TIENDA',
     );
     const nonStoreReceiveActionsNoPrint = nonStoreReceiveActions.filter(
@@ -4220,7 +4420,6 @@ export class OrdenesTrabajoService {
       ANALISTA_ORD: [
         'VER_DETALLE',
         'AUTORIZAR',
-        'ANULAR',
         'ENVIAR',
         'REGRESAR_TIENDA',
         'ASIGNAR_LABORATORIO',
@@ -4233,7 +4432,6 @@ export class OrdenesTrabajoService {
       ANALISTA: [
         'VER_DETALLE',
         'AUTORIZAR',
-        'ANULAR',
         'ENVIAR',
         'REGRESAR_TIENDA',
         'ASIGNAR_LABORATORIO',
@@ -4288,14 +4486,20 @@ export class OrdenesTrabajoService {
     };
 
     const allowed = byRole[roleCode] ?? [];
+    if (panelMode === 'estado') {
+      return roleCode === 'JEF_TALLER' ||
+          roleCode === 'ANALISTA_ORD' ||
+          roleCode === 'ANALISTA'
+        ? ['VER_DETALLE']
+        : [];
+    }
     if (panelMode === 'anulados') {
       if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER')
         return ['VER_DETALLE'];
       return [];
     }
     if (panelMode === 'entregadas') {
-      if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER')
-        return ['VER_DETALLE', 'GARANTIA'];
+      if (roleCode === 'JEF_TALLER') return ['VER_DETALLE', 'GARANTIA'];
       return [];
     }
     return allowed;
@@ -4662,6 +4866,16 @@ export class OrdenesTrabajoService {
       .trim()
       .toUpperCase();
     return text.length ? text : '';
+  }
+
+  private normalizeHourMinute(value: unknown) {
+    const text = this.normalizeText(value);
+    if (!text) return null;
+    const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(text);
+    if (!match) {
+      throw new BadRequestException('hrEnt debe tener formato HH:MM');
+    }
+    return `${match[1]}:${match[2]}`;
   }
 
   private auditActor(user: JwtPayload) {

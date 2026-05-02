@@ -277,7 +277,7 @@ BEGIN
   IF @PAGESIZE > 25 SET @PAGESIZE = 25;
 
   SET @PANEL_MODE = LOWER(LTRIM(RTRIM(ISNULL(@PANEL_MODE, 'operativo'))));
-  IF @PANEL_MODE NOT IN ('operativo', 'anulados', 'entregadas')
+  IF @PANEL_MODE NOT IN ('operativo', 'estado', 'anulados', 'entregadas')
     SET @PANEL_MODE = 'operativo';
 
   SET @ROLE_CODE = UPPER(LTRIM(RTRIM(ISNULL(@ROLE_CODE, ''))));
@@ -311,7 +311,15 @@ BEGIN
   DECLARE @allowedStatus TABLE (ESTSEGU FLOAT PRIMARY KEY);
   DECLARE @ALLOW_NULL_ESTSEGU BIT = 0;
 
-  IF @PANEL_MODE = 'anulados'
+  IF @PANEL_MODE = 'estado'
+  BEGIN
+    IF @IS_ADMIN = 1 OR @ROLE_CODE IN ('JEF_TALLER', 'ANALISTA_ORD', 'ANALISTA')
+      INSERT INTO @allowedStatus (ESTSEGU)
+      SELECT DISTINCT TRY_CONVERT(FLOAT, ESTA)
+      FROM dbo.DAT_EST_ORD
+      WHERE TRY_CONVERT(FLOAT, ESTA) IS NOT NULL;
+  END
+  ELSE IF @PANEL_MODE = 'anulados'
   BEGIN
     IF @IS_ADMIN = 1 OR @ROLE_CODE IN ('JEF_TALLER', 'TALLER')
       INSERT INTO @allowedStatus (ESTSEGU) VALUES (4);
@@ -345,7 +353,23 @@ BEGIN
       o.IORD,
       o.IDFOL,
       o.TIPO,
-      o.OPV,
+      LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), ''))) AS OPV_ID,
+      COALESCE(
+        NULLIF(LTRIM(RTRIM(ISNULL(uopv.NOMBRE, ''))), ''),
+        NULLIF(
+          LTRIM(
+            RTRIM(
+              CONCAT(
+                ISNULL(opv.NOMB, ''),
+                CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(opv.APELP, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(ISNULL(opv.APELP, ''))) END,
+                CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(opv.APELM, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(ISNULL(opv.APELM, ''))) END
+              )
+            )
+          ),
+          ''
+        ),
+        LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
+      ) AS OPV,
       o.FCNS,
       o.FCNM,
       o.CLIEN,
@@ -390,12 +414,26 @@ BEGIN
     ) docdifx
     LEFT JOIN dbo.DAT_EST_ORD e
       ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, o.ESTSEGU)
+    LEFT JOIN dbo.USUARIO uopv
+      ON TRY_CONVERT(INT, uopv.IDUSUARIO) = TRY_CONVERT(INT, o.OPV)
+    LEFT JOIN dbo.PV_OPV opv
+      ON LTRIM(RTRIM(ISNULL(CAST(opv.IDOPV AS NVARCHAR(100)), ''))) = LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
     LEFT JOIN dbo.DAT_LAB lab
       ON TRY_CONVERT(INT, lab.ID) = TRY_CONVERT(INT, o.LABOR)
     WHERE
       (@IORD IS NULL OR LTRIM(RTRIM(ISNULL(o.IORD, ''))) LIKE '%' + @IORD + '%')
       AND (@IDFOL IS NULL OR LTRIM(RTRIM(ISNULL(o.IDFOL, ''))) LIKE '%' + @IDFOL + '%')
-      AND (@CLIENT IS NULL OR CAST(ISNULL(o.CLIEN, '') AS NVARCHAR(255)) LIKE '%' + @CLIENT + '%')
+      AND (
+        @CLIENT IS NULL
+        OR (
+          CASE
+            WHEN TRY_CONVERT(DECIMAL(38, 0), o.CLIEN) IS NOT NULL
+              THEN CONVERT(NVARCHAR(255), CONVERT(DECIMAL(38, 0), o.CLIEN))
+            ELSE LTRIM(RTRIM(CONVERT(NVARCHAR(255), ISNULL(o.CLIEN, ''))))
+          END
+        ) LIKE '%' + @CLIENT + '%'
+        OR UPPER(LTRIM(RTRIM(ISNULL(o.NCLIENTE, '')))) LIKE '%' + UPPER(@CLIENT) + '%'
+      )
       AND (@ART IS NULL OR LTRIM(RTRIM(ISNULL(o.ART, ''))) LIKE '%' + @ART + '%')
       AND (@TIPO IS NULL OR UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) LIKE '%' + UPPER(@TIPO) + '%')
       AND (@LABOR IS NULL OR CAST(ISNULL(o.LABOR, '') AS NVARCHAR(255)) = @LABOR)
@@ -423,7 +461,14 @@ BEGIN
         OR UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) LIKE '%' + UPPER(@SEARCH) + '%'
         OR UPPER(LTRIM(RTRIM(ISNULL(o.ART, '')))) LIKE '%' + UPPER(@SEARCH) + '%'
         OR UPPER(LTRIM(RTRIM(ISNULL(o.DESCART, '')))) LIKE '%' + UPPER(@SEARCH) + '%'
-        OR CAST(ISNULL(o.CLIEN, '') AS NVARCHAR(255)) LIKE '%' + @SEARCH + '%'
+        OR (
+          CASE
+            WHEN TRY_CONVERT(DECIMAL(38, 0), o.CLIEN) IS NOT NULL
+              THEN CONVERT(NVARCHAR(255), CONVERT(DECIMAL(38, 0), o.CLIEN))
+            ELSE LTRIM(RTRIM(CONVERT(NVARCHAR(255), ISNULL(o.CLIEN, ''))))
+          END
+        ) LIKE '%' + @SEARCH + '%'
+        OR UPPER(LTRIM(RTRIM(ISNULL(o.NCLIENTE, '')))) LIKE '%' + UPPER(@SEARCH) + '%'
       )
       AND (
         @IS_ADMIN = 1
