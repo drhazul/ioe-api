@@ -13,6 +13,10 @@ import type { JwtPayload } from '../auth/jwt.strategy';
 import { DatContCtrlEntity } from '../datcontctrl/datcontctrl.entity';
 import { DatDetSvrEntity } from '../datdetsvr/datdetsvr.entity';
 import { UsrModSucEntity } from '../usr-mod-suc/usr-mod-suc.entity';
+import {
+  assertTrustedExcelUpload,
+  assertTrustedWorkbookBounds,
+} from '../../common/security/trusted-excel-upload';
 
 @Injectable()
 export class ConteosService {
@@ -830,13 +834,15 @@ export class ConteosService {
     contCode: string,
     tipocont: string,
   ) {
+    const { buffer } = assertTrustedExcelUpload(file);
     let workbook: XLSX.WorkBook;
 
     try {
-      workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      workbook = XLSX.read(buffer, { type: 'buffer' });
     } catch {
       throw new BadRequestException('No se pudo leer el archivo Excel');
     }
+    assertTrustedWorkbookBounds(workbook);
 
     const sheetNames = workbook.SheetNames ?? [];
     if (!sheetNames.length) {

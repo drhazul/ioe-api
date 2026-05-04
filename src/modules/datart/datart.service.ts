@@ -20,6 +20,10 @@ import { DatArtEntity } from './datart.entity';
 import { CreateDatArtDto } from './dto/create-datart.dto';
 import { UpdateDatArtDto } from './dto/update-datart.dto';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import {
+  assertTrustedExcelUpload,
+  assertTrustedWorkbookBounds,
+} from '../../common/security/trusted-excel-upload';
 
 type DatArtStageRow = {
   RENGLON: number;
@@ -379,17 +383,8 @@ export class DatArtService {
     file: any,
     user: JwtPayload,
   ): Promise<DatArtMassiveUploadResult> {
-    if (!file?.buffer) {
-      throw new BadRequestException('Archivo Excel requerido');
-    }
-
-    const filename = String(file.originalname ?? '').trim();
-    const lowerName = filename.toLowerCase();
-    if (!lowerName.endsWith('.xlsx') && !lowerName.endsWith('.xls')) {
-      throw new BadRequestException('Formato no soportado. Usa .xlsx o .xls');
-    }
-
-    const rows = this.parseExcelRows(file.buffer);
+    const { buffer } = assertTrustedExcelUpload(file);
+    const rows = this.parseExcelRows(buffer);
     if (!rows.length) {
       throw new BadRequestException(
         'El archivo no contiene renglones con datos',
@@ -605,6 +600,7 @@ export class DatArtService {
     } catch (_err) {
       throw new BadRequestException('No se pudo leer el archivo Excel');
     }
+    assertTrustedWorkbookBounds(workbook);
 
     const firstSheet = workbook.SheetNames?.[0];
     if (!firstSheet) {
@@ -612,15 +608,13 @@ export class DatArtService {
     }
 
     const worksheet = workbook.Sheets[firstSheet];
-    const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
-      worksheet,
-      {
-        defval: null,
-        raw: true,
-        blankrows: false,
-      },
-    );
-    if (!jsonRows.length) {
+    const rawRows = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: null,
+      raw: true,
+      blankrows: false,
+    }) as unknown as Array<Array<unknown>>;
+    if (!rawRows.length) {
       return [];
     }
 
@@ -629,9 +623,15 @@ export class DatArtService {
         .toUpperCase()
         .replace(/[\s\-]+/g, '')
         .replace(/[^A-Z0-9_]/g, '');
-    const firstKeys = new Set(
-      Object.keys(jsonRows[0]).map((k) => normalizeKey(k)),
-    );
+    const headerRow = rawRows[0] ?? [];
+    const keyToIndex = new Map<string, number>();
+    headerRow.forEach((value, idx) => {
+      const normalized = normalizeKey(String(value ?? ''));
+      if (!normalized) return;
+      if (!keyToIndex.has(normalized)) keyToIndex.set(normalized, idx);
+    });
+
+    const firstKeys = new Set(Array.from(keyToIndex.keys()));
     if (
       !firstKeys.has('SUC') ||
       !firstKeys.has('ART') ||
@@ -642,63 +642,76 @@ export class DatArtService {
       );
     }
 
-    const rows: DatArtStageRow[] = [];
-    jsonRows.forEach((raw, index) => {
-      const rowMap = new Map<string, unknown>();
-      for (const [key, value] of Object.entries(raw)) {
-        rowMap.set(normalizeKey(key), value);
+    const pickCell = (row: Array<unknown>, ...candidates: string[]) => {
+      for (const candidate of candidates) {
+        const col = keyToIndex.get(candidate);
+        if (col == null) continue;
+        return row[col];
       }
+      return null;
+    };
 
-      const pick = (...candidates: string[]) => {
-        for (const key of candidates) {
-          if (rowMap.has(key)) return rowMap.get(key);
-        }
-        return null;
-      };
-
+    const rows: DatArtStageRow[] = [];
+    rawRows.slice(1).forEach((raw, index) => {
+      const values = Array.isArray(raw) ? raw : [];
       const stageRow: DatArtStageRow = {
         RENGLON: index + 2,
-        SUC: this.toNullableString(pick('SUC'), 5),
-        TIPO: this.toNullableString(pick('TIPO'), 255),
-        ART: this.toNullableString(pick('ART'), 10),
-        UPC: this.toNullableString(pick('UPC'), 15),
-        CLAVESAT: this.toNullableNumber(pick('CLAVESAT')),
-        UNIMEDSAT: this.toNullableString(pick('UNIMEDSAT'), 255),
-        DES: this.toNullableString(pick('DES'), 255),
-        STOCK: this.toNullableNumber(pick('STOCK')),
-        STOCK_MIN: this.toNullableNumber(pick('STOCK_MIN', 'STOCKMIN')),
-        ESTATUS: this.toNullableString(pick('ESTATUS'), 255),
-        DIA_REABASTO: this.toNullableNumber(
-          pick('DIA_REABASTO', 'DIAREABASTO'),
+        SUC: this.toNullableString(pickCell(values, 'SUC'), 5),
+        TIPO: this.toNullableString(pickCell(values, 'TIPO'), 255),
+        ART: this.toNullableString(pickCell(values, 'ART'), 10),
+        UPC: this.toNullableString(pickCell(values, 'UPC'), 15),
+        CLAVESAT: this.toNullableNumber(pickCell(values, 'CLAVESAT')),
+        UNIMEDSAT: this.toNullableString(pickCell(values, 'UNIMEDSAT'), 255),
+        DES: this.toNullableString(pickCell(values, 'DES'), 255),
+        STOCK: this.toNullableNumber(pickCell(values, 'STOCK')),
+        STOCK_MIN: this.toNullableNumber(
+          pickCell(values, 'STOCK_MIN', 'STOCKMIN'),
         ),
-        PVTA: this.toNullableNumber(pick('PVTA')),
-        CTOP: this.toNullableNumber(pick('CTOP')),
-        PROV_1: this.toNullableNumber(pick('PROV_1', 'PROV1')),
-        CTO_PROV1: this.toNullableNumber(pick('CTO_PROV1', 'CTOPROV1')),
-        PROV_2: this.toNullableNumber(pick('PROV_2', 'PROV2')),
-        CTO_PROV2: this.toNullableNumber(pick('CTO_PROV2', 'CTOPROV2')),
-        PROV_3: this.toNullableNumber(pick('PROV_3', 'PROV3')),
-        CTO_PROV3: this.toNullableNumber(pick('CTO_PROV3', 'CTOPROV3')),
-        UN_COMP: this.toNullableString(pick('UN_COMP', 'UNCOMP'), 255),
-        FACT_COMP: this.toNullableNumber(pick('FACT_COMP', 'FACTCOMP')),
-        UN_VTA: this.toNullableString(pick('UN_VTA', 'UNVTA'), 255),
-        FACT_VTA: this.toNullableNumber(pick('FACT_VTA', 'FACTVTA')),
-        BASE: this.toNullableString(pick('BASE'), 255),
-        SPH: this.toNullableNumber(pick('SPH')),
-        CYL: this.toNullableNumber(pick('CYL')),
-        ADIC: this.toNullableNumber(pick('ADIC')),
-        DEPA: this.toNullableNumber(pick('DEPA')),
-        SUBD: this.toNullableNumber(pick('SUBD')),
-        CLAS: this.toNullableNumber(pick('CLAS')),
-        SCLA: this.toNullableNumber(pick('SCLA')),
-        SCLA2: this.toNullableNumber(pick('SCLA2')),
-        UMUE: this.toNullableNumber(pick('UMUE')),
-        UTRA: this.toNullableNumber(pick('UTRA')),
-        UNIV: this.toNullableNumber(pick('UNIV')),
-        UFRE: this.toNullableNumber(pick('UFRE')),
-        BLOQ: this.toNullableInt(pick('BLOQ')),
-        MARCA: this.toNullableString(pick('MARCA'), 255),
-        MODELO: this.toNullableString(pick('MODELO')),
+        ESTATUS: this.toNullableString(pickCell(values, 'ESTATUS'), 255),
+        DIA_REABASTO: this.toNullableNumber(
+          pickCell(values, 'DIA_REABASTO', 'DIAREABASTO'),
+        ),
+        PVTA: this.toNullableNumber(pickCell(values, 'PVTA')),
+        CTOP: this.toNullableNumber(pickCell(values, 'CTOP')),
+        PROV_1: this.toNullableNumber(pickCell(values, 'PROV_1', 'PROV1')),
+        CTO_PROV1: this.toNullableNumber(
+          pickCell(values, 'CTO_PROV1', 'CTOPROV1'),
+        ),
+        PROV_2: this.toNullableNumber(pickCell(values, 'PROV_2', 'PROV2')),
+        CTO_PROV2: this.toNullableNumber(
+          pickCell(values, 'CTO_PROV2', 'CTOPROV2'),
+        ),
+        PROV_3: this.toNullableNumber(pickCell(values, 'PROV_3', 'PROV3')),
+        CTO_PROV3: this.toNullableNumber(
+          pickCell(values, 'CTO_PROV3', 'CTOPROV3'),
+        ),
+        UN_COMP: this.toNullableString(
+          pickCell(values, 'UN_COMP', 'UNCOMP'),
+          255,
+        ),
+        FACT_COMP: this.toNullableNumber(
+          pickCell(values, 'FACT_COMP', 'FACTCOMP'),
+        ),
+        UN_VTA: this.toNullableString(pickCell(values, 'UN_VTA', 'UNVTA'), 255),
+        FACT_VTA: this.toNullableNumber(
+          pickCell(values, 'FACT_VTA', 'FACTVTA'),
+        ),
+        BASE: this.toNullableString(pickCell(values, 'BASE'), 255),
+        SPH: this.toNullableNumber(pickCell(values, 'SPH')),
+        CYL: this.toNullableNumber(pickCell(values, 'CYL')),
+        ADIC: this.toNullableNumber(pickCell(values, 'ADIC')),
+        DEPA: this.toNullableNumber(pickCell(values, 'DEPA')),
+        SUBD: this.toNullableNumber(pickCell(values, 'SUBD')),
+        CLAS: this.toNullableNumber(pickCell(values, 'CLAS')),
+        SCLA: this.toNullableNumber(pickCell(values, 'SCLA')),
+        SCLA2: this.toNullableNumber(pickCell(values, 'SCLA2')),
+        UMUE: this.toNullableNumber(pickCell(values, 'UMUE')),
+        UTRA: this.toNullableNumber(pickCell(values, 'UTRA')),
+        UNIV: this.toNullableNumber(pickCell(values, 'UNIV')),
+        UFRE: this.toNullableNumber(pickCell(values, 'UFRE')),
+        BLOQ: this.toNullableInt(pickCell(values, 'BLOQ')),
+        MARCA: this.toNullableString(pickCell(values, 'MARCA'), 255),
+        MODELO: this.toNullableString(pickCell(values, 'MODELO')),
       };
 
       const hasAnyValue = Object.entries(stageRow).some(

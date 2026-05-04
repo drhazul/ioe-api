@@ -28,8 +28,17 @@ export class UsrModSucController {
     @Query('usuario') usuario?: string,
     @Query('suc') suc?: string,
     @Query('activo') activo?: string,
+    @Query('sucUsuario') sucUsuario?: string,
+    @Query('depto') depto?: string,
   ) {
-    return this.service.findAll({ modulo, usuario, suc, activo });
+    return this.service.findAll({
+      modulo,
+      usuario,
+      suc,
+      activo,
+      sucUsuario,
+      depto,
+    });
   }
 
   @Get(':modulo/:usuario/:suc')

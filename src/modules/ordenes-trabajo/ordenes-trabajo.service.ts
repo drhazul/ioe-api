@@ -51,6 +51,11 @@ type CambioMermaOriginalContext = {
   roleCode: string;
 };
 
+type OrdFlowVisibilityRule = {
+  estsegu: number;
+  onlyExternalLab: boolean;
+};
+
 @Injectable()
 export class OrdenesTrabajoService {
   private static readonly MODULE_CODES = [
@@ -68,6 +73,8 @@ export class OrdenesTrabajoService {
     'DAT_JAO_BISEL',
     'PV_ORDS',
   ] as const;
+  private flowVisibilityTableExists: boolean | null = null;
+  private readonly flowVisibilityPanelConfigCache = new Map<string, boolean>();
 
   constructor(
     private readonly dataSource: DataSource,
@@ -233,13 +240,29 @@ export class OrdenesTrabajoService {
           return out;
         })
       : [];
+    const itemsByAllowedStatus = this.applyAllowedStatusFilterToItems(
+      rawItems,
+      allowedStatusCodes,
+      includeNullFlow,
+    );
+    const visibilityRules = await this.resolveFlowVisibilityRules(
+      user,
+      roleCode,
+      panelMode,
+    );
+    const itemsAfterVisibility = await this.applyFlowVisibilityRulesToItems(
+      itemsByAllowedStatus,
+      visibilityRules,
+      scope,
+      roleCode,
+    );
     const asignLabels = await this.resolveOpvLabels(
-      rawItems.map((item) => item.ASIGN),
+      itemsAfterVisibility.map((item) => item.ASIGN),
     );
     const opvLabels = await this.resolveUsuarioLabels(
-      rawItems.map((item) => item.OPV_ID ?? item.OPV),
+      itemsAfterVisibility.map((item) => item.OPV_ID ?? item.OPV),
     );
-    const items = rawItems.map((item) => {
+    const items = itemsAfterVisibility.map((item) => {
       const asignId = this.normalizeText(item.ASIGN);
       const asignLabel = asignId == null ? null : asignLabels.get(asignId);
       const opvId = this.normalizeText(item.OPV_ID ?? item.OPV);
@@ -1089,8 +1112,8 @@ export class OrdenesTrabajoService {
       auditAction: 'ORD_ENVIAR_LOTE',
       fallbackError:
         'No se pudo enviar el lote de ORDs. Verifique estado, laboratorio y permisos.',
-      singleMessage: '1 ORD enviada a estatus 5',
-      pluralMessagePrefix: 'ORDs enviadas a estatus 5',
+      singleMessage: '1 ORD enviada (5 interno / 9 laboratorio externo)',
+      pluralMessagePrefix: 'ORDs enviadas (5 interno / 9 laboratorio externo)',
       notFoundMessage: 'No fue posible procesar las ORDs enviadas',
     });
   }
@@ -1359,22 +1382,36 @@ export class OrdenesTrabajoService {
 
   async validarRecibirOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('SCAN_RECIBIR', user);
+    const roleCode = await this.resolveRoleCode(user);
+    const isAnalista = this.isAnalistaRoleForRecepcionExterna(roleCode);
     return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 5,
-      requiredFlowLabel: 'ENTREGADA A MAQ O BISEL',
+      requiredFlow: isAnalista ? 9 : 5,
+      requiredFlowLabel: isAnalista
+        ? 'PENDIENTE RECIBIR EN ANALISTA'
+        : 'ENTREGADA A MAQ O BISEL',
       okMessage: 'ORD válida para recepción',
+      requireExternalLaboratorioForAnalyst: isAnalista,
     });
   }
 
   async recibirLote(dto: SendOrdBatchDto, user: JwtPayload, ip: string | null) {
     await this.assertActionPermission('SCAN_RECIBIR', user);
+    const iords = this.normalizeDistinctIords(dto.iords);
+    if (!iords.length) {
+      throw new BadRequestException('Debe proporcionar al menos una ORD');
+    }
+    const scope = await this.resolveSucScope(user, null);
+    const roleCode = await this.resolveRoleCode(user);
+    await this.assertBatchExternalLaboratorioForAnalyst(iords, scope, roleCode);
     return this.executeLoteAction(dto, user, ip, {
       spName: 'sp_ordenes_trabajo_recibir_lote',
       auditAction: 'ORD_RECIBIR_LOTE',
       fallbackError:
         'No se pudo recibir el lote de ORDs. Verifique estado y permisos.',
-      singleMessage: '1 ORD recibida a estatus 7',
-      pluralMessagePrefix: 'ORDs recibidas a estatus 7',
+      singleMessage:
+        '1 ORD recibida (5->7 interno / 9->10 externo)',
+      pluralMessagePrefix:
+        'ORDs recibidas (5->7 interno / 9->10 externo)',
       notFoundMessage: 'No fue posible procesar las ORDs recibidas',
     });
   }
@@ -1712,6 +1749,7 @@ export class OrdenesTrabajoService {
       okMessage: string;
       requireLaboratorio?: boolean;
       requireAsignado?: boolean;
+      requireExternalLaboratorioForAnalyst?: boolean;
     },
   ) {
     const code = this.normalizeText(codeRaw);
@@ -1734,6 +1772,10 @@ export class OrdenesTrabajoService {
         o.DESCART,
         TRY_CONVERT(FLOAT, o.CTD) AS CTD,
         TRY_CONVERT(INT, o.LABOR) AS LABOR,
+        LTRIM(RTRIM(ISNULL(lab.LAB, ''))) AS LAB_DESC,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.TIPOLAB, '')))) AS LAB_TIPOLAB,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.UBILAB, '')))) AS LAB_UBILAB,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) AS LAB_SUC,
         LTRIM(RTRIM(ISNULL(CAST(o.ASIGN AS NVARCHAR(100)), ''))) AS ASIGN,
         TRY_CONVERT(FLOAT, o.ESTSEGU) AS ESTSEGU,
         LTRIM(RTRIM(ISNULL(e.TIPO, ''))) AS ESTSEGU_DESC
@@ -1777,7 +1819,7 @@ export class OrdenesTrabajoService {
       throw new NotFoundException('La ORD encontrada no tiene IORD válido');
     }
     this.assertOrdTipoMatchesRole(
-      await this.resolveRoleCode(user),
+      roleCode,
       row.TIPO,
       iord,
     );
@@ -1805,6 +1847,15 @@ export class OrdenesTrabajoService {
           `La ORD ${iord} debe tener colaborador asignado para continuar.`,
         );
       }
+    }
+    if (
+      options.requireExternalLaboratorioForAnalyst &&
+      this.isAnalistaRoleForRecepcionExterna(roleCode) &&
+      !this.isLaboratorioExterno(row)
+    ) {
+      throw new BadRequestException(
+        `La ORD ${iord} pertenece a laboratorio interno y debe continuar flujo de asignación/trabajo terminado antes de entrega a cliente.`,
+      );
     }
 
     return {
@@ -2196,6 +2247,8 @@ export class OrdenesTrabajoService {
       SCAN_RECIBIR: [
         'JEF_TALLER',
         'TALLER',
+        'ANALISTA_ORD',
+        'ANALISTA',
         'ENC_MAQUILA',
         'ENCARGADO_MAQUILA',
         'ENC_BISEL',
@@ -2450,6 +2503,27 @@ export class OrdenesTrabajoService {
     roleCodeRaw: string,
     panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
   ) {
+    const tableExists = await this.hasFlowVisibilityTable();
+    const configuredRules = await this.resolveFlowVisibilityRules(
+      user,
+      roleCodeRaw,
+      panelMode,
+    );
+    if (configuredRules.length) {
+      const configuredCodes = new Set<number>();
+      for (const rule of configuredRules) {
+        configuredCodes.add(rule.estsegu);
+      }
+      return [...configuredCodes].sort((a, b) => a - b);
+    }
+
+    if (tableExists) {
+      const panelConfigured = await this.hasFlowVisibilityPanelConfig(panelMode);
+      if (panelConfigured) {
+        return [];
+      }
+    }
+
     if (this.isAdmin(user)) {
       if (panelMode === 'estado') return this.resolveAllFlowStatusCodes();
       if (panelMode === 'anulados') return [4];
@@ -2476,7 +2550,7 @@ export class OrdenesTrabajoService {
       return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 9.3, 10, 12];
     }
     if (roleCode === 'ANALISTA_ORD' || roleCode === 'ANALISTA') {
-      return [2, 3, 3.1, 5, 9.1, 9.2, 9.3, 10, 12];
+      return [2, 3, 3.1, 5, 9, 9.1, 9.2, 9.3, 10, 12];
     }
     if (roleCode === 'ANALISTA_INV' || roleCode === 'INVJEF') {
       return [9.1, 9.2, 9.3];
@@ -2557,6 +2631,22 @@ export class OrdenesTrabajoService {
       options.push({ value: 'NULL', label: 'SIN FLUJO' });
     }
     return options;
+  }
+
+  private applyAllowedStatusFilterToItems(
+    items: Record<string, unknown>[],
+    allowedStatusCodes: number[],
+    includeNullFlow: boolean,
+  ) {
+    if (!items.length) return items;
+    const allowed = new Set(
+      allowedStatusCodes.map((code) => this.formatStatusCode(code)),
+    );
+    return items.filter((item) => {
+      const flow = this.toFloat(item.ESTSEGU);
+      if (flow == null) return includeNullFlow;
+      return allowed.has(this.formatStatusCode(flow));
+    });
   }
 
   private shouldIncludeNullFlow(
@@ -4423,6 +4513,7 @@ export class OrdenesTrabajoService {
         'ENVIAR',
         'REGRESAR_TIENDA',
         'ASIGNAR_LABORATORIO',
+        'SCAN_RECIBIR',
         'ENTREGAR',
         'IMPRIMIR_ETIQUETA',
         'CAMBIO_MATERIAL',
@@ -4435,6 +4526,7 @@ export class OrdenesTrabajoService {
         'ENVIAR',
         'REGRESAR_TIENDA',
         'ASIGNAR_LABORATORIO',
+        'SCAN_RECIBIR',
         'ENTREGAR',
         'IMPRIMIR_ETIQUETA',
         'CAMBIO_MATERIAL',
@@ -4773,6 +4865,165 @@ export class OrdenesTrabajoService {
     );
   }
 
+  private async applyFlowVisibilityRulesToItems(
+    items: Record<string, unknown>[],
+    rules: OrdFlowVisibilityRule[],
+    scope: SucScope,
+    roleCodeRaw: string,
+  ) {
+    if (!items.length || !rules.length) return items;
+    const externalOnlyFlows = new Set(
+      rules
+        .filter((rule) => rule.onlyExternalLab)
+        .map((rule) => this.formatStatusCode(rule.estsegu)),
+    );
+    if (!externalOnlyFlows.size) return items;
+
+    const iords = items
+      .map((item) => this.normalizeUpper(item.IORD ?? ''))
+      .filter((value) => value.length > 0);
+    if (!iords.length) return items;
+
+    const contextRows = await this.fetchBatchOrdOperationalContext(
+      iords,
+      scope,
+      roleCodeRaw,
+    );
+    const externalByIord = new Map<string, boolean>();
+    for (const row of contextRows) {
+      const iord = this.normalizeUpper(row.IORD ?? '');
+      if (!iord) continue;
+      externalByIord.set(iord, this.isLaboratorioExterno(row));
+    }
+
+    return items.filter((item) => {
+      const flow = this.toFloat(item.ESTSEGU);
+      if (flow == null) return true;
+      const flowCode = this.formatStatusCode(flow);
+      if (!externalOnlyFlows.has(flowCode)) return true;
+
+      const iord = this.normalizeUpper(item.IORD ?? '');
+      if (!iord) return false;
+      return externalByIord.get(iord) === true;
+    });
+  }
+
+  private async resolveFlowVisibilityRules(
+    user: JwtPayload,
+    roleCodeRaw: string,
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
+  ) {
+    const tableExists = await this.hasFlowVisibilityTable();
+    if (!tableExists) return [];
+
+    const roleCode = this.isAdmin(user)
+      ? 'ADMIN'
+      : this.normalizeUpper(roleCodeRaw);
+    if (!roleCode) return [];
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        TRY_CONVERT(FLOAT, ESTA) AS ESTA,
+        TRY_CONVERT(BIT, SOLO_EXTERNO) AS SOLO_EXTERNO
+      FROM dbo.DAT_JAO_ORD_FLUJO_VIS
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) = 'DAT_JAO_ORD'
+        AND UPPER(LTRIM(RTRIM(ISNULL(PANEL_MODE, '')))) = UPPER(@0)
+        AND UPPER(LTRIM(RTRIM(ISNULL(ROLE_CODE, '')))) = UPPER(@1)
+        AND ISNULL(ACTIVO, 1) = 1
+      ORDER BY TRY_CONVERT(FLOAT, ESTA)
+      `,
+      [panelMode, roleCode],
+    );
+
+    const rules = (Array.isArray(rows) ? rows : [])
+      .map((row) => {
+        const record = row as Record<string, unknown>;
+        const estsegu = this.toFloat(record.ESTA);
+        if (estsegu == null) return null;
+        const onlyExternalLab = this.toInt(record.SOLO_EXTERNO) === 1;
+        return { estsegu, onlyExternalLab } as OrdFlowVisibilityRule;
+      })
+      .filter((rule): rule is OrdFlowVisibilityRule => rule != null);
+
+    if (!rules.length) return [];
+    const unique = new Map<string, OrdFlowVisibilityRule>();
+    for (const rule of rules) {
+      unique.set(this.formatStatusCode(rule.estsegu), rule);
+    }
+    return [...unique.values()].sort((a, b) => a.estsegu - b.estsegu);
+  }
+
+  private async hasFlowVisibilityTable() {
+    if (this.flowVisibilityTableExists != null) {
+      return this.flowVisibilityTableExists;
+    }
+    const rows = await this.dataSource.query(`
+      SELECT TOP 1 1 AS ok
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'DAT_JAO_ORD_FLUJO_VIS'
+    `);
+    this.flowVisibilityTableExists = Array.isArray(rows) && rows.length > 0;
+    return this.flowVisibilityTableExists;
+  }
+
+  private async hasFlowVisibilityPanelConfig(
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
+  ) {
+    const key = panelMode.toLowerCase();
+    const cached = this.flowVisibilityPanelConfigCache.get(key);
+    if (cached != null) return cached;
+
+    const tableExists = await this.hasFlowVisibilityTable();
+    if (!tableExists) {
+      this.flowVisibilityPanelConfigCache.set(key, false);
+      return false;
+    }
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 1 AS ok
+      FROM dbo.DAT_JAO_ORD_FLUJO_VIS
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) = 'DAT_JAO_ORD'
+        AND UPPER(LTRIM(RTRIM(ISNULL(PANEL_MODE, '')))) = UPPER(@0)
+        AND ISNULL(ACTIVO, 1) = 1
+      `,
+      [panelMode],
+    );
+    const hasConfig = Array.isArray(rows) && rows.length > 0;
+    this.flowVisibilityPanelConfigCache.set(key, hasConfig);
+    return hasConfig;
+  }
+
+  private async assertBatchExternalLaboratorioForAnalyst(
+    iords: string[],
+    scope: SucScope,
+    roleCodeRaw: string,
+  ) {
+    if (!this.isAnalistaRoleForRecepcionExterna(roleCodeRaw)) return;
+    const rows = await this.fetchBatchOrdOperationalContext(iords, scope, roleCodeRaw);
+    const invalidFlow = rows
+      .filter((row) => {
+        const flow = this.toFloat(row.ESTSEGU);
+        return flow == null || Math.abs(flow - 9) > 0.0001;
+      })
+      .map((row) => this.normalizeUpper(row.IORD ?? ''))
+      .filter((item) => item.length > 0);
+    if (invalidFlow.length) {
+      throw new BadRequestException(
+        `Las siguientes ORDs deben estar en estatus 9 (PENDIENTE RECIBIR EN ANALISTA): ${invalidFlow.join(', ')}`,
+      );
+    }
+    const invalid = rows
+      .filter((row) => !this.isLaboratorioExterno(row))
+      .map((row) => this.normalizeUpper(row.IORD ?? ''))
+      .filter((item) => item.length > 0);
+    if (!invalid.length) return;
+    throw new BadRequestException(
+      `Las siguientes ORDs pertenecen a laboratorio interno y no pueden recibirse desde analista: ${invalid.join(', ')}`,
+    );
+  }
+
   private async fetchBatchOrdOperationalContext(
     iords: string[],
     scope: SucScope,
@@ -4788,6 +5039,10 @@ export class OrdenesTrabajoService {
         UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) AS TIPO,
         TRY_CONVERT(FLOAT, o.ESTSEGU) AS ESTSEGU,
         TRY_CONVERT(INT, o.LABOR) AS LABOR,
+        LTRIM(RTRIM(ISNULL(lab.LAB, ''))) AS LAB_DESC,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.TIPOLAB, '')))) AS LAB_TIPOLAB,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.UBILAB, '')))) AS LAB_UBILAB,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) AS LAB_SUC,
         LTRIM(RTRIM(ISNULL(CAST(o.ASIGN AS NVARCHAR(100)), ''))) AS ASIGN
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
@@ -4822,6 +5077,22 @@ export class OrdenesTrabajoService {
       );
     }
     return records;
+  }
+
+  private isAnalistaRoleForRecepcionExterna(roleCodeRaw: string) {
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    return roleCode === 'ANALISTA_ORD' || roleCode === 'ANALISTA';
+  }
+
+  private isLaboratorioExterno(row: Record<string, unknown>) {
+    const ubiLab = this.normalizeUpper(row.LAB_UBILAB ?? '');
+    if (ubiLab.includes('EXTER')) return true;
+    if (ubiLab.includes('LOCAL')) return false;
+    const labSuc = this.normalizeUpper(row.LAB_SUC ?? '');
+    if (!labSuc) return true;
+    const tipoLab = this.normalizeUpper(row.LAB_TIPOLAB ?? '');
+    const lab = this.normalizeUpper(row.LAB_DESC ?? '');
+    return tipoLab.includes('EXTER') || lab.includes('EXTER');
   }
 
   private normalizePage(value?: number) {

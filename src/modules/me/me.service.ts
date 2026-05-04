@@ -9,6 +9,7 @@ import { RolGrupmodFrontEntity } from './entities/rol-grupmod-front.entity';
 import { RolGrupModuloPermEntity } from './entities/rol-grup-modulo-perm.entity';
 import { UsuarioEntity } from '../users/usuario.entity';
 import { ModFrontEntity } from './entities/mod-front.entity';
+import { UsrGrupmodFrontEntity } from './entities/usr-grupmod-front.entity';
 
 @Injectable()
 export class MeService {
@@ -23,18 +24,16 @@ export class MeService {
     private readonly userRepo: Repository<UsuarioEntity>,
     @InjectRepository(ModFrontEntity)
     private readonly modFrontRepo: Repository<ModFrontEntity>,
+    @InjectRepository(UsrGrupmodFrontEntity)
+    private readonly ugfRepo: Repository<UsrGrupmodFrontEntity>,
   ) {}
 
-  async getFrontMenu(roleId: number): Promise<FrontMenuResponseDto> {
-    const assigns = await this.rgfRepo.find({
-      where: { IDROL: roleId, ACTIVO: true },
-    });
-
-    const accesoTotal = assigns.some((a) => a.IDGRUPMOD_FRONT === 0);
-
-    const allowedGroupIds = accesoTotal
-      ? null
-      : assigns.map((a) => a.IDGRUPMOD_FRONT).filter((x) => x !== 0);
+  async getFrontMenu(
+    userId: number,
+    roleId: number,
+  ): Promise<FrontMenuResponseDto> {
+    const { accesoTotal, allowedGroupIds } =
+      await this.resolveEffectiveFrontGroups(userId, roleId);
 
     if (!accesoTotal && (!allowedGroupIds || allowedGroupIds.length === 0)) {
       return { roleId, accesoTotal, grupos: [] };
@@ -84,15 +83,12 @@ export class MeService {
     };
   }
 
-  async getRoleDatmodulos(roleId: number): Promise<RoleDatmodulosResponseDto> {
-    const assigns = await this.rgfRepo.find({
-      where: { IDROL: roleId, ACTIVO: true },
-    });
-
-    const accesoTotal = assigns.some((a) => a.IDGRUPMOD_FRONT === 0);
-    const allowedGroupIds = accesoTotal
-      ? null
-      : assigns.map((a) => a.IDGRUPMOD_FRONT).filter((x) => x !== 0);
+  async getRoleDatmodulos(
+    userId: number,
+    roleId: number,
+  ): Promise<RoleDatmodulosResponseDto> {
+    const { accesoTotal, allowedGroupIds } =
+      await this.resolveEffectiveFrontGroups(userId, roleId);
 
     if (accesoTotal) {
       const rows = await this.modFrontRepo.find({
@@ -147,6 +143,32 @@ export class MeService {
     };
   }
 
+  private async resolveEffectiveFrontGroups(userId: number, roleId: number) {
+    const userAssigns = await this.ugfRepo.find({
+      where: { IDUSUARIO: userId, ACTIVO: true },
+    });
+    const sourceAssigns =
+      userAssigns.length > 0
+        ? userAssigns
+        : await this.rgfRepo.find({
+            where: { IDROL: roleId, ACTIVO: true },
+          });
+
+    const accesoTotal =
+      sourceAssigns.some((a) => a.IDGRUPMOD_FRONT === 0) || roleId === 0;
+    const allowedGroupIds = accesoTotal
+      ? null
+      : Array.from(
+          new Set(
+            sourceAssigns
+              .map((a) => a.IDGRUPMOD_FRONT)
+              .filter((x) => x !== 0),
+          ),
+        );
+
+    return { accesoTotal, allowedGroupIds };
+  }
+
   async getBackendPerms(roleId: number): Promise<BackendPermsResponseDto> {
     const rows = await this.rgmpRepo.find({
       where: { IDROL: roleId, ACTIVO: true },
@@ -171,7 +193,7 @@ export class MeService {
 
   async logFrontModuleCounts(roleId: number) {
     const activos = await this.modFrontRepo.count({ where: { ACTIVO: true } });
-    const res = await this.getRoleDatmodulos(roleId);
+    const res = await this.getRoleDatmodulos(0, roleId);
     console.log(
       '[me] MOD_FRONT activos:',
       activos,

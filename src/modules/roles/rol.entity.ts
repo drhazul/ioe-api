@@ -17,6 +17,9 @@ export class RolEntity {
   @Column({ type: 'bit', default: () => '1' })
   ACTIVO: boolean;
 
+  @Column({ type: 'int', nullable: true })
+  IDDEPTO: number | null;
+
   @Column({ type: 'datetime2', precision: 0, default: () => 'SYSDATETIME()' })
   FCNR: Date;
 }

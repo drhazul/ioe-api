@@ -18,12 +18,12 @@ export class MeController {
 
   @Get('front-menu')
   getFrontMenu(@CurrentUser() user: any) {
-    return this.service.getFrontMenu(Number(user.roleId));
+    return this.service.getFrontMenu(Number(user.sub), Number(user.roleId));
   }
 
   @Get('datmodulos')
   getDatmodulos(@CurrentUser() user: any) {
-    return this.service.getRoleDatmodulos(Number(user.roleId));
+    return this.service.getRoleDatmodulos(Number(user.sub), Number(user.roleId));
   }
 
   @Get('backend-perms')

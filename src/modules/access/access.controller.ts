@@ -26,6 +26,7 @@ import { CreateGrupmodFrontDto } from './dto/create-grupmod-front.dto';
 import { UpdateGrupmodFrontDto } from './dto/update-grupmod-front.dto';
 import { AssignFrontModulesToGroupDto } from './dto/assign-front-modules-to-group.dto';
 import { AssignFrontGroupToRoleDto } from './dto/assign-front-group-to-role.dto';
+import { AssignFrontGroupToUserDto } from './dto/assign-front-group-to-user.dto';
 
 @ApiTags('access')
 @ApiBearerAuth('jwt-auth')
@@ -273,10 +274,54 @@ export class AccessController {
     return this.ok(row, 'updated');
   }
 
+  // -------- FRONT ENROLAMIENTOS USUARIO --------
+  @Get('users')
+  @UseGuards(AdminOnlyGuard)
+  async listUsers(
+    @Query('includeInactives') includeInactives?: string,
+    @Query('suc') suc?: string,
+    @Query('idDepto') idDepto?: string,
+  ) {
+    const rows = await this.service.listUsers(
+      this.includeInactives(includeInactives),
+      (suc ?? '').trim() || undefined,
+      idDepto == null || idDepto.trim().length === 0
+        ? undefined
+        : Number(idDepto),
+    );
+    return this.ok(rows);
+  }
+
+  @Get('users/:id/enrolamientos-front')
+  @UseGuards(AdminOnlyGuard)
+  async getFrontUserEnrollments(
+    @Param('id') id: string,
+    @Query('includeInactives') includeInactives?: string,
+  ) {
+    const rows = await this.service.getFrontUserEnrollments(
+      Number(id),
+      this.includeInactives(includeInactives),
+    );
+    return this.ok(rows);
+  }
+
+  @Post('users/:id/enrolamientos-front')
+  @UseGuards(AdminOnlyGuard)
+  async setFrontUserEnrollment(
+    @Param('id') id: string,
+    @Body() dto: AssignFrontGroupToUserDto,
+  ) {
+    const row = await this.service.setFrontUserEnrollment(Number(id), dto);
+    return this.ok(row, 'updated');
+  }
+
   // -------- FRONT MENU (ME) --------
   @Get('me/front-menu')
   async getFrontMenu(@CurrentUser() user: any) {
-    const rows = await this.service.getFrontMenu(Number(user.roleId));
+    const rows = await this.service.getFrontMenu(
+      Number(user.sub),
+      Number(user.roleId),
+    );
     return this.ok(rows);
   }
 }

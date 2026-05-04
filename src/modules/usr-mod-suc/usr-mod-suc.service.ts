@@ -8,6 +8,9 @@ import { Repository } from 'typeorm';
 import { UsrModSucEntity } from './usr-mod-suc.entity';
 import { CreateUsrModSucDto } from './dto/create-usr-mod-suc.dto';
 import { UpdateUsrModSucDto } from './dto/update-usr-mod-suc.dto';
+import { UsuarioEntity } from '../users/usuario.entity';
+import { ModFrontEntity } from '../me/entities/mod-front.entity';
+import { DepartamentoEntity } from '../deptos/departamento.entity';
 
 @Injectable()
 export class UsrModSucService {
@@ -21,27 +24,55 @@ export class UsrModSucService {
     usuario?: string;
     suc?: string;
     activo?: string;
+    sucUsuario?: string;
+    depto?: string;
   }) {
-    const where: any = {};
     const modulo = query?.modulo?.trim();
     const usuario = query?.usuario?.trim();
     const suc = query?.suc?.trim();
     const activo = query?.activo?.trim();
+    const sucUsuario = query?.sucUsuario?.trim();
+    const depto = query?.depto?.trim();
 
-    if (modulo) where.MODULO = modulo;
-    if (usuario) where.USUARIO = usuario;
-    if (suc) where.SUC = suc;
+    const qb = this.repo
+      .createQueryBuilder('ums')
+      .leftJoin(UsuarioEntity, 'u', 'u.USERNAME = ums.USUARIO')
+      .leftJoin(DepartamentoEntity, 'd', 'd.IDDEPTO = u.IDDEPTO')
+      .leftJoin(ModFrontEntity, 'mf', 'mf.CODIGO = ums.MODULO')
+      .orderBy('ums.MODULO', 'ASC')
+      .addOrderBy('ums.USUARIO', 'ASC')
+      .addOrderBy('ums.SUC', 'ASC');
+
+    if (modulo) qb.andWhere('ums.MODULO = :modulo', { modulo });
+    if (usuario) qb.andWhere('ums.USUARIO = :usuario', { usuario });
+    if (suc) qb.andWhere('ums.SUC = :suc', { suc });
 
     if (activo !== undefined && activo !== null && activo !== '') {
       const normalized = activo.toLowerCase();
-      if (normalized === '1' || normalized === 'true') where.ACTIVO = true;
-      if (normalized === '0' || normalized === 'false') where.ACTIVO = false;
+      if (normalized === '1' || normalized === 'true') {
+        qb.andWhere('ums.ACTIVO = :activoTrue', { activoTrue: true });
+      }
+      if (normalized === '0' || normalized === 'false') {
+        qb.andWhere('ums.ACTIVO = :activoFalse', { activoFalse: false });
+      }
     }
 
-    return this.repo.find({
-      where: Object.keys(where).length ? where : undefined,
-      order: { MODULO: 'ASC', USUARIO: 'ASC', SUC: 'ASC' },
-    });
+    if (sucUsuario) {
+      qb.andWhere('u.SUC = :sucUsuario', { sucUsuario });
+    }
+
+    if (depto) {
+      qb.andWhere(
+        "UPPER(LTRIM(RTRIM(ISNULL(d.NOMBRE, '')))) = UPPER(LTRIM(RTRIM(:depto)))",
+        { depto },
+      );
+      qb.andWhere(
+        "UPPER(LTRIM(RTRIM(ISNULL(mf.DEPTO, '')))) = UPPER(LTRIM(RTRIM(:depto)))",
+        { depto },
+      );
+    }
+
+    return qb.getMany();
   }
 
   async findOne(modulo: string, usuario: string, suc: string) {

@@ -16,17 +16,22 @@ Enlaces relacionados:
 - `/me/profile`, `/me/front-menu`, `/me/datmodulos`, `/me/backend-perms`
 - Maestros:
 - `/roles`, `/deptos`, `/puestos`, `/users`, `/dat-suc`, `/datmodulos`
+- Datos Maestros / Módulos Front (2026-05-04): API mantiene CRUD `MOD_FRONT` en `/datmodulos`; el acceso de UI se consolidó en `/#/masterdata/access/mod-front` sin cambios de contrato backend.
+- Datos Maestros / Enrolamiento Front por usuario (2026-05-04): se agrega `USR_GRUPMOD_FRONT` y endpoints `/access/users/:id/enrolamientos-front`; Home aplica prioridad usuario y fallback a `ROL_GRUPMOD_FRONT`.
+- Datos Maestros / Enrolamiento Front por usuario (2026-05-04): `GET /access/users` ahora expone `SUC/SUC_DESC` y `IDDEPTO/DEPTO_NOMBRE`, con filtros opcionales `suc` e `idDepto`.
+- Datos Maestros / Acceso por sucursal (2026-05-04): `GET /usr-mod-suc` incorpora filtros `sucUsuario` y `depto` para soportar filtrado por sucursal del usuario y departamento compartido entre `USUARIO`/`MOD_FRONT` en frontend.
 - Validacion relevante: `/users` exige `USERNAME` con minimo 3 caracteres.
 - Alta usuarios (2026-03): si `PASSWORD` no se envía, backend genera una contraseña temporal aleatoria de 6 dígitos y marca `FORZAR_CAMBIO_PASS=1` para primer acceso.
 - Primer acceso (2026-03): login emite claim JWT `mustChangePassword` y el endpoint autenticado `POST /auth/change-password` permite actualizar contraseña y limpiar `FORZAR_CAMBIO_PASS=0`.
 - Accesos:
 - `/access/modulos`, `/access/grupos-modulo`, `/access/roles/:id/permisos-backend`
-- `/access/mod-front`, `/access/grupos-front`, `/access/roles/:id/enrolamientos-front`
+- `/access/mod-front`, `/access/grupos-front`, `/access/roles/:id/enrolamientos-front`, `/access/users/:id/enrolamientos-front`
 - `/usr-mod-suc`
 - Catalogos:
 - `/datart`, `/datcatreg`, `/datcatuso`, `/dat-almacen`, `/dat-cmov`
 - `PATCH /datart/:suc/:art/:upc` permite actualizar `UPC`; la API rechaza cuando el `UPC` ya está asignado a otro `ART` de la misma sucursal.
 - Alta masiva de artículos (`sp_art_masiva_validate_batch`/`sp_art_masiva_commit_batch`): las validaciones se aplican por combinación `SUC + ART` y `SUC + UPC`, de modo que el mismo `ART` o `UPC` puede coexistir en distintas sucursales sin bloquear la carga, mientras que las duplicaciones se detectan dentro de la misma sucursal.
+- Seguridad upload Excel (2026-05-04): `datart`, `articulos/alta-masiva` y `conteos` validan origen de archivo antes de parsear (`extensión`, `MIME`, firma binaria y límites de tamaño/estructura), manteniendo la funcionalidad de carga y reduciendo riesgo de archivos no confiables.
 - Trazabilidad frontend (2026-03): `ioe_app` incorporó impresión de etiquetas en catálogo `DAT_ART` con selección local por renglón/filtrados y vista previa de impresión (PDF `76mm x 56mm`, una etiqueta por artículo), sin endpoints nuevos en API.
 - Regla EAN13 aplicada en app: de `UPC` se toman los 12 dígitos derechos (si excede) y se calcula dígito verificador para render de código de barras.
 - Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` (`SUC = @SUC`) y `bloqNe=-1` para resolver visibilidad con `BLOQ IS NULL OR BLOQ <> -1` en backend (compatibilidad con datos legacy en `NULL`).
@@ -88,5 +93,10 @@ Enlaces relacionados:
 - `/dat-form` (GET lista, POST crea; por defecto lista solo activas, opcional `includeInactive=true`)
 - `/dat-form/:idform` (GET detalle, PATCH actualiza, DELETE elimina)
 - `/dat-form/:idform/estado` (PATCH para activar/inactivar forma de pago)
+- `/ord-flujo-vis` (GET lista, POST crea sobre `DAT_JAO_ORD_FLUJO_VIS`)
+- `/ord-flujo-vis/:id` (GET detalle, PATCH actualiza, DELETE elimina)
+- `/ord-flujo-vis/:id/estado` (PATCH para activar/inactivar regla de visualización)
+- `/ord-flujo-vis/catalogos` (GET combos de `ROLE_CODE` desde `ROL` y `ESTA` desde `DAT_EST_ORD`; `ORDEN` se deriva de `ESTA`)
+- `ROL`: incorpora `IDDEPTO` (FK `DEPARTAMENTO.IDDEPTO`) y permite filtrar por `iddepto` en `GET /roles`.
 - Clasificadores:
 - `/jrqdepa`, `/jrqsubd`, `/jrqclas`, `/jrqscla`, `/jrqscla2`, `/jrqguia`

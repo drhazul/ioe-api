@@ -61,6 +61,7 @@ import { CajonEstadoModule } from './modules/cajon-estado/cajon-estado.module';
 import { CajaGeneralModule } from './modules/caja-general/caja-general.module';
 import { FacturacionModule } from './modules/facturacion/facturacion.module';
 import { OrdenesTrabajoModule } from './modules/ordenes-trabajo/ordenes-trabajo.module';
+import { OrdFlujoVisModule } from './modules/ord-flujo-vis/ord-flujo-vis.module';
 
 @Module({
   imports: [
@@ -124,6 +125,7 @@ import { OrdenesTrabajoModule } from './modules/ordenes-trabajo/ordenes-trabajo.
     CajaGeneralModule,
     FacturacionModule,
     OrdenesTrabajoModule,
+    OrdFlujoVisModule,
   ],
   providers: [
     {

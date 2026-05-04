@@ -58,6 +58,10 @@ Enlaces relacionados:
 - `GET /ordenes-trabajo` soporta `panelMode='estado'` para consulta solo lectura; `flowStatusOptions` toma estados desde `DAT_EST_ORD`, `OPV` se resuelve con `USUARIO.NOMBRE` y el home debe usar módulo `DAT_JAO_ORD_ESTADO`.
 - garantía 9.3 (2026-04-29): `POST /ordenes-trabajo/:iord/garantia` ahora mueve `ESTSEGU` de `11` a `9.3`; el panel `entregadas` queda restringido a `admin`/`JEF_TALLER` y solo expone `VER_DETALLE`.
 - aplicar merma/cambio (2026-04-29): nuevo `POST /ordenes-trabajo/:iord/aplicar-merma-cambio` exige `ESTSEGU=9.3`, valida `TIPOM (1|2)` y `MOTR` (`DAT_ORD_MOTM`) y enruta a `9.1/9.2` para continuar el mismo flujo de cambio/merma.
+- recepción laboratorio externo (2026-05-01): `POST /ordenes-trabajo/recibir/validar|lote` habilita `SCAN_RECIBIR` para `ANALISTA_ORD/ANALISTA` solo sobre ORDs de laboratorio externo; recepción cambia `ESTSEGU=5 -> 10` para externo y mantiene `5 -> 7` para laboratorio interno.
+- envío laboratorio externo (2026-05-03): `POST /ordenes-trabajo/enviar/lote` envía ORDs con `DAT_LAB.UBILAB='EXTERNO'` a flujo `ESTSEGU=9` (pendiente recibir en analista); laboratorio interno conserva `3 -> 5`.
+- recepción laboratorio externo (2026-05-03): `POST /ordenes-trabajo/recibir/validar|lote` para `ANALISTA_ORD/ANALISTA` valida flujo `9` en laboratorio externo y aplica `9 -> 10`; laboratorio interno conserva validación `5` y transición `5 -> 7`.
+- matriz persistente de visibilidad (2026-05-03): tabla `dbo.DAT_JAO_ORD_FLUJO_VIS` define estatus visibles por `ROLE_CODE` y `PANEL_MODE` para módulo `DAT_JAO_ORD`; `SOLO_EXTERNO=1` restringe flujo al laboratorio externo (`DAT_LAB.UBILAB='EXTERNO'`).
 - `POST /ordenes-trabajo/:iord/detalle/guardar` acepta `hrEnt='HH:MM'` y actualiza `PV_CTR_ORDS.HR_ENT` conservando la fecha existente de entrega cuando aplica.
 - `ANULAR` queda restringido a `admin` y `JEF_TALLER`; la mutación sigue auditando en `AUDIT_LOG` con acción `ORD_ANULAR_LOTE`.
 - `cambio-material` valida `ESTSEGU=9.1` y `TIPOM=1`; `merma` valida `ESTSEGU=9.2` y `TIPOM=2`; ambos validan `CTD_C_M` (`1|0.5`) en DTO/service/SP.
