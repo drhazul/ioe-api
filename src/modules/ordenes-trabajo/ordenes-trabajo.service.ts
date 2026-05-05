@@ -111,12 +111,9 @@ export class OrdenesTrabajoService {
           )
           AND (
             UPPER(LTRIM(RTRIM(ISNULL(${roleCodeParam}, '')))) NOT IN (
-              'ANALISTA',
               'ANALISTA_ORD',
               'ENC_MAQUILA',
-              'ENCARGADO_MAQUILA',
-              'ENC_BISEL',
-              'ENCARGADO_BISELADO'
+              'ENC_BISEL'
             )
             OR ${homeSucParam} IS NULL
             OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${homeSucParam})
@@ -2185,76 +2182,52 @@ export class OrdenesTrabajoService {
     if (!roleCode) return;
 
     const allowedByAction: Record<string, string[]> = {
-      AUTORIZAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      AUTORIZAR: ['JEF_TALLER', 'ANALISTA_ORD'],
       ANULAR: ['JEF_TALLER'],
-      ENVIAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      ENVIAR: ['JEF_TALLER', 'ANALISTA_ORD'],
       ASIGNAR: [
         'JEF_TALLER',
-        'TALLER',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
       TRABAJO_TERMINADO: [
         'JEF_TALLER',
-        'TALLER',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
       REGRESAR_INCIDENCIA: [
         'JEF_TALLER',
-        'TALLER',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
-      REGRESAR_TIENDA: ['JEF_TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      ASIGNAR_LABORATORIO: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      REGRESAR_TIENDA: ['JEF_TALLER', 'ANALISTA_ORD'],
+      ASIGNAR_LABORATORIO: ['JEF_TALLER', 'ANALISTA_ORD'],
       RECIBIR: [
         'JEF_TALLER',
-        'TALLER',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
-      ENTREGAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      ENTREGAR: ['JEF_TALLER', 'ANALISTA_ORD'],
       GARANTIA: ['JEF_TALLER'],
       CAMBIO_MATERIAL: [
         'JEF_TALLER',
-        'TALLER',
         'ANALISTA_ORD',
-        'ANALISTA',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
       MERMA: [
         'JEF_TALLER',
-        'TALLER',
         'ANALISTA_ORD',
-        'ANALISTA',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
       SCAN_RECIBIR: [
         'JEF_TALLER',
-        'TALLER',
         'ANALISTA_ORD',
-        'ANALISTA',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
-      SCAN_ENTREGAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      SCAN_ENTREGAR: ['JEF_TALLER', 'ANALISTA_ORD'],
     };
 
     const allowedRoles = allowedByAction[action] ?? [];
@@ -2288,10 +2261,10 @@ export class OrdenesTrabajoService {
       return ['TALLER', 'BISELADO'];
     }
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    if (roleCode === 'ENC_MAQUILA' || roleCode === 'ENCARGADO_MAQUILA') {
+    if (roleCode === 'ENC_MAQUILA') {
       return ['TALLER'];
     }
-    if (roleCode === 'ENC_BISEL' || roleCode === 'ENCARGADO_BISELADO') {
+    if (roleCode === 'ENC_BISEL') {
       return ['BISELADO'];
     }
     return ['TALLER', 'BISELADO'];
@@ -2302,13 +2275,9 @@ export class OrdenesTrabajoService {
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return [
       'JEF_TALLER',
-      'TALLER',
       'ANALISTA_ORD',
-      'ANALISTA',
       'ENC_MAQUILA',
-      'ENCARGADO_MAQUILA',
       'ENC_BISEL',
-      'ENCARGADO_BISELADO',
     ].includes(roleCode);
   }
 
@@ -2376,7 +2345,8 @@ export class OrdenesTrabajoService {
       `
       SELECT
         LTRIM(RTRIM(ISNULL(CAST(u.IDUSUARIO AS NVARCHAR(100)), ''))) AS IDUSUARIO,
-        LTRIM(RTRIM(ISNULL(u.NOMBRE, ''))) AS NOMBRE
+        LTRIM(RTRIM(ISNULL(u.NOMBRE, ''))) AS NOMBRE,
+        LTRIM(RTRIM(ISNULL(u.APELLIDOS, ''))) AS APELLIDOS
       FROM dbo.USUARIO u
       WHERE LTRIM(RTRIM(ISNULL(CAST(u.IDUSUARIO AS NVARCHAR(100)), ''))) IN (${placeholders})
       `,
@@ -2386,15 +2356,47 @@ export class OrdenesTrabajoService {
     for (const row of Array.isArray(rows) ? rows : []) {
       const rec = row as Record<string, unknown>;
       const idusuario = this.normalizeText(rec.IDUSUARIO);
-      const nombre = this.normalizeText(rec.NOMBRE);
-      if (!idusuario || !nombre) continue;
+      if (!idusuario) continue;
+      const nombre = this.composeUsuarioLabel({
+        nombre: this.normalizeText(rec.NOMBRE),
+        apellidos: this.normalizeText(rec.APELLIDOS),
+      });
+      if (!nombre) continue;
       out.set(idusuario, nombre);
     }
     const missingIds = ids.filter((id) => !out.has(id));
-    if (!missingIds.length) {
+    if (missingIds.length) {
+      const usernamePlaceholders = missingIds.map((_, idx) => `@${idx}`).join(',');
+      const usernameRows = await this.dataSource.query(
+        `
+        SELECT
+          LTRIM(RTRIM(ISNULL(u.USERNAME, ''))) AS USERNAME,
+          LTRIM(RTRIM(ISNULL(u.NOMBRE, ''))) AS NOMBRE,
+          LTRIM(RTRIM(ISNULL(u.APELLIDOS, ''))) AS APELLIDOS
+        FROM dbo.USUARIO u
+        WHERE LTRIM(RTRIM(ISNULL(u.USERNAME, ''))) IN (${usernamePlaceholders})
+        `,
+        missingIds,
+      );
+      for (const row of Array.isArray(usernameRows) ? usernameRows : []) {
+        const rec = row as Record<string, unknown>;
+        const username = this.normalizeText(rec.USERNAME);
+        if (!username || out.has(username)) continue;
+        const nombre = this.composeUsuarioLabel({
+          nombre: this.normalizeText(rec.NOMBRE),
+          apellidos: this.normalizeText(rec.APELLIDOS),
+        });
+        if (!nombre) continue;
+        out.set(username, nombre);
+      }
+    }
+    const missingAfterUsername = ids.filter((id) => !out.has(id));
+    if (!missingAfterUsername.length) {
       return out;
     }
-    const fallbackPlaceholders = missingIds.map((_, idx) => `@${idx}`).join(',');
+    const fallbackPlaceholders = missingAfterUsername
+      .map((_, idx) => `@${idx}`)
+      .join(',');
     const fallbackRows = await this.dataSource.query(
       `
       SELECT
@@ -2405,7 +2407,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_OPV o
       WHERE LTRIM(RTRIM(ISNULL(CAST(o.IDOPV AS NVARCHAR(100)), ''))) IN (${fallbackPlaceholders})
       `,
-      missingIds,
+      missingAfterUsername,
     );
     for (const row of Array.isArray(fallbackRows) ? fallbackRows : []) {
       const rec = row as Record<string, unknown>;
@@ -2422,6 +2424,17 @@ export class OrdenesTrabajoService {
       }
     }
     return out;
+  }
+
+  private composeUsuarioLabel(values: {
+    nombre?: string | null;
+    apellidos?: string | null;
+  }) {
+    const parts = [
+      this.normalizeText(values.nombre),
+      this.normalizeText(values.apellidos),
+    ].filter((item): item is string => item != null && item.length > 0);
+    return parts.join(' ').trim();
   }
 
   private isAdmin(user?: JwtPayload | null) {
@@ -2533,23 +2546,21 @@ export class OrdenesTrabajoService {
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
     if (panelMode === 'estado') {
-      return roleCode === 'JEF_TALLER' ||
-          roleCode === 'ANALISTA_ORD' ||
-          roleCode === 'ANALISTA'
+      return roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
         ? this.resolveAllFlowStatusCodes()
         : [];
     }
     if (panelMode === 'anulados') {
-      return roleCode === 'JEF_TALLER' || roleCode === 'TALLER' ? [4] : [];
+      return roleCode === 'JEF_TALLER' ? [4] : [];
     }
     if (panelMode === 'entregadas') {
       return roleCode === 'JEF_TALLER' ? [11] : [];
     }
 
-    if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER') {
+    if (roleCode === 'JEF_TALLER') {
       return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 9.3, 10, 12];
     }
-    if (roleCode === 'ANALISTA_ORD' || roleCode === 'ANALISTA') {
+    if (roleCode === 'ANALISTA_ORD') {
       return [2, 3, 3.1, 5, 9, 9.1, 9.2, 9.3, 10, 12];
     }
     if (roleCode === 'ANALISTA_INV' || roleCode === 'INVJEF') {
@@ -2557,9 +2568,7 @@ export class OrdenesTrabajoService {
     }
     if (
       roleCode === 'ENC_MAQUILA' ||
-      roleCode === 'ENCARGADO_MAQUILA' ||
-      roleCode === 'ENC_BISEL' ||
-      roleCode === 'ENCARGADO_BISELADO'
+      roleCode === 'ENC_BISEL'
     ) {
       return [7, 8, 9, 9.1, 9.2, 9.3];
     }
@@ -2659,10 +2668,7 @@ export class OrdenesTrabajoService {
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return (
-      roleCode === 'JEF_TALLER' ||
-      roleCode === 'TALLER' ||
-      roleCode === 'ANALISTA_ORD' ||
-      roleCode === 'ANALISTA'
+      roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
     );
   }
 
@@ -4486,9 +4492,6 @@ export class OrdenesTrabajoService {
       'SCAN_RECIBIR',
       'SCAN_ENTREGAR',
     ];
-    const operationalActionsNoAnular = operationalActions.filter(
-      (action) => action !== 'ANULAR',
-    );
 
     if (this.isAdmin(user)) {
       if (panelMode === 'estado') return ['VER_DETALLE'];
@@ -4498,29 +4501,9 @@ export class OrdenesTrabajoService {
     }
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    const nonStoreReceiveActions = operationalActionsNoAnular.filter(
-      (action) => action !== 'REGRESAR_TIENDA',
-    );
-    const nonStoreReceiveActionsNoPrint = nonStoreReceiveActions.filter(
-      (action) => action !== 'IMPRIMIR_ETIQUETA',
-    );
     const byRole: Record<string, string[]> = {
       JEF_TALLER: operationalActions,
-      TALLER: nonStoreReceiveActionsNoPrint,
       ANALISTA_ORD: [
-        'VER_DETALLE',
-        'AUTORIZAR',
-        'ENVIAR',
-        'REGRESAR_TIENDA',
-        'ASIGNAR_LABORATORIO',
-        'SCAN_RECIBIR',
-        'ENTREGAR',
-        'IMPRIMIR_ETIQUETA',
-        'CAMBIO_MATERIAL',
-        'MERMA',
-        'SCAN_ENTREGAR',
-      ],
-      ANALISTA: [
         'VER_DETALLE',
         'AUTORIZAR',
         'ENVIAR',
@@ -4545,27 +4528,7 @@ export class OrdenesTrabajoService {
         'MERMA',
         'SCAN_RECIBIR',
       ],
-      ENCARGADO_MAQUILA: [
-        'VER_DETALLE',
-        'ASIGNAR',
-        'TRABAJO_TERMINADO',
-        'REGRESAR_INCIDENCIA',
-        'RECIBIR',
-        'CAMBIO_MATERIAL',
-        'MERMA',
-        'SCAN_RECIBIR',
-      ],
       ENC_BISEL: [
-        'VER_DETALLE',
-        'ASIGNAR',
-        'TRABAJO_TERMINADO',
-        'REGRESAR_INCIDENCIA',
-        'RECIBIR',
-        'CAMBIO_MATERIAL',
-        'MERMA',
-        'SCAN_RECIBIR',
-      ],
-      ENCARGADO_BISELADO: [
         'VER_DETALLE',
         'ASIGNAR',
         'TRABAJO_TERMINADO',
@@ -4579,15 +4542,12 @@ export class OrdenesTrabajoService {
 
     const allowed = byRole[roleCode] ?? [];
     if (panelMode === 'estado') {
-      return roleCode === 'JEF_TALLER' ||
-          roleCode === 'ANALISTA_ORD' ||
-          roleCode === 'ANALISTA'
+      return roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
         ? ['VER_DETALLE']
         : [];
     }
     if (panelMode === 'anulados') {
-      if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER')
-        return ['VER_DETALLE'];
+      if (roleCode === 'JEF_TALLER') return ['VER_DETALLE'];
       return [];
     }
     if (panelMode === 'entregadas') {
@@ -4602,9 +4562,7 @@ export class OrdenesTrabajoService {
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return (
       roleCode === 'JEF_TALLER' ||
-      roleCode === 'TALLER' ||
-      roleCode === 'ANALISTA_ORD' ||
-      roleCode === 'ANALISTA'
+      roleCode === 'ANALISTA_ORD'
     );
   }
 
@@ -4612,9 +4570,7 @@ export class OrdenesTrabajoService {
     if (this.isAdmin(user)) return true;
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return (
-      roleCode === 'JEF_TALLER' ||
-      roleCode === 'ANALISTA_ORD' ||
-      roleCode === 'ANALISTA'
+      roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
     );
   }
 
@@ -4628,10 +4584,10 @@ export class OrdenesTrabajoService {
 
   private resolveOrdTipoScope(roleCodeRaw: string) {
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    if (roleCode === 'ENC_MAQUILA' || roleCode === 'ENCARGADO_MAQUILA') {
+    if (roleCode === 'ENC_MAQUILA') {
       return 'TALLADO';
     }
-    if (roleCode === 'ENC_BISEL' || roleCode === 'ENCARGADO_BISELADO') {
+    if (roleCode === 'ENC_BISEL') {
       return 'BISELADO';
     }
     return null;
@@ -4920,38 +4876,72 @@ export class OrdenesTrabajoService {
       ? 'ADMIN'
       : this.normalizeUpper(roleCodeRaw);
     if (!roleCode) return [];
+    const roleCandidates = this.resolveFlowVisibilityRoleCandidates(roleCode);
+    if (!roleCandidates.length) return [];
+    const rolePlaceholders = roleCandidates.map((_, idx) => `@${idx + 1}`).join(',');
 
     const rows = await this.dataSource.query(
       `
       SELECT
         TRY_CONVERT(FLOAT, ESTA) AS ESTA,
-        TRY_CONVERT(BIT, SOLO_EXTERNO) AS SOLO_EXTERNO
+        TRY_CONVERT(BIT, SOLO_EXTERNO) AS SOLO_EXTERNO,
+        UPPER(LTRIM(RTRIM(ISNULL(ROLE_CODE, '')))) AS ROLE_CODE
       FROM dbo.DAT_JAO_ORD_FLUJO_VIS
       WHERE UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) = 'DAT_JAO_ORD'
         AND UPPER(LTRIM(RTRIM(ISNULL(PANEL_MODE, '')))) = UPPER(@0)
-        AND UPPER(LTRIM(RTRIM(ISNULL(ROLE_CODE, '')))) = UPPER(@1)
+        AND UPPER(LTRIM(RTRIM(ISNULL(ROLE_CODE, '')))) IN (${rolePlaceholders})
         AND ISNULL(ACTIVO, 1) = 1
       ORDER BY TRY_CONVERT(FLOAT, ESTA)
       `,
-      [panelMode, roleCode],
+      [panelMode, ...roleCandidates],
+    );
+    const candidatePriority = new Map<string, number>();
+    roleCandidates.forEach((candidate, index) =>
+      candidatePriority.set(candidate, index),
     );
 
-    const rules = (Array.isArray(rows) ? rows : [])
-      .map((row) => {
-        const record = row as Record<string, unknown>;
-        const estsegu = this.toFloat(record.ESTA);
-        if (estsegu == null) return null;
-        const onlyExternalLab = this.toInt(record.SOLO_EXTERNO) === 1;
-        return { estsegu, onlyExternalLab } as OrdFlowVisibilityRule;
-      })
-      .filter((rule): rule is OrdFlowVisibilityRule => rule != null);
+    type CandidateRule = OrdFlowVisibilityRule & { priority: number };
+    const selectedByFlow = new Map<string, CandidateRule>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const record = row as Record<string, unknown>;
+      const role = this.normalizeUpper(record.ROLE_CODE ?? '');
+      if (!role) continue;
+      const priority = candidatePriority.get(role);
+      if (priority == null) continue;
 
-    if (!rules.length) return [];
-    const unique = new Map<string, OrdFlowVisibilityRule>();
-    for (const rule of rules) {
-      unique.set(this.formatStatusCode(rule.estsegu), rule);
+      const estsegu = this.toFloat(record.ESTA);
+      if (estsegu == null) continue;
+      const onlyExternalLab = this.toInt(record.SOLO_EXTERNO) === 1;
+      const flowCode = this.formatStatusCode(estsegu);
+
+      const current = selectedByFlow.get(flowCode);
+      if (!current) {
+        selectedByFlow.set(flowCode, { estsegu, onlyExternalLab, priority });
+        continue;
+      }
+
+      if (priority < current.priority) {
+        selectedByFlow.set(flowCode, { estsegu, onlyExternalLab, priority });
+        continue;
+      }
+
+      if (priority === current.priority && onlyExternalLab && !current.onlyExternalLab) {
+        selectedByFlow.set(flowCode, { estsegu, onlyExternalLab, priority });
+      }
     }
-    return [...unique.values()].sort((a, b) => a.estsegu - b.estsegu);
+
+    return [...selectedByFlow.values()]
+      .map((rule) => ({
+        estsegu: rule.estsegu,
+        onlyExternalLab: rule.onlyExternalLab,
+      }))
+      .sort((a, b) => a.estsegu - b.estsegu);
+  }
+
+  private resolveFlowVisibilityRoleCandidates(roleCodeRaw: string) {
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    if (!roleCode) return [] as string[];
+    return [roleCode];
   }
 
   private async hasFlowVisibilityTable() {
@@ -5081,18 +5071,27 @@ export class OrdenesTrabajoService {
 
   private isAnalistaRoleForRecepcionExterna(roleCodeRaw: string) {
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    return roleCode === 'ANALISTA_ORD' || roleCode === 'ANALISTA';
+    return roleCode === 'ANALISTA_ORD';
   }
 
   private isLaboratorioExterno(row: Record<string, unknown>) {
     const ubiLab = this.normalizeUpper(row.LAB_UBILAB ?? '');
-    if (ubiLab.includes('EXTER')) return true;
-    if (ubiLab.includes('LOCAL')) return false;
-    const labSuc = this.normalizeUpper(row.LAB_SUC ?? '');
-    if (!labSuc) return true;
     const tipoLab = this.normalizeUpper(row.LAB_TIPOLAB ?? '');
     const lab = this.normalizeUpper(row.LAB_DESC ?? '');
-    return tipoLab.includes('EXTER') || lab.includes('EXTER');
+    const labSuc = this.normalizeUpper(row.LAB_SUC ?? '');
+
+    const looksExternal =
+      ubiLab.includes('EXTER') ||
+      tipoLab.includes('EXTER') ||
+      lab.includes('EXTER');
+    if (looksExternal) return true;
+
+    if (ubiLab.includes('LOCAL')) return false;
+
+    // Sin catalogo de sucursal en laboratorio: tratamos como externo por compat.
+    if (!labSuc) return true;
+
+    return false;
   }
 
   private normalizePage(value?: number) {
@@ -5186,12 +5185,16 @@ export class OrdenesTrabajoService {
   }
 
   private toInt(value: unknown) {
+    if (value == null) return null;
+    if (typeof value === 'string' && value.trim().length === 0) return null;
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return null;
     return Math.trunc(parsed);
   }
 
   private toFloat(value: unknown) {
+    if (value == null) return null;
+    if (typeof value === 'string' && value.trim().length === 0) return null;
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return null;
     return parsed;

@@ -6,7 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
-import { Repository } from 'typeorm';
+import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { UsuarioEntity } from './usuario.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -16,6 +16,7 @@ export class UsersService {
   constructor(
     @InjectRepository(UsuarioEntity)
     private readonly repo: Repository<UsuarioEntity>,
+    private readonly dataSource: DataSource,
   ) {}
 
   findAll() {
@@ -152,7 +153,9 @@ export class UsersService {
       return this.findOne(id);
     }
 
-    await this.repo.update({ IDUSUARIO: id }, payload);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(UsuarioEntity).update({ IDUSUARIO: id }, payload);
+    });
 
     return this.findOne(id);
   }
@@ -161,7 +164,40 @@ export class UsersService {
     const row = await this.repo.findOne({ where: { IDUSUARIO: id } });
     if (!row) throw new NotFoundException(`USUARIO ${id} no existe`);
 
-    await this.repo.remove(row);
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        const username = row.USERNAME?.trim() ?? '';
+        const userId = row.IDUSUARIO;
+        await manager.query(`DELETE FROM dbo.USUARIO_TOKEN WHERE IDUSUARIO = @0`, [
+          userId,
+        ]);
+        await manager.query(
+          `DELETE FROM dbo.USR_GRUPMOD_FRONT WHERE IDUSUARIO = @0`,
+          [userId],
+        );
+        if (username.length > 0) {
+          await manager.query(
+            `
+            DELETE FROM dbo.USR_MOD_SUC
+            WHERE UPPER(LTRIM(RTRIM(ISNULL(USUARIO, '')))) = UPPER(@0)
+            `,
+            [username],
+          );
+        }
+        await manager.getRepository(UsuarioEntity).delete({ IDUSUARIO: userId });
+      });
+    } catch (error) {
+      if (error instanceof QueryFailedError) {
+        const code = Number((error as QueryFailedError & { driverError?: { number?: number } }).driverError?.number ?? 0);
+        if (code === 547) {
+          throw new ConflictException(
+            `No se puede eliminar USUARIO ${id} porque tiene registros relacionados en otros modulos.`,
+          );
+        }
+      }
+      throw error;
+    }
+
     return { deleted: true, IDUSUARIO: id };
   }
 

@@ -301,6 +301,8 @@ export class PvCtrFolAsvrService {
     const exists = await this.repo.exist({ where: { IDFOL: dto.IDFOL } });
     if (exists) throw new ConflictException(`IDFOL ${dto.IDFOL} ya existe`);
 
+    const opv = await this.normalizeOpvToUsername(dto.OPV ?? null);
+    const opvm = await this.normalizeOpvToUsername(dto.OPVM ?? null);
     const aut = normalizeAut(dto.AUT ?? 'CP');
     const esta = normalizeEstadoOperativo(dto.ESTA ?? 'PENDIENTE');
     const idfolInicial =
@@ -319,7 +321,7 @@ export class PvCtrFolAsvrService {
       SUC: dto.SUC ?? null,
       TER: dto.TER ?? null,
       TRA: dto.TRA ?? null,
-      OPV: dto.OPV ?? null,
+      OPV: opv,
       ESTA: esta,
       IMPT: dto.IMPT ?? null,
       FPGO: dto.FPGO ?? null,
@@ -327,7 +329,7 @@ export class PvCtrFolAsvrService {
       AUT: aut,
       REQF: this.normalizeReqf(dto.REQF),
       FCNM: dto.FCNM ? new Date(dto.FCNM) : null,
-      OPVM: dto.OPVM ?? null,
+      OPVM: opvm,
       MOD: dto.MOD ?? null,
       IDFOLORIG: dto.IDFOLORIG ?? null,
       IDFOLINICIAL: idfolInicial,
@@ -340,12 +342,15 @@ export class PvCtrFolAsvrService {
   async createAuto(dto: CreatePvCtrFolAsvrAutoDto, user: JwtPayload) {
     const isAdmin = this.isAdmin(user);
     const actorSuc = this.normalizeText(user?.suc ?? '');
-    const actorOpv =
+    const actorOpvSource =
       this.normalizeText(user?.username ?? '') ||
       this.normalizeText(String(user?.sub ?? ''));
+    const actorOpv =
+      (await this.normalizeOpvToUsername(actorOpvSource)) ?? '';
 
     const requestedSuc = this.normalizeText(dto?.SUC ?? '');
-    const requestedOpv = this.normalizeText(dto?.OPV ?? '');
+    const requestedOpv =
+      (await this.normalizeOpvToUsername(dto?.OPV ?? '')) ?? '';
     const suc = requestedSuc || actorSuc;
     const opv = requestedOpv || actorOpv;
 
@@ -435,7 +440,8 @@ export class PvCtrFolAsvrService {
     if (dto.SUC !== undefined) partial.SUC = dto.SUC ?? null;
     if (dto.TER !== undefined) partial.TER = dto.TER ?? null;
     if (dto.TRA !== undefined) partial.TRA = dto.TRA ?? null;
-    if (dto.OPV !== undefined) partial.OPV = dto.OPV ?? null;
+    if (dto.OPV !== undefined)
+      partial.OPV = await this.normalizeOpvToUsername(dto.OPV ?? null);
     if (dto.ESTA !== undefined)
       partial.ESTA = normalizeEstadoOperativo(dto.ESTA ?? 'PENDIENTE');
     if (dto.IMPT !== undefined) partial.IMPT = dto.IMPT ?? null;
@@ -445,7 +451,8 @@ export class PvCtrFolAsvrService {
     if (dto.REQF !== undefined) partial.REQF = this.normalizeReqf(dto.REQF);
     if (dto.FCNM !== undefined)
       partial.FCNM = dto.FCNM ? new Date(dto.FCNM) : null;
-    if (dto.OPVM !== undefined) partial.OPVM = dto.OPVM ?? null;
+    if (dto.OPVM !== undefined)
+      partial.OPVM = await this.normalizeOpvToUsername(dto.OPVM ?? null);
     if (dto.MOD !== undefined) partial.MOD = dto.MOD ?? null;
     if (dto.IDFOLORIG !== undefined) partial.IDFOLORIG = dto.IDFOLORIG ?? null;
     if (dto.IDFOLINICIAL !== undefined)
@@ -536,6 +543,35 @@ export class PvCtrFolAsvrService {
 
   private normalizeUpper(value: string) {
     return this.normalizeText(value).toUpperCase();
+  }
+
+  private async normalizeOpvToUsername(
+    value: string | null | undefined,
+  ): Promise<string | null> {
+    const input = this.normalizeText(value ?? '');
+    if (!input) return null;
+    const inputUpper = this.normalizeUpper(input);
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        LTRIM(RTRIM(ISNULL(u.USERNAME, ''))) AS USERNAME
+      FROM dbo.USUARIO u
+      WHERE
+        UPPER(LTRIM(RTRIM(ISNULL(u.USERNAME, '')))) = @1
+        OR LTRIM(RTRIM(CONVERT(NVARCHAR(255), u.IDUSUARIO))) = @0
+      ORDER BY
+        CASE
+          WHEN UPPER(LTRIM(RTRIM(ISNULL(u.USERNAME, '')))) = @1 THEN 0
+          ELSE 1
+        END,
+        u.IDUSUARIO ASC
+      `,
+      [input, inputUpper],
+    );
+
+    const username = this.normalizeText(String(rows?.[0]?.USERNAME ?? ''));
+    return username || input;
   }
 
   private parseSqlDate(value: string, fieldName: string) {

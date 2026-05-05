@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { UsersService } from './users.service';
 import { UsuarioEntity } from './usuario.entity';
 
@@ -20,6 +21,12 @@ describe('UsersService', () => {
             save: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
+          },
+        },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn(),
           },
         },
       ],

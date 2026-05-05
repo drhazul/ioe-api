@@ -127,7 +127,7 @@ export class PvCtrOrdsService {
     const estado = this.normalizeEstadoOperativo(dto.estado);
     const tipo = dto.tipo.trim();
     const suc = dto.suc.trim().toUpperCase();
-    const opv = dto.opv.trim();
+    const opv = await this.normalizeOpvToUsername(dto.opv.trim());
     const fechaEntregaRaw = String(dto.fechaEntrega ?? '').trim();
     const fechaEntregaDate = fechaEntregaRaw ? new Date(fechaEntregaRaw) : null;
     const fechaEntrega =
@@ -423,6 +423,33 @@ export class PvCtrOrdsService {
     const estado = value.trim().toUpperCase();
     if (estado === 'EDITANDO') return 'PENDIENTE';
     return estado;
+  }
+
+  private async normalizeOpvToUsername(value: string): Promise<string> {
+    const input = String(value ?? '').trim();
+    if (!input) return '';
+    const inputUpper = input.toUpperCase();
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        LTRIM(RTRIM(ISNULL(u.USERNAME, ''))) AS USERNAME
+      FROM dbo.USUARIO u
+      WHERE
+        UPPER(LTRIM(RTRIM(ISNULL(u.USERNAME, '')))) = @1
+        OR LTRIM(RTRIM(CONVERT(NVARCHAR(255), u.IDUSUARIO))) = @0
+      ORDER BY
+        CASE
+          WHEN UPPER(LTRIM(RTRIM(ISNULL(u.USERNAME, '')))) = @1 THEN 0
+          ELSE 1
+        END,
+        u.IDUSUARIO ASC
+      `,
+      [input, inputUpper],
+    );
+
+    const username = String(rows?.[0]?.USERNAME ?? '').trim();
+    return username || input;
   }
 
   private normalizeOrdValue(raw?: string): string | null {
