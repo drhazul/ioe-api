@@ -29,8 +29,9 @@ export class RolesController {
     @Query('nombre') nombre?: string,
     @Query('activo') activo?: string,
     @Query('iddepo') iddepo?: string,
+    @Query('iddepto') iddepto?: string,
   ) {
-    return this.service.findAll({ codigo, nombre, activo, iddepo });
+    return this.service.findAll({ codigo, nombre, activo, iddepo, iddepto });
   }
 
   @Get(':id')

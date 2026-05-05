@@ -163,7 +163,13 @@ BEGIN
       AND (@IDFOL IS NULL OR LTRIM(RTRIM(ISNULL(o.IDFOL, ''))) LIKE '%' + @IDFOL + '%')
       AND (
         @CLIENT IS NULL
-        OR CAST(ISNULL(o.CLIEN, '') AS NVARCHAR(255)) LIKE '%' + @CLIENT + '%'
+        OR (
+          CASE
+            WHEN TRY_CONVERT(DECIMAL(38, 0), o.CLIEN) IS NOT NULL
+              THEN CONVERT(NVARCHAR(255), CONVERT(DECIMAL(38, 0), o.CLIEN))
+            ELSE LTRIM(RTRIM(CONVERT(NVARCHAR(255), ISNULL(o.CLIEN, ''))))
+          END
+        ) LIKE '%' + @CLIENT + '%'
         OR UPPER(LTRIM(RTRIM(ISNULL(o.NCLIENTE, '')))) LIKE '%' + UPPER(@CLIENT) + '%'
       )
       AND (@ART IS NULL OR LTRIM(RTRIM(ISNULL(o.ART, ''))) LIKE '%' + @ART + '%')
@@ -193,7 +199,13 @@ BEGIN
         OR UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) LIKE '%' + UPPER(@SEARCH) + '%'
         OR UPPER(LTRIM(RTRIM(ISNULL(o.ART, '')))) LIKE '%' + UPPER(@SEARCH) + '%'
         OR UPPER(LTRIM(RTRIM(ISNULL(o.DESCART, '')))) LIKE '%' + UPPER(@SEARCH) + '%'
-        OR CAST(ISNULL(o.CLIEN, '') AS NVARCHAR(255)) LIKE '%' + @SEARCH + '%'
+        OR (
+          CASE
+            WHEN TRY_CONVERT(DECIMAL(38, 0), o.CLIEN) IS NOT NULL
+              THEN CONVERT(NVARCHAR(255), CONVERT(DECIMAL(38, 0), o.CLIEN))
+            ELSE LTRIM(RTRIM(CONVERT(NVARCHAR(255), ISNULL(o.CLIEN, ''))))
+          END
+        ) LIKE '%' + @SEARCH + '%'
         OR UPPER(LTRIM(RTRIM(ISNULL(o.NCLIENTE, '')))) LIKE '%' + UPPER(@SEARCH) + '%'
       )
       AND (

@@ -14,6 +14,9 @@ Enlaces relacionados:
   - `src/modules/ordenes-trabajo/ordenes-trabajo.controller.ts`
   - `src/modules/ordenes-trabajo/ordenes-trabajo.service.ts`
   - `src/modules/ordenes-trabajo/dto/*`
+- SQL:
+  - `sql/2026-03-22_ordenes_trabajo_module_create.sql`
+  - `sql/2026-04-23_ordenes_trabajo_estado_ord_mod_front.sql`
 - Endpoints:
   - `GET /ordenes-trabajo` (panel con filtros server-side y paginación)
   - `GET /ordenes-trabajo/motivos-movimiento?tipo=1|2` (catálogo de motivos para cambio material/merma desde `DAT_ORD_MOTM`)
@@ -22,6 +25,8 @@ Enlaces relacionados:
   - `GET /ordenes-trabajo/:iord/cambio-merma/context?tipo=1|2`
   - `POST /ordenes-trabajo/:iord/cambio-merma/preparar`
   - `POST /ordenes-trabajo/:iord/cambio-merma/solicitar-autorizacion`
+  - `POST /ordenes-trabajo/:iord/cambio-merma/autorizar`
+  - `POST /ordenes-trabajo/:iord/cambio-merma/retrabajo`
   - `POST /ordenes-trabajo/:iord/cambio-merma/crear`
   - `POST /ordenes-trabajo/:iord/autorizar`
   - `POST /ordenes-trabajo/:iord/enviar`
@@ -58,8 +63,8 @@ Enlaces relacionados:
   - helpers: `sp_ordenes_trabajo_clone_ord`, `sp_ordenes_trabajo_registrar_mb51`, `sp_ordenes_trabajo_registrar_ctrl_ctas_diff`
 - Reglas clave:
   - `IORD` mantiene identidad de orden y `IDFOL` no se rompe.
-  - cambio material crea nueva ORD, cancela original, copia `PV_CTR_ORDS_DET`, registra MB51 y diferencia contable cuando aplica.
-  - merma registra trazabilidad de cantidad mermada/remanente y puede crear ORD derivada según payload.
+  - cambio material crea nueva ORD, anula original, relaciona `REEORD`, copia `PV_CTR_ORDS_DET`, registra MB51 y diferencia contable cuando aplica.
+  - merma crea nueva ORD en el cierre final, anula la original, registra MB51 y conserva `CTD_C_M` como referencia contable. La nueva ORD derivada debe quedar sin colaborador asignado (`ASIGN=NULL`).
   - selección/escaneo se resuelven en API y no dependen de flags legacy (`SEL`, `selCtrlOrd`, `selCtrOrdT`, `selEnt`).
   - `enviar/lote` exige que cada ORD del lote esté en `ESTSEGU=3 (NUEVA AUTORIZADA)` y con `LABOR` asignado; al confirmar, aplica transición masiva a `ESTSEGU=5 (ENTREGADA A MAQ O BISEL)` respetando alcance por sucursal.
   - `recibir/lote` exige `ESTSEGU=5 (ENTREGADA A MAQ O BISEL)` y aplica transición masiva a `ESTSEGU=7 (RECIBIDA A TALLER)`.
@@ -67,11 +72,29 @@ Enlaces relacionados:
   - `regresar-incidencia/lote` valida `ESTSEGU=8` con colaborador asignado, exige un motivo válido de `DAT_ORD_TMOV.IDT` y persiste `PV_CTR_ORDS.TIPOM` al mover la ORD a flujo `9`.
   - `regresar-tienda/lote` aplica mapeo fijo por `TIPOM`: `TIPOM=1 (CAMBIO DE ARTICULO) -> ESTSEGU=9.1`, `TIPOM=2 (MERMA DE ART Y CAMBIO) -> ESTSEGU=9.2`, sin `TIPOM` válido -> `ESTSEGU=10`.
   - `:iord/cambio-material` y `:iord/merma` permanecen retrocompatibles para ejecución directa, validan flujo/tipo del origen (`9.1/TIPOM=1` para cambio, `9.2/TIPOM=2` para merma) y validan `CTD_C_M` (`1|0.5`).
-- `:iord/cambio-merma/context|preparar|solicitar-autorizacion|crear` controla el flujo interno con `selCtrlOrd` (`NULL/0/13/14/15/16`) sin romper `ESTSEGU=9.1/9.2` hasta la creación final.
-- `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` aceptan `@MOTR` y `@CTD_C_M`, calculan diferencia económica sobre la fracción afectada y limpian `selCtrlOrd` al cerrar el proceso.
+- `:iord/cambio-merma/context|preparar|solicitar-autorizacion|retrabajo|autorizar` controla el flujo interno con `selCtrlOrd` (`NULL/0/13/14/15`) sin romper `ESTSEGU=9.1/9.2` hasta la autorización final.
+- garantía (2026-04-29): `POST /ordenes-trabajo/:iord/garantia` cambia de `ESTSEGU=11` a `ESTSEGU=9.3`; el panel `entregadas` conserva solo lectura de lista y `VER_DETALLE` para `admin` y `JEF_TALLER`.
+- aplicar merma/cambio (2026-04-29): `POST /ordenes-trabajo/:iord/aplicar-merma-cambio` valida `ESTSEGU=9.3`, exige `TIPOM (1|2)` + `MOTR` y redirige el flujo a `9.1/9.2` para continuar con el proceso ya existente de cambio/merma.
+- recepción laboratorio externo (2026-05-01): `POST /ordenes-trabajo/recibir/validar|lote` permite a `ANALISTA_ORD/ANALISTA` recibir ORDs externas (`DAT_LAB.SUC` vacío o laboratorio marcado externo); la transición queda `5 -> 10` para externo y `5 -> 7` para interno.
+- envío laboratorio externo (2026-05-03): `POST /ordenes-trabajo/enviar/lote` manda ORDs con `DAT_LAB.UBILAB='EXTERNO'` a `ESTSEGU=9` (pendiente recibir en analista), manteniendo `3 -> 5` para interno.
+- recepción laboratorio externo (2026-05-03): `POST /ordenes-trabajo/recibir/validar|lote` para `ANALISTA_ORD/ANALISTA` valida flujo `9` en externo y aplica `9 -> 10`; en interno mantiene validación `5` y transición `5 -> 7`.
+- matriz persistente de visibilidad (2026-05-03): `dbo.DAT_JAO_ORD_FLUJO_VIS` controla flujos visibles por `ROLE_CODE`/`PANEL_MODE` para módulo `DAT_JAO_ORD`; analista usa excepción `SOLO_EXTERNO=1` en flujo `9`.
+- `:iord/cambio-merma/solicitar-autorizacion` mueve siempre el caso a `selCtrlOrd=14`; `:iord/cambio-merma/retrabajo` lo devuelve a `15`; `:iord/cambio-merma/autorizar` crea la nueva ORD, ejecuta el SP final, registra MB51/diferencia y anula la original.
+- `admin`, `ANALISTA_INV` e `INVJEF` son los únicos perfiles que pueden ejecutar `:iord/cambio-merma/autorizar` y `:iord/cambio-merma/retrabajo`.
+- afectación final (2026-04-22): `sp_ordenes_trabajo_registrar_mb51` ya no usa clase genérica; cambio material registra `204/205`, merma registra `456/455/457`, y `DAT_MB51.CTOT` se calcula con `DAT_ART.CTOP`. Todos los renglones MB51 del caso se concentran bajo `DOCP = IDFOL` original.
+- diferencia contable (2026-04-22): `sp_ordenes_trabajo_registrar_ctrl_ctas_diff` usa `DAT_CAT_CTAS.CTA=101001001` (`RELACION='AD'`), `DAT_CMOV` `801/802` para cargo/abono y genera `NDOC` consecutivo registrado también en `DAT_CTR_DOC`. La UI y los PDFs deben mostrar la diferencia sellada/contable basada en `CTD_C_M`, no el total completo de la nueva ORD.
+- el panel ORDs entrega a `ANALISTA_INV` e `INVJEF` solo la cola de revisión con `selCtrlOrd=14`; el resto de roles conserva su matriz operativa actual.
+- `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` aceptan `@MOTR` y `@CTD_C_M`, calculan diferencia económica sobre la fracción afectada y cierran el proceso dejando la original relacionada por `REEORD`.
 - cálculo económico `Subtotal/IVA/Total` del contexto cambio/merma usa `DAT_SUC.IVA_INTEGRADO` + factor fiscal del folio (`PV_CTR_FOL_ASVR.REQF`/`RQFAC`) y tipo (`AUT/ORIGEN_AUT`), sin inferir `tipotran` por patrón de `IDFOL`.
-- staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` almacena captura temporal (artículo, motivo, laboratorio, docdif, `CTD_C_M`, bandera crear derivada) antes de la creación definitiva.
-  - el panel resuelve `ASIGNADO` como etiqueta legible de `PV_OPV` (`NOMB + APELM + APELP`) y mantiene `ASIGN_ID` como valor crudo para filtros/acciones.
+- staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` almacena captura temporal (artículo, motivo, laboratorio, docdif, `CTD_C_M`, `NVA_IORD`) antes del cierre final en control de ORDs.
+- ajuste fiscal folio (2026-04-19): contexto/API y SPs priorizan `REQF` del folio con fallback explícito a `RQFAC` (`PV_CTR_FOL_ASVR`) para homologar el cálculo al momento de crear nueva ORD.
+- staging UX (2026-04-19): `context` devuelve `hasStagingRecord` para habilitar UI de captura solo cuando ya existe registro temporal.
+- costo alineado (2026-04-19): `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` usan costo de ORD original al calcular importes de la nueva ORD, evitando diferencias de precio.
+- el panel resuelve `ASIGNADO` como etiqueta legible de `PV_OPV` (`NOMB + APELM + APELP`) y mantiene `ASIGN_ID` como valor crudo para filtros/acciones.
+- el panel también resuelve `OPV` con `USUARIO.NOMBRE`, exponiendo `OPV_ID` como valor crudo cuando existe relación.
+- `panelMode='estado'` devuelve catálogo completo de `DAT_EST_ORD`, solo habilita `VER_DETALLE` y reemplaza operativamente a los módulos front legacy de `anuladas`/`entregadas`.
+- `saveDetail` acepta `hrEnt` (`HH:MM`) y lo guarda en `PV_CTR_ORDS.HR_ENT`.
+- `ANULAR` queda limitado a `admin`/`JEF_TALLER`; las anulaciones exitosas continúan registrándose en `AUDIT_LOG`.
   - recepción unificada: se elimina destino (`TALLER/ANALISTA`) y backend fija recepción operativa a `ESTSEGU=7`.
   - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) solo para `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER` (admin conserva acceso total).
   - trazabilidad UI (app): en modal de envío se elimina botón `Agregar ORD`; la captura manual agrega por `Enter` en el `TextField` `ORD`.
@@ -81,6 +104,7 @@ Enlaces relacionados:
   - trazabilidad UI/Home (app, 2026-03-24): `ioe_app` agrega accesos directos desde Home para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar`; backend reutiliza `allowedActions` de `GET /ordenes-trabajo`.
   - regla de consistencia panel/home (2026-04-07): cualquier cambio en validaciones de flujo o requisitos operativos (p. ej. laboratorio o colaborador asignado) para acciones de botonera debe mantenerse tambien en los endpoints usados por Home (`*/validar` y `*/lote`) para que ambos caminos conserven el mismo comportamiento.
   - compatibilidad catálogo estados (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT` (script `sql/2026-03-22_dat_est_ord_esta_float.sql`) para soportar estados intermedios (p. ej. `9.1`).
-  - trazabilidad API/UI ORDs (2026-04-05): la carga de colaboradores para `Asignar` sigue usando `GET /ordenes-trabajo/asignar/colaboradores?suc=...`; la corrección para admin quedó del lado frontend enviando la sucursal seleccionada del panel, sin cambios de contrato API ni SP adicional.
+  - trazabilidad API/UI ORDs (2026-04-21): la carga de colaboradores para `Asignar` sigue usando `GET /ordenes-trabajo/asignar/colaboradores?suc=...`; la UI envía `DAT_LAB.SUC` del laboratorio asignado a la ORD. El catálogo `laboratorios` del panel expone `labSuc` además de `suc`.
   - fix incidencia ORDs (2026-04-05): script `sql/2026-04-05_ordenes_trabajo_regresar_incidencia_tipom_fix.sql` corrige la firma de `sp_ordenes_trabajo_regresar_incidencia_lote` para incluir `@TIPOM` y volver a permitir `POST /ordenes-trabajo/regresar-incidencia/lote` sin error de argumentos; además persiste `TIPOM` para flujo `9.1/9.2`.
+
 

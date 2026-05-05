@@ -25,11 +25,16 @@ Enlaces relacionados:
 - `MODULO`, `GRUP_MODULO`, `GRUPMOD_MODULO`, `ROL_GRUP_MODULO_PERM`.
 - `MOD_FRONT`, `GRUPMOD_FRONT`, `GRUPMOD_FRONT_MOD`, `ROL_GRUPMOD_FRONT`.
 - `datmodulos`: opera sobre `MOD_FRONT`.
+- Datos Maestros / Módulos Front (2026-05-04): se mantiene `/datmodulos` como CRUD único de `MOD_FRONT`; ajuste de consumo en frontend hacia `/#/masterdata/access/mod-front` no requiere cambios de endpoints ni SPs en API.
+- Datos Maestros / Enrolamiento Front por usuario (2026-05-04): nueva tabla `USR_GRUPMOD_FRONT` con asignación `IDUSUARIO -> IDGRUPMOD_FRONT`; resolución de módulos front prioriza usuario y cae a rol cuando no hay filas activas.
+- Datos Maestros / Enrolamiento Front por usuario (2026-05-04): endpoint `GET /access/users` incluye `SUC/SUC_DESC` y `IDDEPTO/DEPTO_NOMBRE`, además de filtros `suc` e `idDepto`.
+- Datos Maestros / Acceso por sucursal (2026-05-04): endpoint `GET /usr-mod-suc` añade filtros `sucUsuario` y `depto`; `depto` se valida en ambos lados (`USUARIO -> DEPARTAMENTO.NOMBRE` y `MOD_FRONT.DEPTO`) para alinear filtros de UI en CRUD/popup.
 - `audit`: `AUDIT_LOG` (`IDLOG`, `IDUSUARIO`, `ACTION`, `MODULO`, `ENTIDAD`, `ENTIDAD_ID`, `SUC`, `METADATA_JSON`, `IP`, `FCNR`).
 
 ### Catalogos y maestros operativos
 
 - `datart`: `DAT_ART` (`SUC`, `ART`, `UPC`, `DES`, `TIPO`, `PVTA`, `CTOP`, `DEPA`, `SUBD`, `CLAS`, `SCLA`, `SCLA2`, ...).
+- Seguridad upload Excel (2026-05-04): cargas en `datart`, `articulos/alta-masiva` y `conteos` validan fuente confiable (`extensión`, `MIME`, firma binaria y límites de tamaño/estructura) antes de parsear; lecturas de filas sensibles usan `header:1` para evitar llaves de objeto no confiables.
 - Edición (2026-04): `PATCH /datart/:suc/:art/:upc` permite actualizar `UPC`; la API rechaza con `409` cuando el `UPC` ya está asignado a otro `ART` de la misma sucursal.
 - Trazabilidad app (2026-03): `ioe_app` agregó impresión de etiquetas en `datart_page.dart` (selección local por renglón/filtrados + impresión masiva), usando endpoints existentes de `datart` sin cambios de contrato API.
 - Regla EAN13 en app: para `UPC` mayor a 12 dígitos, frontend usa los 12 dígitos derechos para calcular dígito verificador y renderizar código de barras en etiqueta `76mm x 56mm` (una página por artículo).
@@ -39,6 +44,8 @@ Enlaces relacionados:
 - `dat-almacen`: `DAT_ALMACEN` (`ALMACEN`, `DESCRIPCION`, `ACTIVO`, `FCNR`).
 - `dat-cmov`: fuente `DAT_CMOV` (descubrimiento dinamico de columnas).
 - `dat-form`: fuente `DAT_FORM` para catalogo de formas de pago (`IDFORM`, `ASPEL`, `FORM`, `NOM`, `ESTADO`).
+- `ord-flujo-vis`: fuente `DAT_JAO_ORD_FLUJO_VIS` para visibilidad de flujos ORD por rol/panel (`ID`, `MODULO`, `PANEL_MODE`, `ROLE_CODE`, `ESTA`, `SOLO_EXTERNO`, `ACTIVO`, `ORDEN`), con catálogo auxiliar `ROL` + `DAT_EST_ORD`; `ORDEN` automático por `ESTA`.
+- `roles`: `ROL` con `IDDEPTO` opcional relacionado a `DEPARTAMENTO.IDDEPTO`; `DAT_JAO_ORD_FLUJO_VIS.ROLE_CODE` ahora tiene FK a `ROL.CODIGO`.
 
 ### Inventarios y conteos
 

@@ -13,7 +13,9 @@ import { ModFrontEntity } from '../me/entities/mod-front.entity';
 import { GrupmodFrontEntity } from '../me/entities/grupmod-front.entity';
 import { GrupmodFrontModEntity } from '../me/entities/grupmod-front-mod.entity';
 import { RolGrupmodFrontEntity } from '../me/entities/rol-grupmod-front.entity';
+import { UsrGrupmodFrontEntity } from '../me/entities/usr-grupmod-front.entity';
 import { RolEntity } from '../roles/rol.entity';
+import { UsuarioEntity } from '../users/usuario.entity';
 import { CreateModuloDto } from './dto/create-modulo.dto';
 import { UpdateModuloDto } from './dto/update-modulo.dto';
 import { CreateGrupModuloDto } from './dto/create-grup-modulo.dto';
@@ -26,6 +28,7 @@ import { CreateGrupmodFrontDto } from './dto/create-grupmod-front.dto';
 import { UpdateGrupmodFrontDto } from './dto/update-grupmod-front.dto';
 import { AssignFrontModulesToGroupDto } from './dto/assign-front-modules-to-group.dto';
 import { AssignFrontGroupToRoleDto } from './dto/assign-front-group-to-role.dto';
+import { AssignFrontGroupToUserDto } from './dto/assign-front-group-to-user.dto';
 
 @Injectable()
 export class AccessService {
@@ -46,8 +49,12 @@ export class AccessService {
     private readonly gfmRepo: Repository<GrupmodFrontModEntity>,
     @InjectRepository(RolGrupmodFrontEntity)
     private readonly rgfRepo: Repository<RolGrupmodFrontEntity>,
+    @InjectRepository(UsrGrupmodFrontEntity)
+    private readonly ugfRepo: Repository<UsrGrupmodFrontEntity>,
     @InjectRepository(RolEntity)
     private readonly rolRepo: Repository<RolEntity>,
+    @InjectRepository(UsuarioEntity)
+    private readonly userRepo: Repository<UsuarioEntity>,
   ) {}
 
   private parseDate(value?: string) {
@@ -232,6 +239,38 @@ export class AccessService {
       where: includeInactives ? undefined : { ACTIVO: true },
       order: { NOMBRE: 'ASC' },
     });
+  }
+
+  async listUsers(includeInactives = false, suc?: string, idDepto?: number) {
+    const qb = this.userRepo
+      .createQueryBuilder('u')
+      .leftJoin('u.DEPARTAMENTO', 'd')
+      .leftJoin('u.SUCURSAL', 's')
+      .select([
+        'u.IDUSUARIO AS IDUSUARIO',
+        'u.USERNAME AS USERNAME',
+        'u.NOMBRE AS NOMBRE',
+        'u.APELLIDOS AS APELLIDOS',
+        'u.MAIL AS MAIL',
+        'u.ESTATUS AS ESTATUS',
+        'u.IDDEPTO AS IDDEPTO',
+        'u.SUC AS SUC',
+        'd.NOMBRE AS DEPTO_NOMBRE',
+        's.[DESC] AS SUC_DESC',
+      ])
+      .orderBy('u.USERNAME', 'ASC');
+
+    if (!includeInactives) {
+      qb.andWhere(`u.ESTATUS = 'ACTIVO'`);
+    }
+    if ((suc ?? '').trim().length > 0) {
+      qb.andWhere('u.SUC = :suc', { suc: suc!.trim() });
+    }
+    if (idDepto != null && Number.isFinite(idDepto)) {
+      qb.andWhere('u.IDDEPTO = :idDepto', { idDepto });
+    }
+
+    return qb.getRawMany();
   }
 
   // -------- PERMISOS BACKEND --------
@@ -524,75 +563,16 @@ export class AccessService {
 
   // -------- ENROLAMIENTOS FRONT --------
   async getFrontEnrollments(roleId: number, includeInactives = false) {
-    const grupos = await this.grupFrontRepo.find({
-      where: includeInactives ? undefined : { ACTIVO: true },
-      order: { NOMBRE: 'ASC' },
-    });
-
-    const modulos = await this.modFrontRepo.find({
-      where: includeInactives ? undefined : { ACTIVO: true },
-    });
-
-    const rel = grupos.length
-      ? await this.gfmRepo.find({
-          where: { IDGRUPMOD_FRONT: In(grupos.map((g) => g.IDGRUPMOD_FRONT)) },
-        })
-      : [];
-
-    const modsById = new Map(modulos.map((m) => [m.IDMOD_FRONT, m]));
-    const modsByGroup = new Map<number, ModFrontEntity[]>();
-
-    for (const g of grupos) modsByGroup.set(g.IDGRUPMOD_FRONT, []);
-
-    for (const r of rel) {
-      const mod = modsById.get(r.IDMOD_FRONT);
-      const list = modsByGroup.get(r.IDGRUPMOD_FRONT);
-      if (!mod || !list) continue;
-      list.push(mod);
-    }
-
     const enrolls = await this.rgfRepo.find({ where: { IDROL: roleId } });
     const enrollByGroup = new Map(enrolls.map((e) => [e.IDGRUPMOD_FRONT, e]));
-
-    const items = grupos.map((g) => {
-      const enr = enrollByGroup.get(g.IDGRUPMOD_FRONT);
-      const modList = (modsByGroup.get(g.IDGRUPMOD_FRONT) ?? [])
-        .map((m) => ({
-          idModFront: m.IDMOD_FRONT,
-          codigo: m.CODIGO,
-          nombre: m.NOMBRE,
-          depto: m.DEPTO ?? null,
-        }))
-        .sort((a, b) => a.nombre.localeCompare(b.nombre));
-
-      return {
-        idGrupmodFront: g.IDGRUPMOD_FRONT,
-        grupoNombre: g.NOMBRE,
-        activo: enr ? !!enr.ACTIVO : false,
-        mods: modList,
-      };
-    });
-
-    const totalEnroll = enrollByGroup.get(0);
-    items.unshift({
-      idGrupmodFront: 0,
-      grupoNombre: 'ACCESO_TOTAL',
-      activo: totalEnroll ? !!totalEnroll.ACTIVO : false,
-      mods: [],
-    });
-
-    return items;
+    return this.buildFrontEnrollmentItems(includeInactives, (groupId) =>
+      enrollByGroup.get(groupId),
+    );
   }
 
   async setFrontEnrollment(roleId: number, dto: AssignFrontGroupToRoleDto) {
     const groupId = Number(dto.idGrupmodFront);
-    if (groupId !== 0) {
-      const group = await this.grupFrontRepo.findOne({
-        where: { IDGRUPMOD_FRONT: groupId },
-      });
-      if (!group)
-        throw new NotFoundException(`GRUPMOD_FRONT ${groupId} no existe`);
-    }
+    await this.ensureFrontGroupExists(groupId);
 
     const payload: Partial<RolGrupmodFrontEntity> = {
       IDROL: roleId,
@@ -613,12 +593,47 @@ export class AccessService {
     return this.rgfRepo.save(this.rgfRepo.create(payload));
   }
 
-  // -------- FRONT MENU --------
-  async getFrontMenu(roleId: number) {
-    // TEMP: log para validar rol y grupos aplicados
+  // -------- ENROLAMIENTOS FRONT USUARIO --------
+  async getFrontUserEnrollments(userId: number, includeInactives = false) {
+    await this.ensureUserExists(userId);
+    const enrolls = await this.ugfRepo.find({ where: { IDUSUARIO: userId } });
+    const enrollByGroup = new Map(enrolls.map((e) => [e.IDGRUPMOD_FRONT, e]));
+    return this.buildFrontEnrollmentItems(includeInactives, (groupId) =>
+      enrollByGroup.get(groupId),
+    );
+  }
 
-    console.log('[access.getFrontMenu] roleId:', roleId);
-    if (roleId === 0) {
+  async setFrontUserEnrollment(
+    userId: number,
+    dto: AssignFrontGroupToUserDto,
+  ) {
+    await this.ensureUserExists(userId);
+    const groupId = Number(dto.idGrupmodFront);
+    await this.ensureFrontGroupExists(groupId);
+
+    const payload: Partial<UsrGrupmodFrontEntity> = {
+      IDUSUARIO: userId,
+      IDGRUPMOD_FRONT: groupId,
+      ACTIVO: dto.activo ?? true,
+      FCNR: new Date(),
+    };
+
+    const existing = await this.ugfRepo.findOne({
+      where: { IDUSUARIO: userId, IDGRUPMOD_FRONT: groupId },
+    });
+
+    if (existing) {
+      const updated = this.ugfRepo.merge(existing, payload);
+      return this.ugfRepo.save(updated);
+    }
+
+    return this.ugfRepo.save(this.ugfRepo.create(payload));
+  }
+
+  // -------- FRONT MENU --------
+  async getFrontMenu(userId: number, roleId: number) {
+    const resolved = await this.resolveEffectiveFrontGroups(userId, roleId);
+    if (resolved.accesoTotal) {
       const rows = await this.modFrontRepo.find({ where: { ACTIVO: true } });
       return rows
         .map((m) => ({
@@ -633,25 +648,10 @@ export class AccessService {
           return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
         });
     }
-    const assigns = await this.rgfRepo.find({
-      where: { IDROL: roleId, ACTIVO: true },
-    });
 
-    console.log(
-      '[access.getFrontMenu] assigns:',
-      assigns.map((a) => ({
-        IDROL: a.IDROL,
-        IDGRUPMOD_FRONT: a.IDGRUPMOD_FRONT,
-        ACTIVO: a.ACTIVO,
-      })),
-    );
-
-    const groupIds = assigns
-      .map((a) => a.IDGRUPMOD_FRONT)
-      .filter((x) => x !== 0);
-    if (!groupIds.length) return [];
-
-    console.log('[access.getFrontMenu] groupIds:', groupIds);
+    if (!resolved.allowedGroupIds || resolved.allowedGroupIds.length === 0) {
+      return [];
+    }
 
     const rel = await this.gfmRepo
       .createQueryBuilder('gfm')
@@ -659,10 +659,10 @@ export class AccessService {
       .leftJoinAndSelect('gfm.MODULO', 'mod')
       .where('grupo.ACTIVO = 1')
       .andWhere('mod.ACTIVO = 1')
-      .andWhere('gfm.IDGRUPMOD_FRONT IN (:...ids)', { ids: groupIds })
+      .andWhere('gfm.IDGRUPMOD_FRONT IN (:...ids)', {
+        ids: resolved.allowedGroupIds,
+      })
       .getMany();
-
-    console.log('[access.getFrontMenu] rel count:', rel.length);
 
     const byId = new Map<number, ModFrontEntity>();
     for (const r of rel) {
@@ -681,5 +681,104 @@ export class AccessService {
         const deptoCmp = deptoA.localeCompare(deptoB);
         return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
       });
+  }
+
+  private async buildFrontEnrollmentItems(
+    includeInactives: boolean,
+    findEnrollment: (groupId: number) => { ACTIVO: boolean } | undefined,
+  ) {
+    const grupos = await this.grupFrontRepo.find({
+      where: includeInactives ? undefined : { ACTIVO: true },
+      order: { NOMBRE: 'ASC' },
+    });
+
+    const modulos = await this.modFrontRepo.find({
+      where: includeInactives ? undefined : { ACTIVO: true },
+    });
+
+    const rel = grupos.length
+      ? await this.gfmRepo.find({
+          where: { IDGRUPMOD_FRONT: In(grupos.map((g) => g.IDGRUPMOD_FRONT)) },
+        })
+      : [];
+
+    const modsById = new Map(modulos.map((m) => [m.IDMOD_FRONT, m]));
+    const modsByGroup = new Map<number, ModFrontEntity[]>();
+
+    for (const g of grupos) modsByGroup.set(g.IDGRUPMOD_FRONT, []);
+    for (const r of rel) {
+      const mod = modsById.get(r.IDMOD_FRONT);
+      const list = modsByGroup.get(r.IDGRUPMOD_FRONT);
+      if (!mod || !list) continue;
+      list.push(mod);
+    }
+
+    const items = grupos.map((g) => {
+      const enr = findEnrollment(g.IDGRUPMOD_FRONT);
+      const modList = (modsByGroup.get(g.IDGRUPMOD_FRONT) ?? [])
+        .map((m) => ({
+          idModFront: m.IDMOD_FRONT,
+          codigo: m.CODIGO,
+          nombre: m.NOMBRE,
+          depto: m.DEPTO ?? null,
+        }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+      return {
+        idGrupmodFront: g.IDGRUPMOD_FRONT,
+        grupoNombre: g.NOMBRE,
+        activo: enr ? !!enr.ACTIVO : false,
+        mods: modList,
+      };
+    });
+
+    const totalEnroll = findEnrollment(0);
+    items.unshift({
+      idGrupmodFront: 0,
+      grupoNombre: 'ACCESO_TOTAL',
+      activo: totalEnroll ? !!totalEnroll.ACTIVO : false,
+      mods: [],
+    });
+
+    return items;
+  }
+
+  private async ensureFrontGroupExists(groupId: number) {
+    if (groupId === 0) return;
+    const group = await this.grupFrontRepo.findOne({
+      where: { IDGRUPMOD_FRONT: groupId },
+    });
+    if (!group) throw new NotFoundException(`GRUPMOD_FRONT ${groupId} no existe`);
+  }
+
+  private async ensureUserExists(userId: number) {
+    const exists = await this.userRepo.exist({ where: { IDUSUARIO: userId } });
+    if (!exists) throw new NotFoundException(`USUARIO ${userId} no existe`);
+  }
+
+  private async resolveEffectiveFrontGroups(userId: number, roleId: number) {
+    const userAssigns = await this.ugfRepo.find({
+      where: { IDUSUARIO: userId, ACTIVO: true },
+    });
+    const sourceAssigns =
+      userAssigns.length > 0
+        ? userAssigns
+        : await this.rgfRepo.find({
+            where: { IDROL: roleId, ACTIVO: true },
+          });
+
+    const accesoTotal =
+      sourceAssigns.some((a) => a.IDGRUPMOD_FRONT === 0) || roleId === 0;
+    const allowedGroupIds = accesoTotal
+      ? null
+      : Array.from(
+          new Set(
+            sourceAssigns
+              .map((a) => a.IDGRUPMOD_FRONT)
+              .filter((x) => x !== 0),
+          ),
+        );
+
+    return { accesoTotal, allowedGroupIds };
   }
 }

@@ -10,7 +10,9 @@ import { ModFrontEntity } from '../me/entities/mod-front.entity';
 import { GrupmodFrontEntity } from '../me/entities/grupmod-front.entity';
 import { GrupmodFrontModEntity } from '../me/entities/grupmod-front-mod.entity';
 import { RolGrupmodFrontEntity } from '../me/entities/rol-grupmod-front.entity';
+import { UsrGrupmodFrontEntity } from '../me/entities/usr-grupmod-front.entity';
 import { RolEntity } from '../roles/rol.entity';
+import { UsuarioEntity } from '../users/usuario.entity';
 
 @Module({
   imports: [
@@ -23,7 +25,9 @@ import { RolEntity } from '../roles/rol.entity';
       GrupmodFrontEntity,
       GrupmodFrontModEntity,
       RolGrupmodFrontEntity,
+      UsrGrupmodFrontEntity,
       RolEntity,
+      UsuarioEntity,
     ]),
   ],
   controllers: [AccessController],

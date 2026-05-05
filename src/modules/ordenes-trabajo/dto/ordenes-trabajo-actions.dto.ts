@@ -11,6 +11,7 @@ import {
   IsOptional,
   IsString,
   IsNotEmpty,
+  Matches,
   ValidateNested,
   Length,
   Min,
@@ -48,10 +49,25 @@ export class EntregarOrdDto {
 }
 
 export class GarantiaOrdDto {
-  @ApiProperty({ example: 'Ajuste por defecto de laboratorio' })
+  @ApiPropertyOptional({ example: 'Ajuste por defecto de laboratorio' })
+  @IsOptional()
   @IsString()
-  @Length(3, 255)
-  motivo!: string;
+  @Length(0, 255)
+  motivo?: string;
+}
+
+export class AplicarMermaCambioDto {
+  @ApiProperty({ example: 1, enum: [1, 2] })
+  @Type(() => Number)
+  @IsNumber()
+  @IsIn([1, 2])
+  tipom!: number;
+
+  @ApiProperty({ example: 2, description: 'IDM del catálogo DAT_ORD_MOTM' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  motr!: number;
 }
 
 export class CambioMaterialDto {
@@ -151,14 +167,6 @@ export class PrepararCambioMermaDto {
   @IsNumber({ maxDecimalPlaces: 4 })
   @IsIn([0.5, 1])
   ctdCM?: number;
-}
-
-export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto {
-  @ApiPropertyOptional({ example: 'ART-NUEVO-001' })
-  @IsOptional()
-  @IsString()
-  @Length(0, 255)
-  artNuevo?: string;
 
   @ApiPropertyOptional({ example: 'Cambio por graduación especial' })
   @IsOptional()
@@ -172,6 +180,29 @@ export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto 
   @IsNumber()
   @Min(1)
   motr?: number;
+}
+
+export class ActualizarArticuloCambioMermaDto extends CambioMermaContextDto {
+  @ApiProperty({ example: 'ART-NUEVO-001' })
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  artNuevo!: string;
+
+  @ApiPropertyOptional({ example: 200 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  pvtaNuevo?: number;
+}
+
+export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto {
+  @ApiPropertyOptional({ example: 'ART-NUEVO-001' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  artNuevo?: string;
 
   @ApiPropertyOptional({ example: 3 })
   @IsOptional()
@@ -189,7 +220,16 @@ export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto 
   @IsOptional()
   @IsBoolean()
   crearNuevaOrd?: boolean;
+
+  @ApiPropertyOptional({ example: 200 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  pvtaNuevo?: number;
 }
+
+export class RetrabajoCambioMermaDto extends CambioMermaContextDto {}
 
 export class CrearCambioMermaDto extends PrepararCambioMermaDto {}
 
@@ -294,6 +334,14 @@ export class SaveOrdDetalleDto {
   @IsString()
   @Length(0, 2000)
   comentarios?: string;
+
+  @ApiPropertyOptional({ example: '14:35' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, {
+    message: 'hrEnt debe tener formato HH:MM',
+  })
+  hrEnt?: string;
 
   @ApiProperty({ type: [SaveOrdDetalleLineaDto] })
   @IsDefined()

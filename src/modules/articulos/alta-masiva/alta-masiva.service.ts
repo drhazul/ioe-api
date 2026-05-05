@@ -2,6 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
+import {
+  assertTrustedExcelUpload,
+  assertTrustedWorkbookBounds,
+} from '../../../common/security/trusted-excel-upload';
 
 type StagingRow = {
   BatchId: string;
@@ -88,17 +92,8 @@ export class AltaMasivaService {
   constructor(private readonly dataSource: DataSource) {}
 
   async upload(file: any): Promise<AltaMasivaUploadResult> {
-    if (!file?.buffer) {
-      throw new BadRequestException('Archivo Excel requerido');
-    }
-
-    const filename = String(file.originalname ?? '').trim();
-    const lowerName = filename.toLowerCase();
-    if (!lowerName.endsWith('.xlsx') && !lowerName.endsWith('.xls')) {
-      throw new BadRequestException('Formato no soportado. Usa .xlsx o .xls');
-    }
-
-    const rows = this.parseExcelRows(file.buffer);
+    const { buffer } = assertTrustedExcelUpload(file);
+    const rows = this.parseExcelRows(buffer);
     if (!rows.length) {
       throw new BadRequestException(
         'El archivo no contiene renglones con datos',
@@ -129,19 +124,11 @@ export class AltaMasivaService {
   }
 
   async preview(file: any): Promise<AltaMasivaPreviewResult> {
-    if (!file?.buffer) {
-      throw new BadRequestException('Archivo Excel requerido');
-    }
-
-    const filename = String(file.originalname ?? '').trim();
-    const lowerName = filename.toLowerCase();
-    if (!lowerName.endsWith('.xlsx') && !lowerName.endsWith('.xls')) {
-      throw new BadRequestException('Formato no soportado. Usa .xlsx o .xls');
-    }
+    const { buffer } = assertTrustedExcelUpload(file);
 
     let workbook: XLSX.WorkBook;
     try {
-      workbook = XLSX.read(file.buffer, {
+      workbook = XLSX.read(buffer, {
         type: 'buffer',
         cellDates: false,
         raw: false,
@@ -149,6 +136,7 @@ export class AltaMasivaService {
     } catch (_err) {
       throw new BadRequestException('No se pudo leer el archivo Excel');
     }
+    assertTrustedWorkbookBounds(workbook);
 
     const firstSheet = workbook.SheetNames?.[0];
     if (!firstSheet) {
@@ -284,6 +272,7 @@ export class AltaMasivaService {
     } catch (_err) {
       throw new BadRequestException('No se pudo leer el archivo Excel');
     }
+    assertTrustedWorkbookBounds(workbook);
 
     const firstSheet = workbook.SheetNames?.[0];
     if (!firstSheet) {
@@ -291,15 +280,13 @@ export class AltaMasivaService {
     }
 
     const worksheet = workbook.Sheets[firstSheet];
-    const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
-      worksheet,
-      {
-        defval: null,
-        raw: false,
-        blankrows: false,
-      },
-    );
-    if (!jsonRows.length) return [];
+    const rawRows = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: null,
+      raw: false,
+      blankrows: false,
+    }) as unknown as Array<Array<unknown>>;
+    if (!rawRows.length) return [];
 
     const normalizeKey = (key: string) =>
       key
@@ -307,71 +294,95 @@ export class AltaMasivaService {
         .replace(/[\s\-]+/g, '')
         .replace(/[^A-Z0-9_]/g, '');
 
-    const rows: StagingRow[] = [];
-    jsonRows.forEach((raw, index) => {
-      const rowMap = new Map<string, unknown>();
-      for (const [key, value] of Object.entries(raw)) {
-        rowMap.set(normalizeKey(key), value);
+    const headerRow = rawRows[0] ?? [];
+    const keyToIndex = new Map<string, number>();
+    headerRow.forEach((value, idx) => {
+      const normalized = normalizeKey(String(value ?? ''));
+      if (!normalized) return;
+      if (!keyToIndex.has(normalized)) keyToIndex.set(normalized, idx);
+    });
+
+    const pickCell = (row: Array<unknown>, ...candidates: string[]) => {
+      for (const candidate of candidates) {
+        const col = keyToIndex.get(candidate);
+        if (col == null) continue;
+        return row[col];
       }
+      return null;
+    };
 
-      const pick = (...candidates: string[]) => {
-        for (const key of candidates) {
-          if (rowMap.has(key)) return rowMap.get(key);
-        }
-        return null;
-      };
-
-      const row: StagingRow = {
+    const rows: StagingRow[] = [];
+    rawRows.slice(1).forEach((raw, index) => {
+      const values = Array.isArray(raw) ? raw : [];
+      const stagedRow: StagingRow = {
         BatchId: '',
         RowNum: index + 2,
-        SUC: this.toNullableString(pick('SUC'), 5),
-        TIPO: this.toNullableString(pick('TIPO'), 255),
-        ART: this.toNullableString(pick('ART'), 10),
-        UPC: this.toNullableString(pick('UPC'), 15),
-        CLAVESAT: this.toNullableString(pick('CLAVESAT')),
-        UNIMEDSAT: this.toNullableString(pick('UNIMEDSAT'), 255),
-        DES: this.toNullableString(pick('DES'), 255),
-        STOCK: this.toNullableString(pick('STOCK')),
-        STOCK_MIN: this.toNullableString(pick('STOCK_MIN', 'STOCKMIN')),
-        ESTATUS: this.toNullableString(pick('ESTATUS'), 255),
-        DIA_REABASTO: this.toNullableString(
-          pick('DIA_REABASTO', 'DIAREABASTO'),
+        SUC: this.toNullableString(pickCell(values, 'SUC'), 5),
+        TIPO: this.toNullableString(pickCell(values, 'TIPO'), 255),
+        ART: this.toNullableString(pickCell(values, 'ART'), 10),
+        UPC: this.toNullableString(pickCell(values, 'UPC'), 15),
+        CLAVESAT: this.toNullableString(pickCell(values, 'CLAVESAT')),
+        UNIMEDSAT: this.toNullableString(pickCell(values, 'UNIMEDSAT'), 255),
+        DES: this.toNullableString(pickCell(values, 'DES'), 255),
+        STOCK: this.toNullableString(pickCell(values, 'STOCK')),
+        STOCK_MIN: this.toNullableString(
+          pickCell(values, 'STOCK_MIN', 'STOCKMIN'),
         ),
-        PVTA: this.toNullableString(pick('PVTA')),
-        CTOP: this.toNullableString(pick('CTOP')),
-        PROV_1: this.toNullableString(pick('PROV_1', 'PROV1')),
-        CTO_PROV1: this.toNullableString(pick('CTO_PROV1', 'CTOPROV1')),
-        PROV_2: this.toNullableString(pick('PROV_2', 'PROV2')),
-        CTO_PROV2: this.toNullableString(pick('CTO_PROV2', 'CTOPROV2')),
-        PROV_3: this.toNullableString(pick('PROV_3', 'PROV3')),
-        CTO_PROV3: this.toNullableString(pick('CTO_PROV3', 'CTOPROV3')),
-        UN_COMP: this.toNullableString(pick('UN_COMP', 'UNCOMP'), 255),
-        FACT_COMP: this.toNullableString(pick('FACT_COMP', 'FACTCOMP')),
-        UN_VTA: this.toNullableString(pick('UN_VTA', 'UNVTA'), 255),
-        FACT_VTA: this.toNullableString(pick('FACT_VTA', 'FACTVTA')),
-        BASE: this.toNullableString(pick('BASE'), 255),
-        SPH: this.toNullableString(pick('SPH')),
-        CYL: this.toNullableString(pick('CYL')),
-        ADIC: this.toNullableString(pick('ADIC')),
-        DEPA: this.toNullableString(pick('DEPA')),
-        SUBD: this.toNullableString(pick('SUBD')),
-        CLAS: this.toNullableString(pick('CLAS')),
-        SCLA: this.toNullableString(pick('SCLA')),
-        SCLA2: this.toNullableString(pick('SCLA2')),
-        UMUE: this.toNullableString(pick('UMUE')),
-        UTRA: this.toNullableString(pick('UTRA')),
-        UNIV: this.toNullableString(pick('UNIV')),
-        UFRE: this.toNullableString(pick('UFRE')),
-        BLOQ: this.toNullableString(pick('BLOQ')),
-        MARCA: this.toNullableString(pick('MARCA'), 255),
-        MODELO: this.toNullableString(pick('MODELO')),
+        ESTATUS: this.toNullableString(pickCell(values, 'ESTATUS'), 255),
+        DIA_REABASTO: this.toNullableString(
+          pickCell(values, 'DIA_REABASTO', 'DIAREABASTO'),
+        ),
+        PVTA: this.toNullableString(pickCell(values, 'PVTA')),
+        CTOP: this.toNullableString(pickCell(values, 'CTOP')),
+        PROV_1: this.toNullableString(pickCell(values, 'PROV_1', 'PROV1')),
+        CTO_PROV1: this.toNullableString(
+          pickCell(values, 'CTO_PROV1', 'CTOPROV1'),
+        ),
+        PROV_2: this.toNullableString(pickCell(values, 'PROV_2', 'PROV2')),
+        CTO_PROV2: this.toNullableString(
+          pickCell(values, 'CTO_PROV2', 'CTOPROV2'),
+        ),
+        PROV_3: this.toNullableString(pickCell(values, 'PROV_3', 'PROV3')),
+        CTO_PROV3: this.toNullableString(
+          pickCell(values, 'CTO_PROV3', 'CTOPROV3'),
+        ),
+        UN_COMP: this.toNullableString(
+          pickCell(values, 'UN_COMP', 'UNCOMP'),
+          255,
+        ),
+        FACT_COMP: this.toNullableString(
+          pickCell(values, 'FACT_COMP', 'FACTCOMP'),
+        ),
+        UN_VTA: this.toNullableString(
+          pickCell(values, 'UN_VTA', 'UNVTA'),
+          255,
+        ),
+        FACT_VTA: this.toNullableString(
+          pickCell(values, 'FACT_VTA', 'FACTVTA'),
+        ),
+        BASE: this.toNullableString(pickCell(values, 'BASE'), 255),
+        SPH: this.toNullableString(pickCell(values, 'SPH')),
+        CYL: this.toNullableString(pickCell(values, 'CYL')),
+        ADIC: this.toNullableString(pickCell(values, 'ADIC')),
+        DEPA: this.toNullableString(pickCell(values, 'DEPA')),
+        SUBD: this.toNullableString(pickCell(values, 'SUBD')),
+        CLAS: this.toNullableString(pickCell(values, 'CLAS')),
+        SCLA: this.toNullableString(pickCell(values, 'SCLA')),
+        SCLA2: this.toNullableString(pickCell(values, 'SCLA2')),
+        UMUE: this.toNullableString(pickCell(values, 'UMUE')),
+        UTRA: this.toNullableString(pickCell(values, 'UTRA')),
+        UNIV: this.toNullableString(pickCell(values, 'UNIV')),
+        UFRE: this.toNullableString(pickCell(values, 'UFRE')),
+        BLOQ: this.toNullableString(pickCell(values, 'BLOQ')),
+        MARCA: this.toNullableString(pickCell(values, 'MARCA'), 255),
+        MODELO: this.toNullableString(pickCell(values, 'MODELO')),
       };
 
-      const hasAnyValue = Object.entries(row).some(
+      const hasAnyValue = Object.entries(stagedRow).some(
         ([key, value]) =>
           key !== 'BatchId' && key !== 'RowNum' && value != null,
       );
-      if (hasAnyValue) rows.push(row);
+      if (hasAnyValue) rows.push(stagedRow);
     });
 
     return rows;

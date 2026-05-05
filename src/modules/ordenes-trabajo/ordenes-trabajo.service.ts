@@ -10,6 +10,8 @@ import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { ListOrdenesTrabajoQueryDto } from './dto/list-ordenes-trabajo-query.dto';
 import {
+  AplicarMermaCambioDto,
+  ActualizarArticuloCambioMermaDto,
   AssignLaboratorioBatchDto,
   AssignOrdBatchDto,
   CambioMaterialDto,
@@ -49,17 +51,30 @@ type CambioMermaOriginalContext = {
   roleCode: string;
 };
 
+type OrdFlowVisibilityRule = {
+  estsegu: number;
+  onlyExternalLab: boolean;
+};
+
 @Injectable()
 export class OrdenesTrabajoService {
   private static readonly MODULE_CODES = [
     'DAT_JAO_ORD',
+    'DAT_JAO_ORD_ESTADO',
     'DAT_JAO_ORD_ANULADAS',
     'DAT_JAO_ORD_ENTREGADAS',
+    'DAT_JAO_ORD_GARANTIA',
+    'DAT_JAO_ORD_GARANTIAS',
+    'DAT_JAO_ORD_TRABAJO_TERMINADO',
+    'DAT_JAO_ORD_TERMINADO',
+    'DAT_JAO_ORD_FINALIZAR',
     'DAT_JAO_ORDS',
     'DAT_JAO_TALLER',
     'DAT_JAO_BISEL',
     'PV_ORDS',
   ] as const;
+  private flowVisibilityTableExists: boolean | null = null;
+  private readonly flowVisibilityPanelConfigCache = new Map<string, boolean>();
 
   constructor(
     private readonly dataSource: DataSource,
@@ -96,12 +111,9 @@ export class OrdenesTrabajoService {
           )
           AND (
             UPPER(LTRIM(RTRIM(ISNULL(${roleCodeParam}, '')))) NOT IN (
-              'ANALISTA',
               'ANALISTA_ORD',
               'ENC_MAQUILA',
-              'ENCARGADO_MAQUILA',
-              'ENC_BISEL',
-              'ENCARGADO_BISELADO'
+              'ENC_BISEL'
             )
             OR ${homeSucParam} IS NULL
             OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${homeSucParam})
@@ -132,7 +144,7 @@ export class OrdenesTrabajoService {
       roleCode,
       panelMode,
     );
-    const allowedStatusCodes = this.resolveAllowedStatusCodes(
+    const allowedStatusCodes = await this.resolveAllowedStatusCodes(
       user,
       roleCode,
       panelMode,
@@ -148,7 +160,7 @@ export class OrdenesTrabajoService {
     );
     const laboratorios = await this.resolveLaboratorios(scope);
     const incidenciaOptions = await this.resolveIncidenciaOptions();
-    if (this.shouldDeferEntregadasPanel(query, panelMode, scope.isAdmin)) {
+    if (this.shouldDeferPanel(query, panelMode, scope.isAdmin)) {
       return {
         ok: true,
         page,
@@ -225,18 +237,42 @@ export class OrdenesTrabajoService {
           return out;
         })
       : [];
-    const asignLabels = await this.resolveOpvLabels(
-      rawItems.map((item) => item.ASIGN),
+    const itemsByAllowedStatus = this.applyAllowedStatusFilterToItems(
+      rawItems,
+      allowedStatusCodes,
+      includeNullFlow,
     );
-    const items = rawItems.map((item) => {
+    const visibilityRules = await this.resolveFlowVisibilityRules(
+      user,
+      roleCode,
+      panelMode,
+    );
+    const itemsAfterVisibility = await this.applyFlowVisibilityRulesToItems(
+      itemsByAllowedStatus,
+      visibilityRules,
+      scope,
+      roleCode,
+    );
+    const asignLabels = await this.resolveOpvLabels(
+      itemsAfterVisibility.map((item) => item.ASIGN),
+    );
+    const opvLabels = await this.resolveUsuarioLabels(
+      itemsAfterVisibility.map((item) => item.OPV_ID ?? item.OPV),
+    );
+    const items = itemsAfterVisibility.map((item) => {
       const asignId = this.normalizeText(item.ASIGN);
       const asignLabel = asignId == null ? null : asignLabels.get(asignId);
-      if (asignLabel == null) return item;
+      const opvId = this.normalizeText(item.OPV_ID ?? item.OPV);
+      const opvLabel = opvId == null ? null : opvLabels.get(opvId);
+      if (asignLabel == null && opvLabel == null) return item;
       return {
         ...item,
-        ASIGN_ID: asignId,
-        ASIGN_LABEL: asignLabel,
-        ASIGN: asignLabel,
+        ...(asignId == null ? {} : { ASIGN_ID: asignId }),
+        ...(asignLabel == null
+          ? {}
+          : { ASIGN_LABEL: asignLabel, ASIGN: asignLabel }),
+        ...(opvId == null ? {} : { OPV_ID: opvId }),
+        ...(opvLabel == null ? {} : { OPV_LABEL: opvLabel, OPV: opvLabel }),
       };
     });
     items.sort((a, b) => {
@@ -344,17 +380,15 @@ export class OrdenesTrabajoService {
   ) {
     const iord = this.requireIord(iordRaw);
     const tipo = this.normalizeCambioMermaTipo(query.tipo);
-    await this.assertActionPermission(
-      tipo === 1 ? 'CAMBIO_MATERIAL' : 'MERMA',
-      user,
-    );
+    await this.assertCambioMermaContextPermission(tipo, user);
 
+    const staging = await this.fetchCambioMermaStagingIfAny(iord, tipo);
     const original = await this.fetchCambioMermaOriginalContext(
       iord,
       user,
       tipo,
+      { allowFinalized: true },
     );
-    const staging = await this.fetchCambioMermaStagingIfAny(iord, tipo);
     return this.buildCambioMermaContextResponse(iord, tipo, original.row, staging);
   }
 
@@ -377,6 +411,8 @@ export class OrdenesTrabajoService {
       user,
       tipo,
     );
+    const stagingBefore = await this.fetchCambioMermaStagingIfAny(iord, tipo);
+    await this.assertCambioMermaStagingUnlocked(iord, stagingBefore);
     const selCtrlOrd = this.toInt(original.row.selCtrlOrd);
     if (!this.isSelCtrlOrdEditable(selCtrlOrd)) {
       throw new BadRequestException(
@@ -391,23 +427,39 @@ export class OrdenesTrabajoService {
       ctdOriginal,
     );
     this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    const motivo = await this.resolveMovimientoMotrAndLabel(
+      tipo,
+      dto.motivo,
+      this.toInt(dto.motr) ?? this.toInt(original.row.MOTR) ?? undefined,
+    );
+    const pvtaOriginal = await this.resolveCambioMermaOriginalUnitPrice(
+      iord,
+      original.row,
+    );
+    const nvaIord = await this.resolveCambioMermaReservedIord(
+      this.normalizeText(original.row.SUC) ?? '',
+      stagingBefore,
+    );
 
     await this.upsertCambioMermaStaging(
       iord,
       tipo,
       {
         artNuevo: this.normalizeText(original.row.ART),
-        motr: this.toInt(original.row.MOTR),
-        motivo: null,
+        motr: motivo.id,
+        motivo: motivo.label,
         labor: this.toInt(original.row.LABOR),
         docDif: this.normalizeText(original.row.DOCDIF),
         ctdCM,
         crearNuevaOrd: true,
+        pvtaNuevo: pvtaOriginal,
+        diferenciaEconomica: null,
+        nvaIord,
       },
       this.auditActor(user),
     );
 
-    await this.updateCambioMermaSelCtrlOrd(iord, 13, ctdCM);
+    await this.updateCambioMermaOriginalState(iord, 13, ctdCM, motivo.id);
 
     await this.auditMutation('ORD_CAMBIO_MERMA_PREPARAR', user, ip, {
       iord,
@@ -422,14 +474,147 @@ export class OrdenesTrabajoService {
       tipo,
     );
     const staging = await this.fetchCambioMermaStaging(iord, tipo);
+    const context = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      updatedOriginal.row,
+      staging,
+    );
+    await this.syncCambioMermaStagingDiferencia(
+      iord,
+      tipo,
+      this.toFloat(context.diferenciaEconomica),
+      this.auditActor(user),
+    );
     return {
-      ...(await this.buildCambioMermaContextResponse(
-        iord,
-        tipo,
-        updatedOriginal.row,
-        staging,
-      )),
+      ...context,
       message: 'Nueva ORD en edición/captura',
+    };
+  }
+
+  async actualizarArticuloCambioMerma(
+    iordRaw: string,
+    dto: ActualizarArticuloCambioMermaDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
+    const iord = this.requireIord(iordRaw);
+    const tipo = this.normalizeCambioMermaTipo(dto.tipo);
+    await this.assertActionPermission(
+      tipo === 1 ? 'CAMBIO_MATERIAL' : 'MERMA',
+      user,
+    );
+    await this.assertCambioMermaStagingTable();
+
+    const original = await this.fetchCambioMermaOriginalContext(
+      iord,
+      user,
+      tipo,
+    );
+    const staging = await this.fetchCambioMermaStaging(iord, tipo);
+    if (!staging) {
+      throw new BadRequestException(
+        `La ORD ${iord} no tiene registro temporal para actualizar artículo.`,
+      );
+    }
+    await this.assertCambioMermaStagingUnlocked(iord, staging);
+    const selCtrlOrd = this.toInt(original.row.selCtrlOrd);
+    if (!this.isSelCtrlOrdEditable(selCtrlOrd)) {
+      throw new BadRequestException(
+        `La ORD ${iord} no admite reemplazo de artículo en selCtrlOrd=${selCtrlOrd ?? 'NULL'}.`,
+      );
+    }
+
+    const artOriginal = this.normalizeText(original.row.ART) ?? '';
+    const artNuevo = this.normalizeText(dto.artNuevo);
+    if (!artNuevo) {
+      throw new BadRequestException(
+        'Debe seleccionar un artículo válido para la nueva ORD.',
+      );
+    }
+    if (
+      tipo === 1 &&
+      artNuevo &&
+      this.normalizeUpper(artNuevo) === this.normalizeUpper(artOriginal)
+    ) {
+      throw new BadRequestException(
+        'El artículo nuevo debe ser distinto al artículo original.',
+      );
+    }
+
+    const suc = this.normalizeText(original.row.SUC) ?? '';
+    let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
+    if (pvtaNuevo == null) {
+      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
+      pvtaNuevo = this.toFloat(artInfo?.pvta);
+    }
+    if (pvtaNuevo == null) {
+      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(
+        iord,
+        original.row,
+      );
+    }
+    if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
+      throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
+    }
+    pvtaNuevo = this.roundMoney(pvtaNuevo);
+
+    const ctdOriginal = this.toFloat(original.row.CTD) ?? 0;
+    const ctdCM = this.resolveCtdCM(
+      staging.CTD_C_M,
+      original.row.CTD_C_M,
+      ctdOriginal,
+    );
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+
+    const nvaIord = await this.resolveCambioMermaReservedIord(suc, staging);
+
+    await this.upsertCambioMermaStaging(
+      iord,
+      tipo,
+      {
+        artNuevo,
+        pvtaNuevo,
+        diferenciaEconomica: null,
+        motr: this.toInt(staging.MOTR) ?? this.toInt(original.row.MOTR),
+        motivo:
+          this.normalizeText(staging.MOTIVO) ??
+          this.normalizeText(original.row.MOTR),
+        labor: this.toInt(staging.LABOR) ?? this.toInt(original.row.LABOR),
+        docDif:
+          this.normalizeText(staging.DOCDIF) ??
+          this.normalizeText(original.row.DOCDIF),
+        ctdCM,
+        crearNuevaOrd:
+          (this.toInt(staging.CREAR_NUEVA_ORD) ?? 1) !== 0,
+        nvaIord,
+      },
+      this.auditActor(user),
+    );
+
+    await this.auditMutation('ORD_CAMBIO_MERMA_ACTUALIZAR_ART', user, ip, {
+      iord,
+      tipo,
+      artNuevo,
+      pvtaNuevo,
+    });
+
+    const refreshedStaging = await this.fetchCambioMermaStaging(iord, tipo);
+    const context = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      original.row,
+      refreshedStaging,
+    );
+    await this.syncCambioMermaStagingDiferencia(
+      iord,
+      tipo,
+      this.toFloat(context.diferenciaEconomica),
+      this.auditActor(user),
+    );
+    return {
+      ...context,
+      message: 'Artículo actualizado en captura temporal.',
     };
   }
 
@@ -452,6 +637,8 @@ export class OrdenesTrabajoService {
       user,
       tipo,
     );
+    const stagingBefore = await this.fetchCambioMermaStagingIfAny(iord, tipo);
+    await this.assertCambioMermaStagingUnlocked(iord, stagingBefore);
     const selCtrlOrd = this.toInt(original.row.selCtrlOrd);
     if (!this.isSelCtrlOrdEditable(selCtrlOrd)) {
       throw new BadRequestException(
@@ -492,7 +679,24 @@ export class OrdenesTrabajoService {
 
     const labor =
       dto.labor == null ? this.toInt(original.row.LABOR) : this.toInt(dto.labor);
-    const crearNuevaOrd = dto.crearNuevaOrd == null ? true : dto.crearNuevaOrd;
+    const crearNuevaOrd = true;
+    const suc = this.normalizeText(original.row.SUC) ?? '';
+    let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
+    if (pvtaNuevo == null && tipo === 1 && artNuevo) {
+      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
+      pvtaNuevo = this.toFloat(artInfo?.pvta);
+    }
+    if (pvtaNuevo == null) {
+      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(iord, original.row);
+    }
+    if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
+      throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
+    }
+    pvtaNuevo = this.roundMoney(pvtaNuevo);
+    const nvaIord = await this.resolveCambioMermaReservedIord(
+      suc,
+      stagingBefore,
+    );
 
     await this.upsertCambioMermaStaging(
       iord,
@@ -506,17 +710,20 @@ export class OrdenesTrabajoService {
           this.normalizeText(dto.docDif) ?? this.normalizeText(original.row.DOCDIF),
         ctdCM,
         crearNuevaOrd,
+        pvtaNuevo,
+        diferenciaEconomica: null,
+        nvaIord,
       },
       this.auditActor(user),
     );
 
-    let nextSelCtrlOrd = 14;
-    let autoAutorizada = false;
-    if (await this.canAutoAuthorizeCambioMerma(user)) {
-      nextSelCtrlOrd = 16;
-      autoAutorizada = true;
-    }
-    await this.updateCambioMermaSelCtrlOrd(iord, nextSelCtrlOrd, ctdCM);
+    const nextSelCtrlOrd = 14;
+    await this.updateCambioMermaOriginalState(
+      iord,
+      nextSelCtrlOrd,
+      ctdCM,
+      motivo.id,
+    );
 
     await this.auditMutation('ORD_CAMBIO_MERMA_SOLICITAR_AUT', user, ip, {
       iord,
@@ -524,7 +731,6 @@ export class OrdenesTrabajoService {
       selCtrlOrd: nextSelCtrlOrd,
       ctdCM,
       motr: motivo.id,
-      autoAutorizada,
     });
 
     const updatedOriginal = await this.fetchCambioMermaOriginalContext(
@@ -533,17 +739,124 @@ export class OrdenesTrabajoService {
       tipo,
     );
     const staging = await this.fetchCambioMermaStaging(iord, tipo);
+    const context = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      updatedOriginal.row,
+      staging,
+    );
+    await this.syncCambioMermaStagingDiferencia(
+      iord,
+      tipo,
+      this.toFloat(context.diferenciaEconomica),
+      this.auditActor(user),
+    );
     return {
-      ...(await this.buildCambioMermaContextResponse(
-        iord,
-        tipo,
-        updatedOriginal.row,
-        staging,
-      )),
-      autoAutorizada,
-      message: autoAutorizada
-        ? 'Autorización aplicada. ORD lista para crear nueva derivada.'
-        : 'Autorización solicitada. Captura bloqueada en espera de liberación.',
+      ...context,
+      message: 'Autorización solicitada. Captura enviada a revisión.',
+    };
+  }
+
+  async autorizarCambioMerma(
+    iordRaw: string,
+    query: CambioMermaContextDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
+    const iord = this.requireIord(iordRaw);
+    const tipo = this.normalizeCambioMermaTipo(query.tipo);
+    const finalized = await this.executeCambioMermaFinalization(
+      iord,
+      tipo,
+      user,
+      ip,
+      {
+        requireSelCtrlOrd14: true,
+        auditAction: 'ORD_CAMBIO_MERMA_AUTORIZAR_FINAL',
+        okMessage:
+          'Cambio/merma autorizado. Nueva ORD creada y ORD original anulada.',
+      },
+    );
+    return {
+      ...finalized.context,
+      message:
+        finalized.context.message.trim().length > 0
+          ? finalized.context.message
+          : 'Cambio/merma autorizado. Nueva ORD creada y ORD original anulada.',
+    };
+  }
+
+  async retrabajoCambioMerma(
+    iordRaw: string,
+    query: CambioMermaContextDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
+    const iord = this.requireIord(iordRaw);
+    const tipo = this.normalizeCambioMermaTipo(query.tipo);
+    await this.assertCambioMermaAuthorizationPermission(user);
+    await this.assertCambioMermaStagingTable();
+
+    const original = await this.fetchCambioMermaOriginalContext(
+      iord,
+      user,
+      tipo,
+    );
+    const staging = await this.fetchCambioMermaStagingIfAny(iord, tipo);
+    if (!staging) {
+      throw new BadRequestException(
+        `La ORD ${iord} no tiene captura temporal para retrabajo.`,
+      );
+    }
+
+    const nvaIord = this.normalizeText(staging.NVA_IORD) ?? '';
+    if (nvaIord && (await this.hasOrdHeader(nvaIord))) {
+      throw new BadRequestException(
+        `La ORD ${iord} ya creó la nueva ORD (${nvaIord}) y no admite retrabajo.`,
+      );
+    }
+
+    const selCtrlOrd = this.toInt(original.row.selCtrlOrd);
+    if (selCtrlOrd !== 14) {
+      throw new BadRequestException(
+        `La ORD ${iord} debe estar en selCtrlOrd=14 para retrabajo (actual=${selCtrlOrd ?? 'NULL'}).`,
+      );
+    }
+
+    const ctdOriginal = this.toFloat(original.row.CTD) ?? 0;
+    const ctdCM = this.resolveCtdCM(
+      staging.CTD_C_M,
+      original.row.CTD_C_M,
+      ctdOriginal,
+    );
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    const motr = this.toInt(staging.MOTR) ?? this.toInt(original.row.MOTR);
+
+    await this.updateCambioMermaOriginalState(iord, 15, ctdCM, motr);
+    await this.auditMutation('ORD_CAMBIO_MERMA_RETRABAJO', user, ip, {
+      iord,
+      tipo,
+      selCtrlOrd: 15,
+      ctdCM,
+      motr,
+    });
+
+    const updatedOriginal = await this.fetchCambioMermaOriginalContext(
+      iord,
+      user,
+      tipo,
+    );
+    const refreshedStaging = await this.fetchCambioMermaStaging(iord, tipo);
+    const context = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      updatedOriginal.row,
+      refreshedStaging,
+    );
+
+    return {
+      ...context,
+      message: 'Captura devuelta a retrabajo editable.',
     };
   }
 
@@ -555,115 +868,20 @@ export class OrdenesTrabajoService {
   ) {
     const iord = this.requireIord(iordRaw);
     const tipo = this.normalizeCambioMermaTipo(dto.tipo);
-    await this.assertActionPermission(
-      tipo === 1 ? 'CAMBIO_MATERIAL' : 'MERMA',
+    const finalized = await this.executeCambioMermaFinalization(
+      iord,
+      tipo,
       user,
+      ip,
+      {
+        requireSelCtrlOrd14: false,
+        allowLegacySelCtrlOrd16: true,
+        auditAction: 'ORD_CAMBIO_MERMA_CREAR_LEGACY',
+        okMessage:
+          'Compatibilidad aplicada: la nueva ORD se creó desde el flujo final de autorización.',
+      },
     );
-    await this.assertCambioMermaStagingTable();
-
-    const original = await this.fetchCambioMermaOriginalContext(
-      iord,
-      user,
-      tipo,
-    );
-    const selCtrlOrd = this.toInt(original.row.selCtrlOrd);
-    if (selCtrlOrd !== 16) {
-      throw new BadRequestException(
-        `La ORD ${iord} debe estar en selCtrlOrd=16 para crear la nueva ORD.`,
-      );
-    }
-
-    const staging = await this.fetchCambioMermaStaging(iord, tipo);
-    if (!staging) {
-      throw new BadRequestException(
-        `No existe captura temporal para la ORD ${iord}.`,
-      );
-    }
-
-    const ctdOriginal = this.toFloat(original.row.CTD) ?? 0;
-    const ctdCM = this.resolveCtdCM(staging.CTD_C_M, dto.ctdCM, ctdOriginal);
-    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
-
-    const artOriginal = this.normalizeText(original.row.ART) ?? '';
-    const artNuevo = this.normalizeText(staging.ART_NUEVO) ?? artOriginal;
-    const motivo = await this.resolveMovimientoMotrAndLabel(
-      tipo,
-      this.normalizeText(staging.MOTIVO) ?? undefined,
-      this.toInt(staging.MOTR) ?? undefined,
-    );
-
-    let result: {
-      ok: boolean;
-      message: string;
-      data: Record<string, unknown>;
-    };
-
-    if (tipo === 1) {
-      if (!artNuevo) {
-        throw new BadRequestException(
-          'Debe existir artículo nuevo en la captura para cambio material.',
-        );
-      }
-      if (this.normalizeUpper(artNuevo) === this.normalizeUpper(artOriginal)) {
-        throw new BadRequestException(
-          'El artículo nuevo debe ser distinto al artículo original.',
-        );
-      }
-
-      result = await this.executeSimpleAction(
-        'sp_ordenes_trabajo_cambio_material',
-        iord,
-        [
-          artNuevo,
-          motivo.label,
-          this.toInt(staging.LABOR),
-          this.normalizeText(staging.DOCDIF),
-          motivo.id,
-          ctdCM,
-        ],
-        user,
-        ip,
-        'Cambio de material aplicado',
-        'ORD_CAMBIO_MATERIAL',
-        '@ART_NUEVO=@1,@MOTIVO=@2,@LABOR=@3,@DOCDIF=@4,@MOTR=@5,@CTD_C_M=@6,',
-      );
-    } else {
-      const crearNuevaOrd =
-        this.toInt(staging.CREAR_NUEVA_ORD) === 0 ? false : true;
-      result = await this.executeSimpleAction(
-        'sp_ordenes_trabajo_merma',
-        iord,
-        [
-          ctdCM,
-          motivo.label,
-          crearNuevaOrd ? 1 : 0,
-          motivo.id,
-          artNuevo,
-          ctdCM,
-        ],
-        user,
-        ip,
-        'Merma procesada',
-        'ORD_MERMA',
-        '@CANTIDAD_MERMA=@1,@MOTIVO=@2,@CREAR_NUEVA_ORD=@3,@MOTR=@4,@ART_NUEVO=@5,@CTD_C_M=@6,',
-      );
-    }
-
-    await this.forceEstatus2FromActionData(result.data);
-    await this.clearCambioMermaStaging(iord, tipo);
-    await this.resetSelCtrlOrdByIords([
-      iord,
-      this.normalizeText(result.data.IORD_NUEVA),
-    ]);
-
-    await this.auditMutation('ORD_CAMBIO_MERMA_CREAR', user, ip, {
-      iord,
-      tipo,
-      ctdCM,
-      result: result.data,
-    });
-
-    return result;
+    return finalized.result;
   }
 
   async saveDetail(
@@ -683,6 +901,7 @@ export class OrdenesTrabajoService {
     await this.assertOrdTypeAccessByIord(iord, user, scope);
     const actor = this.auditActor(user);
     const commentsValue = this.normalizeText(dto.comentarios);
+    const hrEntValue = this.normalizeHourMinute(dto.hrEnt);
     const tipoValueRaw = this.normalizeUpper(dto.tipo);
     const tipoValue = tipoValueRaw ? this.normalizeOrdTipo(tipoValueRaw) : '';
     if (tipoValueRaw && !tipoValue) {
@@ -745,10 +964,27 @@ export class OrdenesTrabajoService {
         LABOR = CASE WHEN @1 IS NULL THEN LABOR ELSE @1 END,
         COMAD = CASE WHEN @2 IS NULL THEN COMAD ELSE LEFT(@2, 2000) END,
         TIPO = CASE WHEN @3 IS NULL THEN TIPO ELSE @3 END,
+        HR_ENT = CASE
+          WHEN @4 IS NULL THEN HR_ENT
+          ELSE TRY_CONVERT(
+            DATETIME,
+            CONVERT(
+              VARCHAR(10),
+              COALESCE(
+                TRY_CONVERT(DATE, HR_ENT),
+                TRY_CONVERT(DATE, FCNEN),
+                TRY_CONVERT(DATE, FCNM),
+                CONVERT(DATE, GETDATE())
+              ),
+              23
+            ) + ' ' + @4 + ':00',
+            120
+          )
+        END,
         FCNMOD = GETDATE()
       WHERE IORD = @0
       `,
-      [iord, laborValue, commentsValue, tipoValue || null],
+      [iord, laborValue, commentsValue, tipoValue || null, hrEntValue],
     );
 
     if (rows.length) {
@@ -783,6 +1019,7 @@ export class OrdenesTrabajoService {
       iord,
       labor: laborValue,
       tipo: tipoValue || null,
+      hrEnt: hrEntValue,
       comentarios: commentsValue,
       rowsUpdated: rows.length,
       actor,
@@ -872,8 +1109,8 @@ export class OrdenesTrabajoService {
       auditAction: 'ORD_ENVIAR_LOTE',
       fallbackError:
         'No se pudo enviar el lote de ORDs. Verifique estado, laboratorio y permisos.',
-      singleMessage: '1 ORD enviada a estatus 5',
-      pluralMessagePrefix: 'ORDs enviadas a estatus 5',
+      singleMessage: '1 ORD enviada (5 interno / 9 laboratorio externo)',
+      pluralMessagePrefix: 'ORDs enviadas (5 interno / 9 laboratorio externo)',
       notFoundMessage: 'No fue posible procesar las ORDs enviadas',
     });
   }
@@ -1142,22 +1379,36 @@ export class OrdenesTrabajoService {
 
   async validarRecibirOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('SCAN_RECIBIR', user);
+    const roleCode = await this.resolveRoleCode(user);
+    const isAnalista = this.isAnalistaRoleForRecepcionExterna(roleCode);
     return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 5,
-      requiredFlowLabel: 'ENTREGADA A MAQ O BISEL',
+      requiredFlow: isAnalista ? 9 : 5,
+      requiredFlowLabel: isAnalista
+        ? 'PENDIENTE RECIBIR EN ANALISTA'
+        : 'ENTREGADA A MAQ O BISEL',
       okMessage: 'ORD válida para recepción',
+      requireExternalLaboratorioForAnalyst: isAnalista,
     });
   }
 
   async recibirLote(dto: SendOrdBatchDto, user: JwtPayload, ip: string | null) {
     await this.assertActionPermission('SCAN_RECIBIR', user);
+    const iords = this.normalizeDistinctIords(dto.iords);
+    if (!iords.length) {
+      throw new BadRequestException('Debe proporcionar al menos una ORD');
+    }
+    const scope = await this.resolveSucScope(user, null);
+    const roleCode = await this.resolveRoleCode(user);
+    await this.assertBatchExternalLaboratorioForAnalyst(iords, scope, roleCode);
     return this.executeLoteAction(dto, user, ip, {
       spName: 'sp_ordenes_trabajo_recibir_lote',
       auditAction: 'ORD_RECIBIR_LOTE',
       fallbackError:
         'No se pudo recibir el lote de ORDs. Verifique estado y permisos.',
-      singleMessage: '1 ORD recibida a estatus 7',
-      pluralMessagePrefix: 'ORDs recibidas a estatus 7',
+      singleMessage:
+        '1 ORD recibida (5->7 interno / 9->10 externo)',
+      pluralMessagePrefix:
+        'ORDs recibidas (5->7 interno / 9->10 externo)',
       notFoundMessage: 'No fue posible procesar las ORDs recibidas',
     });
   }
@@ -1240,15 +1491,61 @@ export class OrdenesTrabajoService {
       requiredFlowLabel: 'ENTREGADA A CLIENTE',
       okMessage: 'ORD válida para garantía',
     });
+    const motivo =
+      this.normalizeText(dto.motivo) ?? 'Garantía registrada (flujo 9.3)';
     return this.executeSimpleAction(
       'sp_ordenes_trabajo_garantia',
       iordRaw,
-      [this.normalizeText(dto.motivo)],
+      [motivo],
       user,
       ip,
-      'Garantia registrada',
+      'Garantía registrada',
       'ORD_GARANTIA',
       '@MOTIVO=@1,',
+    );
+  }
+
+  async aplicarMermaCambio(
+    iordRaw: string,
+    dto: AplicarMermaCambioDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
+    const tipom = Math.trunc(Number(dto.tipom ?? 0));
+    if (tipom !== 1 && tipom !== 2) {
+      throw new BadRequestException(
+        'tipom debe ser 1 (CAMBIO DE ARTICULO) o 2 (MERMA DE ART Y CAMBIO)',
+      );
+    }
+    if (tipom === 1) {
+      await this.assertActionPermission('CAMBIO_MATERIAL', user);
+    } else {
+      await this.assertActionPermission('MERMA', user);
+    }
+    await this.validateOrdByRequiredFlow(iordRaw, user, {
+      requiredFlow: 9.3,
+      requiredFlowLabel: 'GARANTÍA APLICADA',
+      okMessage: 'ORD válida para aplicar merma o cambio',
+    });
+    const motivo = await this.resolveMovimientoMotrAndLabel(
+      tipom,
+      undefined,
+      dto.motr,
+    );
+    const tipomLabel =
+      tipom === 1 ? 'CAMBIO DE ARTICULO' : 'MERMA DE ART Y CAMBIO';
+    const obs = `Aplicar merma/cambio (TIPOM=${tipom} ${tipomLabel}, MOTR=${motivo.id} ${motivo.label})`;
+    return this.executeSimpleAction(
+      'sp_ordenes_trabajo_aplicar_merma_cambio',
+      iordRaw,
+      [tipom, motivo.id, obs],
+      user,
+      ip,
+      tipom === 1
+        ? 'Flujo 9.1 listo para cambio material'
+        : 'Flujo 9.2 listo para merma',
+      'ORD_APLICAR_MERMA_CAMBIO',
+      '@TIPOM=@1,@MOTR=@2,@OBS=@3,',
     );
   }
 
@@ -1449,6 +1746,7 @@ export class OrdenesTrabajoService {
       okMessage: string;
       requireLaboratorio?: boolean;
       requireAsignado?: boolean;
+      requireExternalLaboratorioForAnalyst?: boolean;
     },
   ) {
     const code = this.normalizeText(codeRaw);
@@ -1471,6 +1769,10 @@ export class OrdenesTrabajoService {
         o.DESCART,
         TRY_CONVERT(FLOAT, o.CTD) AS CTD,
         TRY_CONVERT(INT, o.LABOR) AS LABOR,
+        LTRIM(RTRIM(ISNULL(lab.LAB, ''))) AS LAB_DESC,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.TIPOLAB, '')))) AS LAB_TIPOLAB,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.UBILAB, '')))) AS LAB_UBILAB,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) AS LAB_SUC,
         LTRIM(RTRIM(ISNULL(CAST(o.ASIGN AS NVARCHAR(100)), ''))) AS ASIGN,
         TRY_CONVERT(FLOAT, o.ESTSEGU) AS ESTSEGU,
         LTRIM(RTRIM(ISNULL(e.TIPO, ''))) AS ESTSEGU_DESC
@@ -1514,7 +1816,7 @@ export class OrdenesTrabajoService {
       throw new NotFoundException('La ORD encontrada no tiene IORD válido');
     }
     this.assertOrdTipoMatchesRole(
-      await this.resolveRoleCode(user),
+      roleCode,
       row.TIPO,
       iord,
     );
@@ -1542,6 +1844,15 @@ export class OrdenesTrabajoService {
           `La ORD ${iord} debe tener colaborador asignado para continuar.`,
         );
       }
+    }
+    if (
+      options.requireExternalLaboratorioForAnalyst &&
+      this.isAnalistaRoleForRecepcionExterna(roleCode) &&
+      !this.isLaboratorioExterno(row)
+    ) {
+      throw new BadRequestException(
+        `La ORD ${iord} pertenece a laboratorio interno y debe continuar flujo de asignación/trabajo terminado antes de entrega a cliente.`,
+      );
     }
 
     return {
@@ -1871,74 +2182,52 @@ export class OrdenesTrabajoService {
     if (!roleCode) return;
 
     const allowedByAction: Record<string, string[]> = {
-      AUTORIZAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      ANULAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      ENVIAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      AUTORIZAR: ['JEF_TALLER', 'ANALISTA_ORD'],
+      ANULAR: ['JEF_TALLER'],
+      ENVIAR: ['JEF_TALLER', 'ANALISTA_ORD'],
       ASIGNAR: [
         'JEF_TALLER',
-        'TALLER',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
       TRABAJO_TERMINADO: [
         'JEF_TALLER',
-        'TALLER',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
       REGRESAR_INCIDENCIA: [
         'JEF_TALLER',
-        'TALLER',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
-      REGRESAR_TIENDA: ['JEF_TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      ASIGNAR_LABORATORIO: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      REGRESAR_TIENDA: ['JEF_TALLER', 'ANALISTA_ORD'],
+      ASIGNAR_LABORATORIO: ['JEF_TALLER', 'ANALISTA_ORD'],
       RECIBIR: [
         'JEF_TALLER',
-        'TALLER',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
-      ENTREGAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
-      GARANTIA: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      ENTREGAR: ['JEF_TALLER', 'ANALISTA_ORD'],
+      GARANTIA: ['JEF_TALLER'],
       CAMBIO_MATERIAL: [
         'JEF_TALLER',
-        'TALLER',
         'ANALISTA_ORD',
-        'ANALISTA',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
       MERMA: [
         'JEF_TALLER',
-        'TALLER',
         'ANALISTA_ORD',
-        'ANALISTA',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
       SCAN_RECIBIR: [
         'JEF_TALLER',
-        'TALLER',
+        'ANALISTA_ORD',
         'ENC_MAQUILA',
-        'ENCARGADO_MAQUILA',
         'ENC_BISEL',
-        'ENCARGADO_BISELADO',
       ],
-      SCAN_ENTREGAR: ['JEF_TALLER', 'TALLER', 'ANALISTA_ORD', 'ANALISTA'],
+      SCAN_ENTREGAR: ['JEF_TALLER', 'ANALISTA_ORD'],
     };
 
     const allowedRoles = allowedByAction[action] ?? [];
@@ -1972,10 +2261,10 @@ export class OrdenesTrabajoService {
       return ['TALLER', 'BISELADO'];
     }
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    if (roleCode === 'ENC_MAQUILA' || roleCode === 'ENCARGADO_MAQUILA') {
+    if (roleCode === 'ENC_MAQUILA') {
       return ['TALLER'];
     }
-    if (roleCode === 'ENC_BISEL' || roleCode === 'ENCARGADO_BISELADO') {
+    if (roleCode === 'ENC_BISEL') {
       return ['BISELADO'];
     }
     return ['TALLER', 'BISELADO'];
@@ -1986,13 +2275,9 @@ export class OrdenesTrabajoService {
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return [
       'JEF_TALLER',
-      'TALLER',
       'ANALISTA_ORD',
-      'ANALISTA',
       'ENC_MAQUILA',
-      'ENCARGADO_MAQUILA',
       'ENC_BISEL',
-      'ENCARGADO_BISELADO',
     ].includes(roleCode);
   }
 
@@ -2048,6 +2333,110 @@ export class OrdenesTrabajoService {
     return out;
   }
 
+  private async resolveUsuarioLabels(idsRaw: unknown[]) {
+    const ids = [
+      ...new Set(idsRaw.map((item) => this.normalizeText(item) ?? '')),
+    ].filter((item) => item.length > 0);
+    if (!ids.length) {
+      return new Map<string, string>();
+    }
+    const placeholders = ids.map((_, idx) => `@${idx}`).join(',');
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        LTRIM(RTRIM(ISNULL(CAST(u.IDUSUARIO AS NVARCHAR(100)), ''))) AS IDUSUARIO,
+        LTRIM(RTRIM(ISNULL(u.NOMBRE, ''))) AS NOMBRE,
+        LTRIM(RTRIM(ISNULL(u.APELLIDOS, ''))) AS APELLIDOS
+      FROM dbo.USUARIO u
+      WHERE LTRIM(RTRIM(ISNULL(CAST(u.IDUSUARIO AS NVARCHAR(100)), ''))) IN (${placeholders})
+      `,
+      ids,
+    );
+    const out = new Map<string, string>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const rec = row as Record<string, unknown>;
+      const idusuario = this.normalizeText(rec.IDUSUARIO);
+      if (!idusuario) continue;
+      const nombre = this.composeUsuarioLabel({
+        nombre: this.normalizeText(rec.NOMBRE),
+        apellidos: this.normalizeText(rec.APELLIDOS),
+      });
+      if (!nombre) continue;
+      out.set(idusuario, nombre);
+    }
+    const missingIds = ids.filter((id) => !out.has(id));
+    if (missingIds.length) {
+      const usernamePlaceholders = missingIds.map((_, idx) => `@${idx}`).join(',');
+      const usernameRows = await this.dataSource.query(
+        `
+        SELECT
+          LTRIM(RTRIM(ISNULL(u.USERNAME, ''))) AS USERNAME,
+          LTRIM(RTRIM(ISNULL(u.NOMBRE, ''))) AS NOMBRE,
+          LTRIM(RTRIM(ISNULL(u.APELLIDOS, ''))) AS APELLIDOS
+        FROM dbo.USUARIO u
+        WHERE LTRIM(RTRIM(ISNULL(u.USERNAME, ''))) IN (${usernamePlaceholders})
+        `,
+        missingIds,
+      );
+      for (const row of Array.isArray(usernameRows) ? usernameRows : []) {
+        const rec = row as Record<string, unknown>;
+        const username = this.normalizeText(rec.USERNAME);
+        if (!username || out.has(username)) continue;
+        const nombre = this.composeUsuarioLabel({
+          nombre: this.normalizeText(rec.NOMBRE),
+          apellidos: this.normalizeText(rec.APELLIDOS),
+        });
+        if (!nombre) continue;
+        out.set(username, nombre);
+      }
+    }
+    const missingAfterUsername = ids.filter((id) => !out.has(id));
+    if (!missingAfterUsername.length) {
+      return out;
+    }
+    const fallbackPlaceholders = missingAfterUsername
+      .map((_, idx) => `@${idx}`)
+      .join(',');
+    const fallbackRows = await this.dataSource.query(
+      `
+      SELECT
+        LTRIM(RTRIM(ISNULL(CAST(o.IDOPV AS NVARCHAR(100)), ''))) AS IDOPV,
+        LTRIM(RTRIM(ISNULL(o.NOMB, ''))) AS NOMB,
+        LTRIM(RTRIM(ISNULL(o.APELP, ''))) AS APELP,
+        LTRIM(RTRIM(ISNULL(o.APELM, ''))) AS APELM
+      FROM dbo.PV_OPV o
+      WHERE LTRIM(RTRIM(ISNULL(CAST(o.IDOPV AS NVARCHAR(100)), ''))) IN (${fallbackPlaceholders})
+      `,
+      missingAfterUsername,
+    );
+    for (const row of Array.isArray(fallbackRows) ? fallbackRows : []) {
+      const rec = row as Record<string, unknown>;
+      const idopv = this.normalizeText(rec.IDOPV);
+      if (!idopv || out.has(idopv)) continue;
+      const label = this.composeOpvLabel({
+        idopv,
+        nomb: this.normalizeText(rec.NOMB),
+        apelp: this.normalizeText(rec.APELP),
+        apelm: this.normalizeText(rec.APELM),
+      });
+      if (label) {
+        out.set(idopv, label);
+      }
+    }
+    return out;
+  }
+
+  private composeUsuarioLabel(values: {
+    nombre?: string | null;
+    apellidos?: string | null;
+  }) {
+    const parts = [
+      this.normalizeText(values.nombre),
+      this.normalizeText(values.apellidos),
+    ].filter((item): item is string => item != null && item.length > 0);
+    return parts.join(' ').trim();
+  }
+
   private isAdmin(user?: JwtPayload | null) {
     const roleId = Number(user?.roleId ?? 0);
     if (roleId === 1) return true;
@@ -2089,19 +2478,20 @@ export class OrdenesTrabajoService {
 
   private normalizePanelMode(
     value?: string,
-  ): 'operativo' | 'anulados' | 'entregadas' {
+  ): 'operativo' | 'estado' | 'anulados' | 'entregadas' {
     const raw = this.normalizeUpper(value ?? '');
+    if (raw === 'ESTADO') return 'estado';
     if (raw === 'ANULADOS') return 'anulados';
     if (raw === 'ENTREGADAS') return 'entregadas';
     return 'operativo';
   }
 
-  private shouldDeferEntregadasPanel(
+  private shouldDeferPanel(
     query: ListOrdenesTrabajoQueryDto,
-    panelMode: 'operativo' | 'anulados' | 'entregadas',
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
     isAdmin: boolean,
   ) {
-    if (panelMode !== 'entregadas') return false;
+    if (panelMode !== 'entregadas' && panelMode !== 'estado') return false;
     const hasManualCriteria =
       this.normalizeText(query.iord) != null ||
       this.normalizeText(query.idfol) != null ||
@@ -2121,40 +2511,85 @@ export class OrdenesTrabajoService {
     return !hasManualCriteria;
   }
 
-  private resolveAllowedStatusCodes(
+  private async resolveAllowedStatusCodes(
     user: JwtPayload,
     roleCodeRaw: string,
-    panelMode: 'operativo' | 'anulados' | 'entregadas',
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
   ) {
+    const tableExists = await this.hasFlowVisibilityTable();
+    const configuredRules = await this.resolveFlowVisibilityRules(
+      user,
+      roleCodeRaw,
+      panelMode,
+    );
+    if (configuredRules.length) {
+      const configuredCodes = new Set<number>();
+      for (const rule of configuredRules) {
+        configuredCodes.add(rule.estsegu);
+      }
+      return [...configuredCodes].sort((a, b) => a - b);
+    }
+
+    if (tableExists) {
+      const panelConfigured = await this.hasFlowVisibilityPanelConfig(panelMode);
+      if (panelConfigured) {
+        return [];
+      }
+    }
+
     if (this.isAdmin(user)) {
+      if (panelMode === 'estado') return this.resolveAllFlowStatusCodes();
       if (panelMode === 'anulados') return [4];
       if (panelMode === 'entregadas') return [11];
-      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 10, 12];
+      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 9.3, 10, 12];
     }
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
+    if (panelMode === 'estado') {
+      return roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
+        ? this.resolveAllFlowStatusCodes()
+        : [];
+    }
     if (panelMode === 'anulados') {
-      return roleCode === 'JEF_TALLER' || roleCode === 'TALLER' ? [4] : [];
+      return roleCode === 'JEF_TALLER' ? [4] : [];
     }
     if (panelMode === 'entregadas') {
-      return roleCode === 'JEF_TALLER' || roleCode === 'TALLER' ? [11] : [];
+      return roleCode === 'JEF_TALLER' ? [11] : [];
     }
 
-    if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER') {
-      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 10, 12];
+    if (roleCode === 'JEF_TALLER') {
+      return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 9.3, 10, 12];
     }
-    if (roleCode === 'ANALISTA_ORD' || roleCode === 'ANALISTA') {
-      return [2, 3, 3.1, 5, 9.1, 9.2, 10, 12];
+    if (roleCode === 'ANALISTA_ORD') {
+      return [2, 3, 3.1, 5, 9, 9.1, 9.2, 9.3, 10, 12];
+    }
+    if (roleCode === 'ANALISTA_INV' || roleCode === 'INVJEF') {
+      return [9.1, 9.2, 9.3];
     }
     if (
       roleCode === 'ENC_MAQUILA' ||
-      roleCode === 'ENCARGADO_MAQUILA' ||
-      roleCode === 'ENC_BISEL' ||
-      roleCode === 'ENCARGADO_BISELADO'
+      roleCode === 'ENC_BISEL'
     ) {
-      return [7, 8, 9];
+      return [7, 8, 9, 9.1, 9.2, 9.3];
     }
     return [];
+  }
+
+  private async resolveAllFlowStatusCodes() {
+    const rows = await this.dataSource.query(`
+      SELECT DISTINCT TRY_CONVERT(FLOAT, ESTA) AS ESTA
+      FROM dbo.DAT_EST_ORD
+      WHERE TRY_CONVERT(FLOAT, ESTA) IS NOT NULL
+      ORDER BY TRY_CONVERT(FLOAT, ESTA)
+    `);
+    const set = new Set<number>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const value = this.toFloat((row as Record<string, unknown>).ESTA);
+      if (value != null) {
+        set.add(value);
+      }
+    }
+    return [...set].sort((a, b) => a - b);
   }
 
   private async resolveFlowStatusOptions(
@@ -2207,20 +2642,33 @@ export class OrdenesTrabajoService {
     return options;
   }
 
+  private applyAllowedStatusFilterToItems(
+    items: Record<string, unknown>[],
+    allowedStatusCodes: number[],
+    includeNullFlow: boolean,
+  ) {
+    if (!items.length) return items;
+    const allowed = new Set(
+      allowedStatusCodes.map((code) => this.formatStatusCode(code)),
+    );
+    return items.filter((item) => {
+      const flow = this.toFloat(item.ESTSEGU);
+      if (flow == null) return includeNullFlow;
+      return allowed.has(this.formatStatusCode(flow));
+    });
+  }
+
   private shouldIncludeNullFlow(
     user: JwtPayload,
     roleCodeRaw: string,
-    panelMode: 'operativo' | 'anulados' | 'entregadas',
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
   ) {
     if (panelMode !== 'operativo') return false;
     if (this.isAdmin(user)) return true;
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return (
-      roleCode === 'JEF_TALLER' ||
-      roleCode === 'TALLER' ||
-      roleCode === 'ANALISTA_ORD' ||
-      roleCode === 'ANALISTA'
+      roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
     );
   }
 
@@ -2493,10 +2941,22 @@ export class OrdenesTrabajoService {
     iordRaw: string,
     user: JwtPayload,
     tipo: number,
+    options: {
+      allowFinalized?: boolean;
+    } = {},
   ): Promise<CambioMermaOriginalContext> {
     const iord = this.requireIord(iordRaw);
     const scope = await this.resolveSucScope(user, null);
     const roleCode = await this.resolveRoleCode(user);
+    const hasFolioRqfac = await this.hasColumn('PV_CTR_FOL_ASVR', 'RQFAC');
+    const rqfacFolioSql = hasFolioRqfac
+      ? `COALESCE(
+            TRY_CONVERT(INT, f.REQF),
+            TRY_CONVERT(INT, f.RQFAC)
+          ) AS REQF_FOLIO,
+          TRY_CONVERT(INT, f.RQFAC) AS RQFAC_FOLIO`
+      : `TRY_CONVERT(INT, f.REQF) AS REQF_FOLIO,
+          CAST(NULL AS INT) AS RQFAC_FOLIO`;
 
     const rows = await this.dataSource.query(
       `
@@ -2506,6 +2966,7 @@ export class OrdenesTrabajoService {
         LTRIM(RTRIM(ISNULL(deAuto.TIPO, ''))) AS DESAUTO,
         LTRIM(RTRIM(ISNULL(fol.AUT_FOLIO, ''))) AS AUT_FOLIO,
         TRY_CONVERT(INT, fol.REQF_FOLIO) AS REQF_FOLIO,
+        TRY_CONVERT(INT, fol.RQFAC_FOLIO) AS RQFAC_FOLIO,
         TRY_CONVERT(INT, ds.IVA_INTEGRADO) AS IVA_INTEGRADO
       FROM dbo.PV_CTR_ORDS o
       LEFT JOIN dbo.DAT_EST_ORD deFlujo
@@ -2515,7 +2976,7 @@ export class OrdenesTrabajoService {
       OUTER APPLY (
         SELECT TOP 1
           LTRIM(RTRIM(ISNULL(f.AUT, ''))) AS AUT_FOLIO,
-          TRY_CONVERT(INT, f.REQF) AS REQF_FOLIO
+          ${rqfacFolioSql}
         FROM dbo.PV_CTR_FOL_ASVR f
         WHERE UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, ''))))
         ORDER BY ISNULL(f.FCNM, f.FCN) DESC
@@ -2553,7 +3014,14 @@ export class OrdenesTrabajoService {
       tipo === 1 ? 'CAMBIO DE ARTICULO' : 'MERMA DE ART Y CAMBIO';
 
     const flow = this.toFloat(row.ESTSEGU);
-    if (flow == null || Math.abs(flow - requiredFlow) > 0.0001) {
+    const reeord =
+      this.normalizeText(row.REEORD) ?? this.normalizeText(row.REOORD) ?? '';
+    const allowFinalized =
+      options.allowFinalized === true &&
+      flow != null &&
+      Math.abs(flow - 4) <= 0.0001 &&
+      reeord.length > 0;
+    if ((flow == null || Math.abs(flow - requiredFlow) > 0.0001) && !allowFinalized) {
       const flowLabel = this.normalizeText(row.DESCFLUJO) ?? 'SIN FLUJO';
       const flowText = flow == null ? 'SIN FLUJO' : this.formatStatusCode(flow);
       throw new BadRequestException(
@@ -2584,7 +3052,10 @@ export class OrdenesTrabajoService {
       SELECT TOP 1
         t.IORD,
         t.TIPOM,
+        t.NVA_IORD,
         t.ART_NUEVO,
+        TRY_CONVERT(FLOAT, t.PVTA_NUEVO) AS PVTA_NUEVO,
+        TRY_CONVERT(FLOAT, t.DIFERENCIA_ECONOMICA) AS DIFERENCIA_ECONOMICA,
         t.MOTR,
         t.MOTIVO,
         t.LABOR,
@@ -2613,6 +3084,7 @@ export class OrdenesTrabajoService {
     const idfol = this.normalizeText(originalRow.IDFOL) ?? '';
     const artOriginal = this.normalizeText(originalRow.ART) ?? '';
     const ctdOriginal = this.toFloat(originalRow.CTD) ?? 0;
+    const ctdCMStored = this.toFloat(originalRow.CTD_C_M);
     const ctdCM = this.resolveCtdCM(
       stagingRow?.CTD_C_M,
       originalRow.CTD_C_M,
@@ -2634,7 +3106,10 @@ export class OrdenesTrabajoService {
       artOriginal,
       originalArtInfo?.pvta ?? 0,
     );
-    const precioNuevo = nuevoArtInfo?.pvta ?? precioOriginal;
+    const precioNuevoDefault = nuevoArtInfo?.pvta ?? precioOriginal;
+    const precioNuevo = this.roundMoney(
+      this.toFloat(stagingRow?.PVTA_NUEVO) ?? precioNuevoDefault,
+    );
 
     const tipoTran = this.resolveCambioMermaTipoTran(
       originalRow.TIPOTRAN ??
@@ -2647,9 +3122,16 @@ export class OrdenesTrabajoService {
     );
     const rqfac = this.resolveCambioMermaRqfac(originalRow);
     const ivaIntegrado = this.toInt(originalRow.IVA_INTEGRADO);
-
-    const originalBase = this.roundMoney(precioOriginal * ctdCM);
-    const nuevoBase = this.roundMoney(precioNuevo * ctdCM);
+    const ctdCalculoOrd = ctdOriginal > 0 ? ctdOriginal : ctdCM;
+    const ctdCalculoContable = ctdCM > 0 ? ctdCM : ctdCalculoOrd;
+    const originalBase = this.roundMoney(precioOriginal * ctdCalculoOrd);
+    const nuevoBase = this.roundMoney(precioNuevo * ctdCalculoOrd);
+    const originalBaseContable = this.roundMoney(
+      precioOriginal * ctdCalculoContable,
+    );
+    const nuevoBaseContable = this.roundMoney(
+      precioNuevo * ctdCalculoContable,
+    );
 
     const montosOriginal = this.calculateFinanceByIva(originalBase, {
       tipoTran,
@@ -2661,8 +3143,25 @@ export class OrdenesTrabajoService {
       ivaIntegrado,
       rqfac,
     });
+    const montosOriginalContable = this.calculateFinanceByIva(
+      originalBaseContable,
+      {
+        tipoTran,
+        ivaIntegrado,
+        rqfac,
+      },
+    );
+    const montosNuevoContable = this.calculateFinanceByIva(nuevoBaseContable, {
+      tipoTran,
+      ivaIntegrado,
+      rqfac,
+    });
+    const diferenciaEconomicaCalculada = this.roundMoney(
+      montosNuevoContable.total - montosOriginalContable.total,
+    );
     const diferenciaEconomica = this.roundMoney(
-      montosNuevo.total - montosOriginal.total,
+      this.toFloat(stagingRow?.DIFERENCIA_ECONOMICA) ??
+        diferenciaEconomicaCalculada,
     );
     const generaAfectacionContable = Math.abs(diferenciaEconomica) >= 0.009;
 
@@ -2680,16 +3179,26 @@ export class OrdenesTrabajoService {
       this.normalizeText(stagingRow?.DOCDIF) ??
       this.normalizeText(originalRow.DOCDIF) ??
       '';
-    const crearNuevaOrd =
-      this.toInt(stagingRow?.CREAR_NUEVA_ORD) === 0 ? false : true;
+    const crearNuevaOrd = true;
+    const hasStagingRecord = stagingRow != null;
+    const nvaIord = this.normalizeText(stagingRow?.NVA_IORD) ?? '';
+    const hasCreatedOrd = await this.hasOrdHeader(nvaIord);
+    const finalized =
+      hasCreatedOrd &&
+      Math.abs((this.toFloat(originalRow.ESTSEGU) ?? 0) - 4) <= 0.0001;
 
     return {
       ok: true,
       tipo,
       selCtrlOrd,
-      editable,
+      hasStagingRecord,
+      hasCreatedOrd,
+      finalized,
+      editable: editable && !hasCreatedOrd,
       blockedByAuthorization: selCtrlOrd === 14,
-      canCreateNewOrd: selCtrlOrd === 16,
+      canCreateNewOrd: false,
+      canPrintFormato: hasCreatedOrd,
+      canPrintSaldo: hasCreatedOrd && generaAfectacionContable,
       subtotalOriginal: montosOriginal.subtotal,
       ivaOriginal: montosOriginal.iva,
       totalOriginal: montosOriginal.total,
@@ -2711,11 +3220,18 @@ export class OrdenesTrabajoService {
           this.normalizeText(originalRow.DESCART) ??
           this.normalizeText(originalRow.DESCRT) ??
           null,
+        CTD: ctdOriginal,
         PVTAT_BASE: precioOriginal,
-        CTD_C_M: ctdCM,
+        CTD_C_M: ctdCMStored,
+        CTD_C_M_CALCULADO: ctdCM,
         SUBTOTAL: montosOriginal.subtotal,
         IVA: montosOriginal.iva,
         TOTAL: montosOriginal.total,
+        SUBTOTAL_CONTABLE: montosOriginalContable.subtotal,
+        IVA_CONTABLE: montosOriginalContable.iva,
+        TOTAL_CONTABLE: montosOriginalContable.total,
+        USR_AUT_CYM: this.normalizeText(originalRow.USR_AUT_CYM) ?? null,
+        FCN_AUT_CYM: originalRow.FCN_AUT_CYM ?? null,
       },
       draft: {
         IORD_ORIGINAL: iord,
@@ -2731,7 +3247,7 @@ export class OrdenesTrabajoService {
           this.normalizeText(originalRow.DESCART) ??
           this.normalizeText(originalRow.DESCRT) ??
           '',
-        CTD: ctdCM,
+        CTD: ctdCalculoOrd,
         PVTA: precioNuevo,
         PVTAR: precioNuevo,
         TIPO: this.normalizeText(originalRow.TIPO) ?? '',
@@ -2753,11 +3269,254 @@ export class OrdenesTrabajoService {
           '',
         DOCDIF: docDif,
         CTD_C_M: ctdCM,
+        NVA_IORD: nvaIord,
         CREAR_NUEVA_ORD: crearNuevaOrd ? 1 : 0,
         SUBTOTAL: montosNuevo.subtotal,
         IVA: montosNuevo.iva,
         TOTAL: montosNuevo.total,
+        SUBTOTAL_CONTABLE: montosNuevoContable.subtotal,
+        IVA_CONTABLE: montosNuevoContable.iva,
+        TOTAL_CONTABLE: montosNuevoContable.total,
         DIFERENCIA_ECONOMICA: diferenciaEconomica,
+        FINALIZADA: finalized ? 1 : 0,
+      },
+    };
+  }
+
+  private async executeCambioMermaFinalization(
+    iord: string,
+    tipo: number,
+    user: JwtPayload,
+    ip: string | null,
+    options: {
+      requireSelCtrlOrd14: boolean;
+      allowLegacySelCtrlOrd16?: boolean;
+      auditAction: string;
+      okMessage: string;
+    },
+  ) {
+    await this.assertCambioMermaAuthorizationPermission(user);
+    await this.assertCambioMermaStagingTable();
+
+    const original = await this.fetchCambioMermaOriginalContext(
+      iord,
+      user,
+      tipo,
+    );
+    const staging = await this.fetchCambioMermaStaging(iord, tipo);
+    if (!staging) {
+      throw new BadRequestException(
+        `No existe captura temporal para la ORD ${iord}.`,
+      );
+    }
+    const actor = this.auditActor(user);
+
+    const allowedSelCtrlOrd = options.allowLegacySelCtrlOrd16
+      ? new Set([14, 16])
+      : new Set([14]);
+    const selCtrlOrd = this.toInt(original.row.selCtrlOrd);
+    if (!allowedSelCtrlOrd.has(selCtrlOrd ?? -1)) {
+      throw new BadRequestException(
+        `La ORD ${iord} debe estar en selCtrlOrd=${options.requireSelCtrlOrd14 ? '14' : '14 o 16'} para cerrar el proceso.`,
+      );
+    }
+
+    const ctdOriginal = this.toFloat(original.row.CTD) ?? 0;
+    const ctdCM = this.resolveCtdCM(staging.CTD_C_M, original.row.CTD_C_M, ctdOriginal);
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+
+    const suc = this.normalizeText(original.row.SUC) ?? '';
+    const artOriginal = this.normalizeText(original.row.ART) ?? '';
+    const artNuevo = this.normalizeText(staging.ART_NUEVO) ?? artOriginal;
+    if (tipo === 1) {
+      if (!artNuevo) {
+        throw new BadRequestException(
+          'Debe existir artículo nuevo en la captura para cambio material.',
+        );
+      }
+      if (this.normalizeUpper(artNuevo) === this.normalizeUpper(artOriginal)) {
+        throw new BadRequestException(
+          'El artículo nuevo debe ser distinto al artículo original.',
+        );
+      }
+    }
+
+    const motivo = await this.resolveMovimientoMotrAndLabel(
+      tipo,
+      this.normalizeText(staging.MOTIVO) ?? undefined,
+      this.toInt(staging.MOTR) ?? undefined,
+    );
+    const labor = this.toInt(staging.LABOR) ?? this.toInt(original.row.LABOR);
+    if (labor != null && labor > 0) {
+      await this.assertLaboratorioDisponibleParaOrd(
+        iord,
+        labor,
+        user,
+        original.scope,
+        this.normalizeText(original.row.TIPO) ?? null,
+      );
+    }
+
+    let pvtaNuevo = this.toFloat(staging.PVTA_NUEVO);
+    if (pvtaNuevo == null && tipo === 1 && artNuevo) {
+      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
+      pvtaNuevo = this.toFloat(artInfo?.pvta);
+    }
+    if (pvtaNuevo == null) {
+      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(iord, original.row);
+    }
+    if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
+      throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
+    }
+    pvtaNuevo = this.roundMoney(pvtaNuevo);
+
+    const nvaIord = await this.ensureCambioMermaReservedIordAvailable(
+      iord,
+      tipo,
+      suc,
+      staging,
+      actor,
+    );
+
+    await this.upsertCambioMermaStaging(
+      iord,
+      tipo,
+      {
+        artNuevo,
+        pvtaNuevo,
+        diferenciaEconomica: this.toFloat(staging.DIFERENCIA_ECONOMICA),
+        motr: motivo.id,
+        motivo: motivo.label,
+        labor,
+        docDif:
+          this.normalizeText(staging.DOCDIF) ??
+          this.normalizeText(original.row.DOCDIF),
+        ctdCM,
+        crearNuevaOrd: true,
+        nvaIord,
+      },
+      actor,
+    );
+
+    const stagedForSeal = await this.fetchCambioMermaStaging(iord, tipo);
+    if (!stagedForSeal) {
+      throw new BadRequestException(
+        `No existe captura temporal sellada para la ORD ${iord}.`,
+      );
+    }
+    const previewContext = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      original.row,
+      stagedForSeal,
+    );
+    const sealedDiff =
+      this.toFloat(previewContext.diferenciaEconomica) ??
+      this.toFloat(stagedForSeal.DIFERENCIA_ECONOMICA);
+    await this.syncCambioMermaStagingDiferencia(iord, tipo, sealedDiff, actor);
+
+    let result: {
+      ok: boolean;
+      message: string;
+      data: Record<string, unknown>;
+    };
+
+    if (tipo === 1) {
+      result = await this.executeSimpleAction(
+        'sp_ordenes_trabajo_cambio_material',
+        iord,
+        [
+          artNuevo,
+          motivo.label,
+          labor,
+          this.normalizeText(stagedForSeal.DOCDIF),
+          motivo.id,
+          ctdCM,
+          pvtaNuevo,
+          nvaIord,
+        ],
+        user,
+        ip,
+        'Cambio de material aplicado',
+        'ORD_CAMBIO_MATERIAL',
+        '@ART_NUEVO=@1,@MOTIVO=@2,@LABOR=@3,@DOCDIF=@4,@MOTR=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,@IORD_NUEVA=@8,',
+      );
+    } else {
+      result = await this.executeSimpleAction(
+        'sp_ordenes_trabajo_merma',
+        iord,
+        [
+          ctdCM,
+          motivo.label,
+          1,
+          motivo.id,
+          artNuevo,
+          ctdCM,
+          pvtaNuevo,
+          nvaIord,
+        ],
+        user,
+        ip,
+        'Merma procesada',
+        'ORD_MERMA',
+        '@CANTIDAD_MERMA=@1,@MOTIVO=@2,@CREAR_NUEVA_ORD=@3,@MOTR=@4,@ART_NUEVO=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,@IORD_NUEVA=@8,',
+      );
+    }
+
+    const finalNewIord = this.normalizeText(result.data.IORD_NUEVA) ?? nvaIord;
+    const finalDiff =
+      this.toFloat(result.data.DIFERENCIA_ECONOMICA) ?? sealedDiff ?? 0;
+
+    await this.forceEstatus2FromActionData(result.data);
+    await this.finalizeCambioMermaOriginalAfterAuthorize(
+      iord,
+      finalNewIord,
+      ctdOriginal,
+      ctdCM,
+      motivo.id,
+      actor,
+    );
+    await this.markCambioMermaStagingCreated(
+      iord,
+      tipo,
+      finalNewIord,
+      finalDiff,
+      actor,
+    );
+    await this.resetSelCtrlOrdByIords([finalNewIord]);
+
+    await this.auditMutation(options.auditAction, user, ip, {
+      iord,
+      tipo,
+      nvaIord: finalNewIord,
+      ctdCM,
+      pvtaNuevo,
+      diferenciaEconomica: finalDiff,
+      result: result.data,
+    });
+
+    const updatedOriginal = await this.fetchCambioMermaOriginalContext(
+      iord,
+      user,
+      tipo,
+      { allowFinalized: true },
+    );
+    const refreshedStaging = await this.fetchCambioMermaStaging(iord, tipo);
+    const context = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      updatedOriginal.row,
+      refreshedStaging,
+    );
+
+    return {
+      result: {
+        ...result,
+        message: options.okMessage,
+      },
+      context: {
+        ...context,
+        message: options.okMessage,
       },
     };
   }
@@ -2835,6 +3594,139 @@ export class OrdenesTrabajoService {
     return this.roundMoney(value);
   }
 
+  private async resolveCambioMermaOriginalUnitPrice(
+    iord: string,
+    originalRow: Record<string, unknown>,
+  ) {
+    const suc = this.normalizeText(originalRow.SUC) ?? '';
+    const idfol = this.normalizeText(originalRow.IDFOL) ?? '';
+    const artOriginal = this.normalizeText(originalRow.ART) ?? '';
+    const originalArtInfo = await this.resolveArticuloDatArt(suc, artOriginal);
+    return this.resolveTicketLogUnitPrice(
+      iord,
+      idfol,
+      artOriginal,
+      originalArtInfo?.pvta ?? 0,
+    );
+  }
+
+  private async syncCambioMermaStagingDiferencia(
+    iord: string,
+    tipo: number,
+    diferenciaEconomica: number | null,
+    actor: string,
+  ) {
+    if (!(await this.hasColumn('PV_ORD_CAMBIO_MERMA_TMP', 'DIFERENCIA_ECONOMICA'))) {
+      return;
+    }
+    await this.dataSource.query(
+      `
+      UPDATE t
+      SET
+        DIFERENCIA_ECONOMICA = @2,
+        USER_MOD = @3,
+        FCN_MOD = GETDATE()
+      FROM dbo.PV_ORD_CAMBIO_MERMA_TMP t
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(t.IORD, '')))) = UPPER(@0)
+        AND TRY_CONVERT(INT, t.TIPOM) = @1
+      `,
+      [
+        iord,
+        tipo,
+        diferenciaEconomica,
+        actor,
+      ],
+    );
+  }
+
+  private async assertCambioMermaStagingUnlocked(
+    iord: string,
+    stagingRow: Record<string, unknown> | null,
+  ) {
+    const nvaIord = this.normalizeText(stagingRow?.NVA_IORD);
+    if (await this.hasOrdHeader(nvaIord)) {
+      throw new BadRequestException(
+        `La ORD ${iord} ya tiene nueva ORD creada (${nvaIord}). CTD_C_M y MOTR quedan bloqueados.`,
+      );
+    }
+  }
+
+  private async hasOrdHeader(iordRaw: unknown) {
+    const iord = this.normalizeText(iordRaw);
+    if (!iord) return false;
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 IORD
+      FROM dbo.PV_CTR_ORDS
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0)
+      `,
+      [iord],
+    );
+    return this.firstRow(rows) != null;
+  }
+
+  private async reserveCambioMermaNvaIord(sucRaw: string) {
+    const suc = this.normalizeText(sucRaw);
+    if (!suc) {
+      throw new BadRequestException(
+        'No se pudo determinar la sucursal para generar NVA_IORD.',
+      );
+    }
+    const rows = await this.dataSource.query(
+      `
+      DECLARE @IORD_OUT NVARCHAR(255);
+      DECLARE @FCN DATETIME = GETDATE();
+      EXEC dbo.sp_pv_ctr_ords_generate_iord
+        @SUC = @0,
+        @FCN = @FCN,
+        @IORD_OUT = @IORD_OUT OUTPUT;
+      SELECT @IORD_OUT AS IORD;
+      `,
+      [suc],
+    );
+    const iord = this.normalizeText(this.firstRow(rows)?.IORD);
+    if (!iord) {
+      throw new BadRequestException('No se pudo generar NVA_IORD para la captura.');
+    }
+    return iord;
+  }
+
+  private async resolveCambioMermaReservedIord(
+    sucRaw: string,
+    stagingRow: Record<string, unknown> | null,
+  ) {
+    const reserved = this.normalizeText(stagingRow?.NVA_IORD);
+    if (reserved) return reserved;
+    return this.reserveCambioMermaNvaIord(sucRaw);
+  }
+
+  private async ensureCambioMermaReservedIordAvailable(
+    iord: string,
+    tipo: number,
+    sucRaw: string,
+    stagingRow: Record<string, unknown> | null,
+    actor: string,
+  ) {
+    const reserved = this.normalizeText(stagingRow?.NVA_IORD);
+    if (reserved && !(await this.hasOrdHeader(reserved))) {
+      return reserved;
+    }
+    const regenerated = await this.reserveCambioMermaNvaIord(sucRaw);
+    await this.dataSource.query(
+      `
+      UPDATE dbo.PV_ORD_CAMBIO_MERMA_TMP
+      SET
+        NVA_IORD = @2,
+        USER_MOD = @3,
+        FCN_MOD = GETDATE()
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0)
+        AND TRY_CONVERT(INT, TIPOM) = @1
+      `,
+      [iord, tipo, regenerated, actor],
+    );
+    return regenerated;
+  }
+
   private normalizeCambioMermaTipo(value: unknown) {
     const tipo = this.toInt(value);
     if (tipo !== 1 && tipo !== 2) {
@@ -2910,12 +3802,15 @@ export class OrdenesTrabajoService {
     tipo: number,
     draft: {
       artNuevo: string | null;
+      pvtaNuevo: number | null;
+      diferenciaEconomica: number | null;
       motr: number | null;
       motivo: string | null;
       labor: number | null;
       docDif: string | null;
       ctdCM: number;
       crearNuevaOrd: boolean;
+      nvaIord?: string | null;
     },
     actor: string,
   ) {
@@ -2928,25 +3823,31 @@ export class OrdenesTrabajoService {
       WHEN MATCHED THEN
         UPDATE SET
           ART_NUEVO = @2,
-          MOTR = @3,
-          MOTIVO = @4,
-          LABOR = @5,
-          DOCDIF = @6,
-          CTD_C_M = @7,
-          CREAR_NUEVA_ORD = @8,
-          USER_MOD = @9,
+          PVTA_NUEVO = @3,
+          DIFERENCIA_ECONOMICA = @4,
+          MOTR = @5,
+          MOTIVO = @6,
+          LABOR = @7,
+          DOCDIF = @8,
+          CTD_C_M = @9,
+          CREAR_NUEVA_ORD = @10,
+          NVA_IORD = @11,
+          USER_MOD = @12,
           FCN_MOD = GETDATE()
       WHEN NOT MATCHED THEN
         INSERT (
           IORD,
           TIPOM,
           ART_NUEVO,
+          PVTA_NUEVO,
+          DIFERENCIA_ECONOMICA,
           MOTR,
           MOTIVO,
           LABOR,
           DOCDIF,
           CTD_C_M,
           CREAR_NUEVA_ORD,
+          NVA_IORD,
           USER_MOD,
           FCN_ALT,
           FCN_MOD
@@ -2962,6 +3863,9 @@ export class OrdenesTrabajoService {
           @7,
           @8,
           @9,
+          @10,
+          @11,
+          @12,
           GETDATE(),
           GETDATE()
         );
@@ -2970,21 +3874,51 @@ export class OrdenesTrabajoService {
         iord,
         tipo,
         draft.artNuevo,
+        draft.pvtaNuevo,
+        draft.diferenciaEconomica,
         draft.motr,
         draft.motivo,
         draft.labor,
         draft.docDif,
         draft.ctdCM,
         draft.crearNuevaOrd ? 1 : 0,
+        draft.nvaIord ?? null,
         actor,
       ],
     );
   }
 
-  private async updateCambioMermaSelCtrlOrd(
+  private async markCambioMermaStagingCreated(
+    iord: string,
+    tipo: number,
+    nvaIord: string | null,
+    diferenciaEconomica: number | null,
+    actor: string,
+  ) {
+    if (!(await this.hasColumn('PV_ORD_CAMBIO_MERMA_TMP', 'NVA_IORD'))) {
+      return;
+    }
+    await this.dataSource.query(
+      `
+      UPDATE t
+      SET
+        NVA_IORD = @2,
+        DIFERENCIA_ECONOMICA = COALESCE(@3, t.DIFERENCIA_ECONOMICA),
+        USER_MOD = @4,
+        FCN_MOD = GETDATE()
+      FROM dbo.PV_ORD_CAMBIO_MERMA_TMP t
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(t.IORD, '')))) = UPPER(@0)
+        AND TRY_CONVERT(INT, t.TIPOM) = @1
+      `,
+      [iord, tipo, nvaIord, diferenciaEconomica, actor],
+    );
+  }
+
+  private async updateCambioMermaOriginalState(
     iord: string,
     selCtrlOrd: number,
     ctdCM: number,
+    motr?: number | null,
   ) {
     await this.dataSource.query(
       `
@@ -2992,10 +3926,42 @@ export class OrdenesTrabajoService {
       SET
         selCtrlOrd = @1,
         CTD_C_M = @2,
+        MOTR = COALESCE(@3, MOTR),
         FCNMOD = GETDATE()
       WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0)
       `,
-      [iord, selCtrlOrd, ctdCM],
+      [iord, selCtrlOrd, ctdCM, motr ?? null],
+    );
+  }
+
+  private async finalizeCambioMermaOriginalAfterAuthorize(
+    iord: string,
+    newIord: string,
+    ctdOriginal: number,
+    ctdCM: number,
+    motr: number | null,
+    actor: string,
+  ) {
+    const hasUsrAut = await this.hasColumn('PV_CTR_ORDS', 'USR_AUT_CYM');
+    const hasFcnAut = await this.hasColumn('PV_CTR_ORDS', 'FCN_AUT_CYM');
+
+    await this.dataSource.query(
+      `
+      UPDATE dbo.PV_CTR_ORDS
+      SET
+        CTD = @2,
+        CTD_C_M = @3,
+        MOTR = COALESCE(@4, MOTR),
+        REEORD = @1,
+        selCtrlOrd = NULL,
+        ESTSEGU = 4,
+        ESTATUS = 2,
+        ${hasUsrAut ? 'USR_AUT_CYM = @5,' : ''}
+        ${hasFcnAut ? 'FCN_AUT_CYM = GETDATE(),' : ''}
+        FCNMOD = GETDATE()
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0)
+      `,
+      [iord, newIord, ctdOriginal, ctdCM, motr ?? null, actor],
     );
   }
 
@@ -3030,14 +3996,32 @@ export class OrdenesTrabajoService {
     );
   }
 
-  private async canAutoAuthorizeCambioMerma(user: JwtPayload) {
+  private async assertCambioMermaContextPermission(
+    tipo: number,
+    user: JwtPayload,
+  ) {
     try {
-      await this.assertActionPermission('AUTORIZAR', user);
-      return true;
+      await this.assertActionPermission(
+        tipo === 1 ? 'CAMBIO_MATERIAL' : 'MERMA',
+        user,
+      );
+      return;
     } catch (error) {
-      if (error instanceof ForbiddenException) return false;
-      throw error;
+      if (!(error instanceof ForbiddenException)) throw error;
     }
+
+    await this.assertCambioMermaAuthorizationPermission(user);
+  }
+
+  private async assertCambioMermaAuthorizationPermission(user: JwtPayload) {
+    if (this.isAdmin(user)) return;
+    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
+    if (roleCode === 'ANALISTA_INV' || roleCode === 'INVJEF') {
+      return;
+    }
+    throw new ForbiddenException(
+      'Rol no autorizado para aprobar cambio material/merma.',
+    );
   }
 
   private resolveCambioMermaTipoTran(value: unknown) {
@@ -3051,10 +4035,10 @@ export class OrdenesTrabajoService {
 
   private resolveCambioMermaRqfac(row: Record<string, unknown>) {
     return (
-      this.toInt(row.RQFAC) ??
-      this.toInt(row.REQF) ??
+      this.toInt(row.REQF_FOLIO) ??
       this.toInt(row.RQFAC_FOLIO) ??
-      this.toInt(row.REQF_FOLIO)
+      this.toInt(row.REQF) ??
+      this.toInt(row.RQFAC)
     );
   }
 
@@ -3128,6 +4112,24 @@ export class OrdenesTrabajoService {
     );
   }
 
+  private async hasColumn(tableName: string, columnName: string) {
+    if (!tableName.trim() || !columnName.trim()) return false;
+    return (
+      (
+        await this.dataSource.query(
+          `
+        SELECT 1
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = @0
+          AND COLUMN_NAME = @1
+        `,
+          [tableName.trim(), columnName.trim()],
+        )
+      ).length > 0
+    );
+  }
+
   private async resolveLaboratoriosFromAcceso(
     scope: SucScope,
     sucOverride?: string | null,
@@ -3151,6 +4153,7 @@ export class OrdenesTrabajoService {
             )
           ) AS TIPOLAB,
           UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) AS SUC,
+          UPPER(LTRIM(RTRIM(ISNULL(l.SUC, '')))) AS LAB_SUC,
           ROW_NUMBER() OVER (
             PARTITION BY
               UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))),
@@ -3188,7 +4191,7 @@ export class OrdenesTrabajoService {
             OR UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = UPPER(@2)
           )
       )
-      SELECT ID, LAB, TIPOLAB, SUC
+      SELECT ID, LAB, TIPOLAB, SUC, LAB_SUC
       FROM raw
       WHERE RN = 1
       ORDER BY
@@ -3212,6 +4215,7 @@ export class OrdenesTrabajoService {
           LTRIM(RTRIM(ISNULL(l.LAB, ''))) AS LAB,
           UPPER(LTRIM(RTRIM(ISNULL(l.TIPOLAB, '')))) AS TIPOLAB,
           UPPER(LTRIM(RTRIM(ISNULL(l.SUC, '')))) AS SUC,
+          UPPER(LTRIM(RTRIM(ISNULL(l.SUC, '')))) AS LAB_SUC,
           ROW_NUMBER() OVER (
             PARTITION BY TRY_CONVERT(INT, l.ID)
             ORDER BY
@@ -3227,7 +4231,7 @@ export class OrdenesTrabajoService {
         FROM dbo.DAT_LAB l
         WHERE ISNULL(l.BLOQ, 0) = 0
       )
-      SELECT ID, LAB, TIPOLAB, SUC
+      SELECT ID, LAB, TIPOLAB, SUC, LAB_SUC
       FROM raw
       WHERE RN = 1
       ORDER BY UPPER(LTRIM(RTRIM(ISNULL(LAB, '')))), ID
@@ -3251,13 +4255,21 @@ export class OrdenesTrabajoService {
           '';
         const suc =
           this.normalizeText((row as Record<string, unknown>)['SUC']) ?? '';
+        const labSuc =
+          this.normalizeText((row as Record<string, unknown>)['LAB_SUC']) ?? suc;
         if (id <= 0 || !lab) return null;
-        return { id, lab, tipoLab, suc };
+        return { id, lab, tipoLab, suc, labSuc };
       })
       .filter(
         (
           item,
-        ): item is { id: number; lab: string; tipoLab: string; suc: string } =>
+        ): item is {
+          id: number;
+          lab: string;
+          tipoLab: string;
+          suc: string;
+          labSuc: string;
+        } =>
           item !== null,
       );
   }
@@ -3460,7 +4472,7 @@ export class OrdenesTrabajoService {
   private resolveAllowedActions(
     user: JwtPayload,
     roleCodeRaw: string,
-    panelMode: 'operativo' | 'anulados' | 'entregadas',
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
   ) {
     const operationalActions = [
       'VER_DETALLE',
@@ -3482,58 +4494,31 @@ export class OrdenesTrabajoService {
     ];
 
     if (this.isAdmin(user)) {
+      if (panelMode === 'estado') return ['VER_DETALLE'];
       if (panelMode === 'anulados') return ['VER_DETALLE'];
       if (panelMode === 'entregadas') return ['VER_DETALLE', 'GARANTIA'];
       return operationalActions;
     }
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    const nonStoreReceiveActions = operationalActions.filter(
-      (action) => action !== 'REGRESAR_TIENDA',
-    );
-    const nonStoreReceiveActionsNoPrint = nonStoreReceiveActions.filter(
-      (action) => action !== 'IMPRIMIR_ETIQUETA',
-    );
     const byRole: Record<string, string[]> = {
       JEF_TALLER: operationalActions,
-      TALLER: nonStoreReceiveActionsNoPrint,
       ANALISTA_ORD: [
         'VER_DETALLE',
         'AUTORIZAR',
-        'ANULAR',
         'ENVIAR',
         'REGRESAR_TIENDA',
         'ASIGNAR_LABORATORIO',
-        'ENTREGAR',
-        'IMPRIMIR_ETIQUETA',
-        'CAMBIO_MATERIAL',
-        'MERMA',
-        'SCAN_ENTREGAR',
-      ],
-      ANALISTA: [
-        'VER_DETALLE',
-        'AUTORIZAR',
-        'ANULAR',
-        'ENVIAR',
-        'REGRESAR_TIENDA',
-        'ASIGNAR_LABORATORIO',
-        'ENTREGAR',
-        'IMPRIMIR_ETIQUETA',
-        'CAMBIO_MATERIAL',
-        'MERMA',
-        'SCAN_ENTREGAR',
-      ],
-      ENC_MAQUILA: [
-        'VER_DETALLE',
-        'ASIGNAR',
-        'TRABAJO_TERMINADO',
-        'REGRESAR_INCIDENCIA',
-        'RECIBIR',
-        'CAMBIO_MATERIAL',
-        'MERMA',
         'SCAN_RECIBIR',
+        'ENTREGAR',
+        'IMPRIMIR_ETIQUETA',
+        'CAMBIO_MATERIAL',
+        'MERMA',
+        'SCAN_ENTREGAR',
       ],
-      ENCARGADO_MAQUILA: [
+      ANALISTA_INV: ['VER_DETALLE', 'CAMBIO_MATERIAL', 'MERMA'],
+      INVJEF: ['VER_DETALLE', 'CAMBIO_MATERIAL', 'MERMA'],
+      ENC_MAQUILA: [
         'VER_DETALLE',
         'ASIGNAR',
         'TRABAJO_TERMINADO',
@@ -3553,27 +4538,20 @@ export class OrdenesTrabajoService {
         'MERMA',
         'SCAN_RECIBIR',
       ],
-      ENCARGADO_BISELADO: [
-        'VER_DETALLE',
-        'ASIGNAR',
-        'TRABAJO_TERMINADO',
-        'REGRESAR_INCIDENCIA',
-        'RECIBIR',
-        'CAMBIO_MATERIAL',
-        'MERMA',
-        'SCAN_RECIBIR',
-      ],
     };
 
     const allowed = byRole[roleCode] ?? [];
+    if (panelMode === 'estado') {
+      return roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
+        ? ['VER_DETALLE']
+        : [];
+    }
     if (panelMode === 'anulados') {
-      if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER')
-        return ['VER_DETALLE'];
+      if (roleCode === 'JEF_TALLER') return ['VER_DETALLE'];
       return [];
     }
     if (panelMode === 'entregadas') {
-      if (roleCode === 'JEF_TALLER' || roleCode === 'TALLER')
-        return ['VER_DETALLE', 'GARANTIA'];
+      if (roleCode === 'JEF_TALLER') return ['VER_DETALLE', 'GARANTIA'];
       return [];
     }
     return allowed;
@@ -3584,9 +4562,7 @@ export class OrdenesTrabajoService {
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return (
       roleCode === 'JEF_TALLER' ||
-      roleCode === 'TALLER' ||
-      roleCode === 'ANALISTA_ORD' ||
-      roleCode === 'ANALISTA'
+      roleCode === 'ANALISTA_ORD'
     );
   }
 
@@ -3594,9 +4570,7 @@ export class OrdenesTrabajoService {
     if (this.isAdmin(user)) return true;
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return (
-      roleCode === 'JEF_TALLER' ||
-      roleCode === 'ANALISTA_ORD' ||
-      roleCode === 'ANALISTA'
+      roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
     );
   }
 
@@ -3610,10 +4584,10 @@ export class OrdenesTrabajoService {
 
   private resolveOrdTipoScope(roleCodeRaw: string) {
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    if (roleCode === 'ENC_MAQUILA' || roleCode === 'ENCARGADO_MAQUILA') {
+    if (roleCode === 'ENC_MAQUILA') {
       return 'TALLADO';
     }
-    if (roleCode === 'ENC_BISEL' || roleCode === 'ENCARGADO_BISELADO') {
+    if (roleCode === 'ENC_BISEL') {
       return 'BISELADO';
     }
     return null;
@@ -3847,6 +4821,199 @@ export class OrdenesTrabajoService {
     );
   }
 
+  private async applyFlowVisibilityRulesToItems(
+    items: Record<string, unknown>[],
+    rules: OrdFlowVisibilityRule[],
+    scope: SucScope,
+    roleCodeRaw: string,
+  ) {
+    if (!items.length || !rules.length) return items;
+    const externalOnlyFlows = new Set(
+      rules
+        .filter((rule) => rule.onlyExternalLab)
+        .map((rule) => this.formatStatusCode(rule.estsegu)),
+    );
+    if (!externalOnlyFlows.size) return items;
+
+    const iords = items
+      .map((item) => this.normalizeUpper(item.IORD ?? ''))
+      .filter((value) => value.length > 0);
+    if (!iords.length) return items;
+
+    const contextRows = await this.fetchBatchOrdOperationalContext(
+      iords,
+      scope,
+      roleCodeRaw,
+    );
+    const externalByIord = new Map<string, boolean>();
+    for (const row of contextRows) {
+      const iord = this.normalizeUpper(row.IORD ?? '');
+      if (!iord) continue;
+      externalByIord.set(iord, this.isLaboratorioExterno(row));
+    }
+
+    return items.filter((item) => {
+      const flow = this.toFloat(item.ESTSEGU);
+      if (flow == null) return true;
+      const flowCode = this.formatStatusCode(flow);
+      if (!externalOnlyFlows.has(flowCode)) return true;
+
+      const iord = this.normalizeUpper(item.IORD ?? '');
+      if (!iord) return false;
+      return externalByIord.get(iord) === true;
+    });
+  }
+
+  private async resolveFlowVisibilityRules(
+    user: JwtPayload,
+    roleCodeRaw: string,
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
+  ) {
+    const tableExists = await this.hasFlowVisibilityTable();
+    if (!tableExists) return [];
+
+    const roleCode = this.isAdmin(user)
+      ? 'ADMIN'
+      : this.normalizeUpper(roleCodeRaw);
+    if (!roleCode) return [];
+    const roleCandidates = this.resolveFlowVisibilityRoleCandidates(roleCode);
+    if (!roleCandidates.length) return [];
+    const rolePlaceholders = roleCandidates.map((_, idx) => `@${idx + 1}`).join(',');
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        TRY_CONVERT(FLOAT, ESTA) AS ESTA,
+        TRY_CONVERT(BIT, SOLO_EXTERNO) AS SOLO_EXTERNO,
+        UPPER(LTRIM(RTRIM(ISNULL(ROLE_CODE, '')))) AS ROLE_CODE
+      FROM dbo.DAT_JAO_ORD_FLUJO_VIS
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) = 'DAT_JAO_ORD'
+        AND UPPER(LTRIM(RTRIM(ISNULL(PANEL_MODE, '')))) = UPPER(@0)
+        AND UPPER(LTRIM(RTRIM(ISNULL(ROLE_CODE, '')))) IN (${rolePlaceholders})
+        AND ISNULL(ACTIVO, 1) = 1
+      ORDER BY TRY_CONVERT(FLOAT, ESTA)
+      `,
+      [panelMode, ...roleCandidates],
+    );
+    const candidatePriority = new Map<string, number>();
+    roleCandidates.forEach((candidate, index) =>
+      candidatePriority.set(candidate, index),
+    );
+
+    type CandidateRule = OrdFlowVisibilityRule & { priority: number };
+    const selectedByFlow = new Map<string, CandidateRule>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const record = row as Record<string, unknown>;
+      const role = this.normalizeUpper(record.ROLE_CODE ?? '');
+      if (!role) continue;
+      const priority = candidatePriority.get(role);
+      if (priority == null) continue;
+
+      const estsegu = this.toFloat(record.ESTA);
+      if (estsegu == null) continue;
+      const onlyExternalLab = this.toInt(record.SOLO_EXTERNO) === 1;
+      const flowCode = this.formatStatusCode(estsegu);
+
+      const current = selectedByFlow.get(flowCode);
+      if (!current) {
+        selectedByFlow.set(flowCode, { estsegu, onlyExternalLab, priority });
+        continue;
+      }
+
+      if (priority < current.priority) {
+        selectedByFlow.set(flowCode, { estsegu, onlyExternalLab, priority });
+        continue;
+      }
+
+      if (priority === current.priority && onlyExternalLab && !current.onlyExternalLab) {
+        selectedByFlow.set(flowCode, { estsegu, onlyExternalLab, priority });
+      }
+    }
+
+    return [...selectedByFlow.values()]
+      .map((rule) => ({
+        estsegu: rule.estsegu,
+        onlyExternalLab: rule.onlyExternalLab,
+      }))
+      .sort((a, b) => a.estsegu - b.estsegu);
+  }
+
+  private resolveFlowVisibilityRoleCandidates(roleCodeRaw: string) {
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    if (!roleCode) return [] as string[];
+    return [roleCode];
+  }
+
+  private async hasFlowVisibilityTable() {
+    if (this.flowVisibilityTableExists != null) {
+      return this.flowVisibilityTableExists;
+    }
+    const rows = await this.dataSource.query(`
+      SELECT TOP 1 1 AS ok
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'DAT_JAO_ORD_FLUJO_VIS'
+    `);
+    this.flowVisibilityTableExists = Array.isArray(rows) && rows.length > 0;
+    return this.flowVisibilityTableExists;
+  }
+
+  private async hasFlowVisibilityPanelConfig(
+    panelMode: 'operativo' | 'estado' | 'anulados' | 'entregadas',
+  ) {
+    const key = panelMode.toLowerCase();
+    const cached = this.flowVisibilityPanelConfigCache.get(key);
+    if (cached != null) return cached;
+
+    const tableExists = await this.hasFlowVisibilityTable();
+    if (!tableExists) {
+      this.flowVisibilityPanelConfigCache.set(key, false);
+      return false;
+    }
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 1 AS ok
+      FROM dbo.DAT_JAO_ORD_FLUJO_VIS
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) = 'DAT_JAO_ORD'
+        AND UPPER(LTRIM(RTRIM(ISNULL(PANEL_MODE, '')))) = UPPER(@0)
+        AND ISNULL(ACTIVO, 1) = 1
+      `,
+      [panelMode],
+    );
+    const hasConfig = Array.isArray(rows) && rows.length > 0;
+    this.flowVisibilityPanelConfigCache.set(key, hasConfig);
+    return hasConfig;
+  }
+
+  private async assertBatchExternalLaboratorioForAnalyst(
+    iords: string[],
+    scope: SucScope,
+    roleCodeRaw: string,
+  ) {
+    if (!this.isAnalistaRoleForRecepcionExterna(roleCodeRaw)) return;
+    const rows = await this.fetchBatchOrdOperationalContext(iords, scope, roleCodeRaw);
+    const invalidFlow = rows
+      .filter((row) => {
+        const flow = this.toFloat(row.ESTSEGU);
+        return flow == null || Math.abs(flow - 9) > 0.0001;
+      })
+      .map((row) => this.normalizeUpper(row.IORD ?? ''))
+      .filter((item) => item.length > 0);
+    if (invalidFlow.length) {
+      throw new BadRequestException(
+        `Las siguientes ORDs deben estar en estatus 9 (PENDIENTE RECIBIR EN ANALISTA): ${invalidFlow.join(', ')}`,
+      );
+    }
+    const invalid = rows
+      .filter((row) => !this.isLaboratorioExterno(row))
+      .map((row) => this.normalizeUpper(row.IORD ?? ''))
+      .filter((item) => item.length > 0);
+    if (!invalid.length) return;
+    throw new BadRequestException(
+      `Las siguientes ORDs pertenecen a laboratorio interno y no pueden recibirse desde analista: ${invalid.join(', ')}`,
+    );
+  }
+
   private async fetchBatchOrdOperationalContext(
     iords: string[],
     scope: SucScope,
@@ -3862,6 +5029,10 @@ export class OrdenesTrabajoService {
         UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) AS TIPO,
         TRY_CONVERT(FLOAT, o.ESTSEGU) AS ESTSEGU,
         TRY_CONVERT(INT, o.LABOR) AS LABOR,
+        LTRIM(RTRIM(ISNULL(lab.LAB, ''))) AS LAB_DESC,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.TIPOLAB, '')))) AS LAB_TIPOLAB,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.UBILAB, '')))) AS LAB_UBILAB,
+        UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) AS LAB_SUC,
         LTRIM(RTRIM(ISNULL(CAST(o.ASIGN AS NVARCHAR(100)), ''))) AS ASIGN
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
@@ -3896,6 +5067,31 @@ export class OrdenesTrabajoService {
       );
     }
     return records;
+  }
+
+  private isAnalistaRoleForRecepcionExterna(roleCodeRaw: string) {
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    return roleCode === 'ANALISTA_ORD';
+  }
+
+  private isLaboratorioExterno(row: Record<string, unknown>) {
+    const ubiLab = this.normalizeUpper(row.LAB_UBILAB ?? '');
+    const tipoLab = this.normalizeUpper(row.LAB_TIPOLAB ?? '');
+    const lab = this.normalizeUpper(row.LAB_DESC ?? '');
+    const labSuc = this.normalizeUpper(row.LAB_SUC ?? '');
+
+    const looksExternal =
+      ubiLab.includes('EXTER') ||
+      tipoLab.includes('EXTER') ||
+      lab.includes('EXTER');
+    if (looksExternal) return true;
+
+    if (ubiLab.includes('LOCAL')) return false;
+
+    // Sin catalogo de sucursal en laboratorio: tratamos como externo por compat.
+    if (!labSuc) return true;
+
+    return false;
   }
 
   private normalizePage(value?: number) {
@@ -3942,6 +5138,16 @@ export class OrdenesTrabajoService {
     return text.length ? text : '';
   }
 
+  private normalizeHourMinute(value: unknown) {
+    const text = this.normalizeText(value);
+    if (!text) return null;
+    const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(text);
+    if (!match) {
+      throw new BadRequestException('hrEnt debe tener formato HH:MM');
+    }
+    return `${match[1]}:${match[2]}`;
+  }
+
   private auditActor(user: JwtPayload) {
     const username = this.normalizeText(user?.username);
     if (username) return username;
@@ -3979,12 +5185,16 @@ export class OrdenesTrabajoService {
   }
 
   private toInt(value: unknown) {
+    if (value == null) return null;
+    if (typeof value === 'string' && value.trim().length === 0) return null;
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return null;
     return Math.trunc(parsed);
   }
 
   private toFloat(value: unknown) {
+    if (value == null) return null;
+    if (typeof value === 'string' && value.trim().length === 0) return null;
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return null;
     return parsed;
