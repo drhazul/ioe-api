@@ -59,12 +59,6 @@ export class CreateUserDto {
   @Min(1)
   IDDEPTO?: number;
 
-  @ApiPropertyOptional({ example: 1 })
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  IDPUESTO?: number;
-
   @ApiPropertyOptional({ example: '001' })
   @IsOptional()
   @IsString()

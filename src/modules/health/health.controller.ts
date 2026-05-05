@@ -16,4 +16,9 @@ export class HealthController {
   db() {
     return this.healthService.dbCheck();
   }
+
+  @Get('environment')
+  environment() {
+    return this.healthService.environmentCheck();
+  }
 }

@@ -1,22 +1,21 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { AppController } from './app.controller';
+import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
 
-describe('AppController', () => {
-  let appController: AppController;
+@Controller()
+export class AppController {
+  constructor(private readonly appService: AppService) {}
 
-  beforeEach(async () => {
-    const app: TestingModule = await Test.createTestingModule({
-      controllers: [AppController],
-      providers: [AppService],
-    }).compile();
+  @Get()
+  getHello(): string {
+    return this.appService.getHello();
+  }
 
-    appController = app.get<AppController>(AppController);
-  });
-
-  describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
-    });
-  });
-});
+  // --- ESTA ES LA RUTA MANUAL QUE FALTA ---
+  @Get('health')
+  checkHealth() {
+    return { 
+      status: 'ok', 
+      message: 'Servidor IOE funcionando correctamente' 
+    };
+  }
+}

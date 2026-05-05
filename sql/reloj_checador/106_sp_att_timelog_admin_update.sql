@@ -55,6 +55,7 @@ BEGIN
         tl.DEVICE_ID,
         tl.CLIENT_IP,
         tl.NOTES,
+        tl.hash_verificacion,
         tl.LOCKED
       FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
     )
@@ -88,6 +89,7 @@ BEGIN
         tl.DEVICE_ID,
         tl.CLIENT_IP,
         tl.NOTES,
+        tl.hash_verificacion,
         tl.LOCKED
       FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
     )
@@ -127,6 +129,34 @@ BEGIN
     SYSUTCDATETIME()
   );
 
+  IF OBJECT_ID('dbo.LOGS_AUDITORIA', 'U') IS NOT NULL
+  BEGIN
+    INSERT INTO dbo.LOGS_AUDITORIA (
+      admin_id,
+      accion,
+      modulo,
+      ip_origen,
+      detalles
+    )
+    VALUES (
+      @CHANGED_BY,
+      'ADMIN_UPDATE_ATT_TIME_LOG',
+      'reloj_checador',
+      @IP,
+      (
+        SELECT
+          @CHANGED_BY AS ID_ADMIN,
+          @IDTIMELOG AS IDTIMELOG,
+          JSON_QUERY(@beforeJson) AS valor_anterior,
+          JSON_QUERY(@afterJson) AS valor_nuevo,
+          @REASON AS motivo,
+          @URL AS url,
+          @METHOD AS metodo
+        FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+      )
+    );
+  END;
+
   COMMIT TRANSACTION;
 
   SELECT TOP 1
@@ -144,6 +174,7 @@ BEGIN
     tl.DEVICE_ID,
     tl.CLIENT_IP,
     tl.NOTES,
+    tl.hash_verificacion,
     tl.LOCKED
   FROM dbo.ATT_TIME_LOG tl
   WHERE tl.IDTIMELOG = @IDTIMELOG;

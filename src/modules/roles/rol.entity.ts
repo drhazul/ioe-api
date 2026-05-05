@@ -11,6 +11,9 @@ export class RolEntity {
   @Column({ type: 'nvarchar', length: 100 })
   NOMBRE: string;
 
+  @Column({ type: 'int', nullable: true })
+  IDDEPTO: number | null;
+
   @Column({ type: 'nvarchar', length: 255, nullable: true })
   DESCRIPCION: string | null;
 

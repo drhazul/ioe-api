@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Length } from 'class-validator';
 
 export class CreateRolDto {
   @ApiProperty({ example: 'ADMIN' })
@@ -17,6 +17,11 @@ export class CreateRolDto {
   @IsString()
   @Length(0, 255)
   DESCRIPCION?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  IDDEPTO?: number;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()

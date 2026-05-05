@@ -25,6 +25,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
           synchronize: false,
           logging: false,
           autoLoadEntities: true,
+          retryAttempts: Number(config.get('DB_RETRY_ATTEMPTS') ?? 60),
+          retryDelay: Number(config.get('DB_RETRY_DELAY_MS') ?? 5000),
 
           options: {
             encrypt: false,

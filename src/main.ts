@@ -1,71 +1,64 @@
 import { ValidationPipe } from '@nestjs/common';
+import type { Server } from 'node:http';
+import { existsSync, mkdirSync } from 'node:fs';
+import * as path from 'node:path';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
+// Configura la hora de México para que las fechas en la base de datos sean correctas
 process.env.TZ = process.env.TZ || 'America/Mexico_City';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+  const asistenciaUploadsDir = path.join(uploadsRoot, 'asistencia');
 
+  if (!existsSync(asistenciaUploadsDir)) {
+    mkdirSync(asistenciaUploadsDir, { recursive: true });
+  }
+
+  // Se crea la instancia de la aplicación
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  app.useStaticAssets(uploadsRoot, {
+    prefix: '/uploads',
+  });
+
+  // Configuración de validaciones automáticas
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       transform: true,
+      transformOptions: { enableImplicitConversion: true },
       forbidNonWhitelisted: true,
     }),
   );
 
-  // CORS configuration: allow configurable origins via CORS_ORIGINS env var
-  // Example: CORS_ORIGINS="http://localhost:57591,http://127.0.0.1:57591"
-  const defaultOrigins = ['http://localhost:57591', 'http://127.0.0.1:57591'];
-  const envOrigins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : [];
-  const allowedOrigins = envOrigins.length > 0 ? envOrigins : defaultOrigins;
-
+  // --- CONFIGURACIÓN DE CORS PARA PROYECTO IOE ---
   app.enableCors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like curl, mobile apps)
-      if (!origin) return callback(null, true);
-
-      // Exact matches from env or defaults
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        return callback(null, true);
-      }
-
-      // Development convenience: allow any localhost or 127.0.0.1 origin on any port
-      try {
-        const u = new URL(origin);
-        if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
-          return callback(null, true);
-        }
-      } catch (e) {
-        // ignore parse errors
-      }
-
-      callback(new Error('CORS policy: Origin not allowed'), false);
-    },
+    origin: true, 
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    // `cajon-estado/resumen` sends the supervisor authorization in a custom header.
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Cajon-Estado-Token'],
+    allowedHeaders: [
+      'Content-Type', 
+      'Authorization', 
+      'X-Device-Id', 
+      'X-Cajon-Estado-Token'
+    ],
   });
 
+  // Configuración de la documentación Swagger
   const config = new DocumentBuilder()
     .setTitle('IOE API')
     .setDescription('API NestJS + MSSQL')
     .setVersion('1.0')
-    // 👇👇 ESTO ES LO ÚNICO QUE FALTABA 👇👇
     .addBearerAuth(
       {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
         name: 'Authorization',
-        description: 'Ingrese el token JWT como: Bearer {token}',
         in: 'header',
       },
       'jwt-auth',
@@ -75,8 +68,31 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
 
+  // Puertos de red
   const port = process.env.PORT ? Number(process.env.PORT) : 3001;
+  const admsPort = process.env.ADMS_PORT ? Number(process.env.ADMS_PORT) : 8081;
+
+  // Escuchar en todas las interfaces para permitir acceso desde tablets y red local
   await app.listen(port, '0.0.0.0');
-  console.log(`API corriendo en http://localhost:${port}/docs`);
+
+  console.log(`\n🚀 API IOE lista y corriendo`);
+  console.log(`🔗 Local: http://localhost:${port}/docs`);
+  console.log(`🌐 Red: http://10.99.0.3:${port}/docs\n`);
+
+  // Configuración para puerto ADMS Push
+  if (admsPort !== port) {
+    try {
+      const expressApp = app.getHttpAdapter().getInstance();
+      const admsServer: Server = expressApp.listen(admsPort, '0.0.0.0', () => {
+        console.log(`📡 Puerto ADMS Push activo en puerto ${admsPort}`);
+      });
+
+      admsServer.on('error', (err) => {
+        console.warn('⚠️  Aviso: Puerto ADMS ya está en uso o no disponible.');
+      });
+    } catch (e) {
+      console.error('❌ Error al iniciar servidor ADMS.');
+    }
+  }
 }
 bootstrap();

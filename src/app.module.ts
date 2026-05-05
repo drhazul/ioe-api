@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { RolesGuard } from './common/guards/roles.guard';
 import { envValidationSchema } from './config/env.validation';
@@ -61,6 +62,12 @@ import { CajonEstadoModule } from './modules/cajon-estado/cajon-estado.module';
 import { CajaGeneralModule } from './modules/caja-general/caja-general.module';
 import { FacturacionModule } from './modules/facturacion/facturacion.module';
 import { OrdenesTrabajoModule } from './modules/ordenes-trabajo/ordenes-trabajo.module';
+import { SucursalesModule } from './modules/sucursales/sucursales.module';
+import { ColaboradoresModule } from './modules/colaboradores/colaboradores.module';
+import { HorariosModule } from './modules/horarios/horarios.module';
+import { AsistenciaModule } from './modules/asistencia/asistencia.module';
+import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
+import { IncidenciasVacacionesModule } from './modules/incidencias-vacaciones/incidencias-vacaciones.module';
 
 @Module({
   imports: [
@@ -69,6 +76,7 @@ import { OrdenesTrabajoModule } from './modules/ordenes-trabajo/ordenes-trabajo.
       validationSchema: envValidationSchema,
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
     DatabaseModule,
     HealthModule,
     DatSucModule,
@@ -114,16 +122,13 @@ import { OrdenesTrabajoModule } from './modules/ordenes-trabajo/ordenes-trabajo.
     UsrModSucModule,
     AltaMasivaModule,
     CatCtasModule,
-    CtrlCtasModule,
-    RelojChecadorModule,
-    PvDevolucionesModule,
-    PagosServiciosModule,
-    RetirosModule,
-    FormasPagoCambiosModule,
-    CajonEstadoModule,
-    CajaGeneralModule,
-    FacturacionModule,
     OrdenesTrabajoModule,
+    SucursalesModule,
+    ColaboradoresModule,
+    HorariosModule,
+    AsistenciaModule,
+    NotificacionesModule,
+    IncidenciasVacacionesModule,
   ],
   providers: [
     {

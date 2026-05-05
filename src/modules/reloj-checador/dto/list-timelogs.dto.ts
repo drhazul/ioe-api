@@ -1,8 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
   IsInt,
+  IsNumber, // <--- Faltaba esta línea
   IsOptional,
   IsString,
   Length,
@@ -11,15 +12,39 @@ import {
 } from 'class-validator';
 
 export class ListTimelogsDto {
+  @ApiPropertyOptional({ description: 'Filtro por MARCAJES.id_usuario' })
+  @Transform(({ value, obj }) => value ?? obj?.id_usuario ?? obj?.idUsuario)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  id_usuario?: number;
+
   @ApiPropertyOptional({ description: 'Sucursal (SUC)' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 10)
+  SUC?: string;
+
+  @ApiPropertyOptional({ description: 'Sucursal (alias minúscula)' })
   @IsOptional()
   @IsString()
   @Length(1, 10)
   suc?: string;
 
-  @ApiPropertyOptional({
-    description: 'Usuario a consultar (solo admin/manager)',
-  })
+  @ApiPropertyOptional({ description: 'Latitud opcional desde cliente' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber() // <--- Ahora TypeScript ya sabrá qué es esto
+  LAT?: number;
+
+  @ApiPropertyOptional({ description: 'Longitud opcional desde cliente' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber() // <--- Y aquí también
+  LON?: number;
+
+  @ApiPropertyOptional({ description: 'Usuario a consultar (solo admin/manager)' })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

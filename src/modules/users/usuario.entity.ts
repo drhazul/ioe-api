@@ -7,7 +7,6 @@ import {
 } from 'typeorm';
 import { RolEntity } from '../roles/rol.entity';
 import { DepartamentoEntity } from '../deptos/departamento.entity';
-import { PuestoEntity } from '../puestos/puesto.entity';
 import { DatSucEntity } from '../dat-suc/dat-suc.entity';
 
 @Entity({ name: 'USUARIO', schema: 'dbo' })
@@ -49,13 +48,6 @@ export class UsuarioEntity {
   @ManyToOne(() => DepartamentoEntity, { nullable: true })
   @JoinColumn({ name: 'IDDEPTO' })
   DEPARTAMENTO: DepartamentoEntity | null;
-
-  @Column({ type: 'int', nullable: true })
-  IDPUESTO: number | null;
-
-  @ManyToOne(() => PuestoEntity, { nullable: true })
-  @JoinColumn({ name: 'IDPUESTO' })
-  PUESTO: PuestoEntity | null;
 
   @Column({ type: 'nvarchar', length: 10, nullable: true })
   SUC: string | null;

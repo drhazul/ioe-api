@@ -10,6 +10,7 @@ import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { CreateIncidenciaDto } from './dto/create-incidencia.dto';
 import { CreateOverrideDto } from './dto/create-override.dto';
+import { CreateAuditoriaDto } from './dto/create-auditoria.dto';
 import { CreateTimelogDto } from './dto/create-timelog.dto';
 import { GetPolicyDto } from './dto/get-policy.dto';
 import { ListDocumentosDto } from './dto/list-documentos.dto';
@@ -215,7 +216,7 @@ export class RelojChecadorService {
       suc = this.requireActorSuc(scope);
       idUsuario = scope.idUsuario;
       idDepto = null;
-    } else if (!scope.isAdmin) {
+    } else if (!this.hasGlobalScope(scope)) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
         throw new ForbiddenException('El usuario no puede consultar otra SUC');
@@ -302,6 +303,95 @@ export class RelojChecadorService {
     }
   }
 
+  async createClientAuditLog(
+    user: JwtPayload,
+    dto: CreateAuditoriaDto,
+    meta: RequestMeta,
+  ) {
+    const scope = await this.resolveAccessScope(user);
+    const payload = {
+      evento: this.normalizeUpper(dto.EVENTO),
+      detalle: dto.DETALLE?.trim() || null,
+      deviceId: dto.DEVICE_ID?.trim() || null,
+      clientIdUnico: dto.CLIENT_ID_UNICO?.trim() || null,
+      fechaHoraLocal: dto.FECHA_HORA_LOCAL?.trim() || null,
+      url: meta.url,
+      method: meta.method,
+    };
+
+    await this.audit.log({
+      IDUSUARIO: scope.idUsuario,
+      ACTION: 'POST',
+      MODULO: 'reloj_checador',
+      ENTIDAD: 'CLIENT_AUDIT',
+      ENTIDAD_ID: null,
+      SUC: scope.suc,
+      METADATA_JSON: JSON.stringify(payload),
+      IP: meta.ip,
+    });
+
+    return {
+      ok: true,
+      message: 'Auditoria registrada',
+    };
+  }
+
+  async getMarcajesHistorialByUsuario(
+    user: JwtPayload,
+    idUsuarioRaw: string,
+    meta: RequestMeta,
+  ) {
+    const scope = await this.resolveAccessScope(user);
+    const idUsuario = this.parseId(idUsuarioRaw, 'id_usuario');
+
+    let suc: string | null = null;
+    if (scope.isEmployee) {
+      if (idUsuario !== scope.idUsuario) {
+        throw new ForbiddenException(
+          'Empleado solo puede consultar su propio historial',
+        );
+      }
+      suc = this.requireActorSuc(scope);
+    } else if (!this.hasGlobalScope(scope)) {
+      suc = this.requireActorSuc(scope);
+      await this.ensureUserWithinScope(scope, idUsuario, suc);
+    }
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 200
+        m.id_usuario,
+        m.punch_time,
+        m.pin,
+        m.suc,
+        m.tipo,
+        m.verify_mode_label
+      FROM dbo.MARCAJES m
+      WHERE m.id_usuario = @0
+        AND (@1 IS NULL OR UPPER(LTRIM(RTRIM(ISNULL(m.suc, '')))) = @1)
+      ORDER BY m.punch_time DESC;
+      `,
+      [idUsuario, suc ? this.normalizeUpper(suc) : null],
+    );
+
+    await this.audit.log({
+      IDUSUARIO: scope.idUsuario,
+      ACTION: 'GET',
+      MODULO: 'reloj_checador',
+      ENTIDAD: 'MARCAJES',
+      ENTIDAD_ID: null,
+      SUC: suc ?? scope.suc,
+      METADATA_JSON: JSON.stringify({
+        url: meta.url,
+        method: meta.method,
+        idUsuario,
+      }),
+      IP: meta.ip,
+    });
+
+    return rows ?? [];
+  }
+
   async updateTimelog(
     user: JwtPayload,
     idRaw: string,
@@ -309,7 +399,7 @@ export class RelojChecadorService {
     meta: RequestMeta,
   ) {
     const scope = await this.resolveAccessScope(user);
-    if (!scope.isAdmin && !scope.isHr) {
+    if (!this.hasGlobalScope(scope)) {
       throw new ForbiddenException('Solo Admin/RRHH puede corregir marcajes');
     }
 
@@ -351,6 +441,51 @@ export class RelojChecadorService {
     }
   }
 
+  async deleteTimelog(user: JwtPayload, idRaw: string, meta: RequestMeta) {
+    const scope = await this.resolveAccessScope(user);
+    if (!this.hasGlobalScope(scope)) {
+      throw new ForbiddenException('Solo Admin/RRHH puede eliminar marcajes');
+    }
+
+    const id = this.parseId(idRaw, 'IDTIMELOG');
+    const existsRows = await this.dataSource.query(
+      `
+      SELECT TOP 1 IDTIMELOG
+      FROM dbo.ATT_TIME_LOG
+      WHERE IDTIMELOG = @0
+      `,
+      [id],
+    );
+    if (!this.firstRow(existsRows)) {
+      throw new NotFoundException('Marcaje no encontrado');
+    }
+
+    await this.dataSource.query(
+      `
+      UPDATE dbo.ATT_TIME_LOG
+      SET ACTIVO = 0
+      WHERE IDTIMELOG = @0;
+      `,
+      [id],
+    );
+
+    await this.audit.log({
+      IDUSUARIO: scope.idUsuario,
+      ACTION: 'DELETE',
+      MODULO: 'reloj_checador',
+      ENTIDAD: 'ATT_TIME_LOG',
+      ENTIDAD_ID: String(id),
+      SUC: scope.suc,
+      METADATA_JSON: JSON.stringify({
+        url: meta.url,
+        method: meta.method,
+      }),
+      IP: meta.ip,
+    });
+
+    return { success: true, id, logical: true };
+  }
+
   async createIncidencia(
     user: JwtPayload,
     dto: CreateIncidenciaDto,
@@ -368,7 +503,7 @@ export class RelojChecadorService {
     let suc = this.normalizeNullable(dto.SUC);
     if (scope.isEmployee) {
       suc = this.requireActorSuc(scope);
-    } else if (!scope.isAdmin) {
+    } else if (!this.hasGlobalScope(scope)) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
         throw new ForbiddenException('Manager solo puede operar en su SUC');
@@ -443,7 +578,7 @@ export class RelojChecadorService {
 
     const id = this.parseId(idRaw, 'IDINC');
 
-    if (!scope.isAdmin) {
+    if (!this.hasGlobalScope(scope)) {
       const rows = await this.dataSource.query(
         `
         SELECT TOP 1 i.IDUSUARIO, i.SUC
@@ -515,7 +650,7 @@ export class RelojChecadorService {
     if (scope.isEmployee) {
       suc = this.requireActorSuc(scope);
       idUsuario = scope.idUsuario;
-    } else if (!scope.isAdmin) {
+    } else if (!this.hasGlobalScope(scope)) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
         throw new ForbiddenException('Manager solo puede listar su SUC');
@@ -592,7 +727,7 @@ export class RelojChecadorService {
     let suc = sucFromDto;
     if (scope.isEmployee) {
       suc = this.requireActorSuc(scope);
-    } else if (!scope.isAdmin) {
+    } else if (!this.hasGlobalScope(scope)) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
         throw new ForbiddenException(
@@ -673,7 +808,7 @@ export class RelojChecadorService {
     if (scope.isEmployee) {
       suc = this.requireActorSuc(scope);
       userId = scope.idUsuario;
-    } else if (!scope.isAdmin) {
+    } else if (!this.hasGlobalScope(scope)) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
         throw new ForbiddenException(
@@ -756,7 +891,7 @@ export class RelojChecadorService {
           'Empleado solo puede descargar documentos propios',
         );
       }
-    } else if (!scope.isAdmin) {
+    } else if (!this.hasGlobalScope(scope)) {
       if (docSuc == null || docSuc !== this.requireActorSuc(scope)) {
         throw new ForbiddenException(
           'Manager solo puede descargar documentos de su SUC',
@@ -808,7 +943,7 @@ export class RelojChecadorService {
     }
 
     let suc = this.normalizeNullable(dto.SUC);
-    if (!scope.isAdmin) {
+    if (!this.hasGlobalScope(scope)) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
         throw new ForbiddenException(
@@ -875,7 +1010,7 @@ export class RelojChecadorService {
     let suc = this.normalizeNullable(query.suc);
     const idUsuario = query.idUsuario ?? null;
 
-    if (!scope.isAdmin) {
+    if (!this.hasGlobalScope(scope)) {
       const managerSuc = this.requireActorSuc(scope);
       if (suc != null && suc !== managerSuc) {
         throw new ForbiddenException(
@@ -941,7 +1076,7 @@ export class RelojChecadorService {
 
     const idOvr = this.parseId(idRaw, 'IDOVR');
 
-    if (!scope.isAdmin) {
+    if (!this.hasGlobalScope(scope)) {
       const rows = await this.dataSource.query(
         `
         SELECT TOP 1 IDUSUARIO, SUC
@@ -998,7 +1133,7 @@ export class RelojChecadorService {
 
   async getPolicy(user: JwtPayload, query: GetPolicyDto, meta: RequestMeta) {
     const scope = await this.resolveAccessScope(user);
-    if (!scope.isAdmin) {
+    if (!this.hasGlobalScope(scope)) {
       throw new ForbiddenException('Solo Admin puede consultar policies');
     }
 
@@ -1052,7 +1187,7 @@ export class RelojChecadorService {
     meta: RequestMeta,
   ) {
     const scope = await this.resolveAccessScope(user);
-    if (!scope.isAdmin) {
+    if (!this.hasGlobalScope(scope)) {
       throw new ForbiddenException('Solo Admin puede editar policies');
     }
 
@@ -1211,10 +1346,14 @@ export class RelojChecadorService {
     };
   }
 
+  private hasGlobalScope(scope: AccessScope) {
+    return scope.isAdmin || scope.isHr;
+  }
+
   private resolveScopedSuc(scope: AccessScope, requestedSuc?: string | null) {
     const req = this.normalizeNullable(requestedSuc);
 
-    if (scope.isAdmin) {
+    if (this.hasGlobalScope(scope)) {
       return req ?? this.requireActorSuc(scope);
     }
 
@@ -1245,7 +1384,7 @@ export class RelojChecadorService {
     if (expectedSuc != null && user.suc !== expectedSuc) {
       throw new ForbiddenException('Usuario fuera de la SUC permitida');
     }
-    if (!scope.isAdmin) {
+    if (!this.hasGlobalScope(scope)) {
       const scopeSuc = this.requireActorSuc(scope);
       if (user.suc !== scopeSuc) {
         throw new ForbiddenException('Usuario fuera de la SUC del manager');
@@ -1319,7 +1458,7 @@ export class RelojChecadorService {
       );
     }
 
-    if (!scope.isAdmin && rowSuc !== this.requireActorSuc(scope)) {
+    if (!this.hasGlobalScope(scope) && rowSuc !== this.requireActorSuc(scope)) {
       throw new ForbiddenException('Incidencia fuera del alcance del usuario');
     }
   }

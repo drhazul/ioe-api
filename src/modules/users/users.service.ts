@@ -6,7 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { UsuarioEntity } from './usuario.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -16,6 +16,7 @@ export class UsersService {
   constructor(
     @InjectRepository(UsuarioEntity)
     private readonly repo: Repository<UsuarioEntity>,
+    private readonly dataSource: DataSource,
   ) {}
 
   findAll() {
@@ -23,7 +24,6 @@ export class UsersService {
       relations: {
         ROL: true,
         DEPARTAMENTO: true,
-        PUESTO: true,
         SUCURSAL: true,
       },
       order: { IDUSUARIO: 'ASC' },
@@ -36,7 +36,6 @@ export class UsersService {
       relations: {
         ROL: true,
         DEPARTAMENTO: true,
-        PUESTO: true,
         SUCURSAL: true,
       },
     });
@@ -94,12 +93,19 @@ export class UsersService {
       NIVEL: dto.NIVEL,
       IDROL: dto.IDROL,
       IDDEPTO: dto.IDDEPTO ?? null,
-      IDPUESTO: dto.IDPUESTO ?? null,
       SUC: dto.SUC ?? null,
       FORZAR_CAMBIO_PASS: dto.FORZAR_CAMBIO_PASS ?? true,
     });
 
     const saved = await this.repo.save(entity);
+    await this.enqueueSyncCommandsForUser(saved.IDUSUARIO, {
+      oldSuc: null,
+      newSuc: saved.SUC ?? null,
+      oldDepto: null,
+      newDepto: saved.IDDEPTO ?? null,
+      reason: 'CREATE_USER_SCOPE',
+    });
+
     const created = await this.findOne(saved.IDUSUARIO);
 
     if (hasPassword) return created;
@@ -113,6 +119,9 @@ export class UsersService {
   async update(id: number, dto: UpdateUserDto) {
     const row = await this.repo.findOne({ where: { IDUSUARIO: id } });
     if (!row) throw new NotFoundException(`USUARIO ${id} no existe`);
+
+    const oldSuc = row.SUC ?? null;
+    const oldDepto = row.IDDEPTO ?? null;
 
     const payload: Partial<UsuarioEntity> = {};
     const { PASSWORD, ...rest } = dto;
@@ -154,6 +163,18 @@ export class UsersService {
 
     await this.repo.update({ IDUSUARIO: id }, payload);
 
+    const newSuc = payload.SUC !== undefined ? (payload.SUC ?? null) : oldSuc;
+    const newDepto =
+      payload.IDDEPTO !== undefined ? (payload.IDDEPTO ?? null) : oldDepto;
+
+    await this.enqueueSyncCommandsForUser(id, {
+      oldSuc,
+      newSuc,
+      oldDepto,
+      newDepto,
+      reason: 'UPDATE_USER_SCOPE',
+    });
+
     return this.findOne(id);
   }
 
@@ -168,5 +189,82 @@ export class UsersService {
   private generateRandomSixDigitPassword(): string {
     const value = randomInt(100000, 1000000);
     return String(value);
+  }
+
+  private async enqueueSyncCommandsForUser(
+    userId: number,
+    scope: {
+      oldSuc: string | null;
+      newSuc: string | null;
+      oldDepto: number | null;
+      newDepto: number | null;
+      reason: string;
+    },
+  ) {
+    const oldSuc = this.normalizeUpper(scope.oldSuc);
+    const newSuc = this.normalizeUpper(scope.newSuc);
+    const scopeChanged = oldSuc !== newSuc || scope.oldDepto !== scope.newDepto;
+
+    if (!scopeChanged || !newSuc) return;
+
+    try {
+      const existsRows = await this.dataSource.query(
+        `
+        SELECT CASE WHEN OBJECT_ID('dbo.COMANDOS_ADMS', 'U') IS NULL THEN 0 ELSE 1 END AS EXISTS_FLAG
+        `,
+      );
+      const exists =
+        Number(existsRows?.[0]?.EXISTS_FLAG ?? existsRows?.[0]?.exists_flag ?? 0) ===
+        1;
+      if (!exists) return;
+
+      const deviceRows = await this.dataSource.query(
+        `
+        SELECT DISTINCT
+          UPPER(LTRIM(RTRIM(ISNULL(tl.DEVICE_ID, '')))) AS DEVICE_ID
+        FROM dbo.ATT_TIME_LOG tl
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(tl.SUC, '')))) = @0
+          AND NULLIF(LTRIM(RTRIM(ISNULL(tl.DEVICE_ID, ''))), '') IS NOT NULL
+        `,
+        [newSuc],
+      );
+
+      for (const row of (deviceRows as Record<string, unknown>[]) ?? []) {
+        const deviceId = this.normalizeUpper(
+          String(row.DEVICE_ID ?? row.device_id ?? ''),
+        );
+        if (!deviceId) continue;
+
+        await this.dataSource.query(
+          `
+          INSERT INTO dbo.COMANDOS_ADMS (
+            dispositivo_id,
+            comando,
+            estado,
+            fecha_creacion
+          )
+          VALUES (
+            @0,
+            @1,
+            'PENDIENTE',
+            GETDATE()
+          );
+          `,
+          [
+            deviceId,
+            `SYNC_BIOMETRIA|USER=${userId}|SUC=${newSuc}|DEPTO=${scope.newDepto ?? 'NULL'}|REASON=${scope.reason}`,
+          ],
+        );
+      }
+    } catch (error) {
+      console.error('WARN enqueueSyncCommandsForUser:', error);
+    }
+  }
+
+  private normalizeUpper(value: string | null | undefined) {
+    const text = String(value ?? '')
+      .trim()
+      .toUpperCase();
+    return text.length ? text : null;
   }
 }

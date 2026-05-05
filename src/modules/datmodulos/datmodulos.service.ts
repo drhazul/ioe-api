@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, QueryFailedError, Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { ModFrontEntity } from '../me/entities/mod-front.entity';
 import { CreateDatmoduloDto } from './dto/create-datmodulo.dto';
 import { UpdateDatmoduloDto } from './dto/update-datmodulo.dto';
@@ -67,16 +67,12 @@ export class DatmodulosService {
 
   async remove(codigo: string) {
     const row = await this.findOne(codigo);
-    try {
-      await this.repo.remove(row);
-    } catch (err) {
-      if (err instanceof QueryFailedError) {
-        throw new ConflictException(
-          `No se puede eliminar el módulo ${codigo} porque está referenciado por otros registros.`,
-        );
-      }
-      throw err;
+    if (!row.ACTIVO) {
+      return { deleted: false, logical: true, alreadyInactive: true, CODIGO: codigo };
     }
-    return { deleted: true, CODIGO: codigo };
+    row.ACTIVO = false;
+    row.FCNR = new Date();
+    await this.repo.save(row);
+    return { deleted: false, logical: true, inactivated: true, CODIGO: codigo };
   }
 }

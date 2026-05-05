@@ -19,16 +19,16 @@ import { FormasPagoCambiosService } from './formas-pago-cambios.service';
 @ApiTags('formas-pago')
 @ApiBearerAuth('jwt-auth')
 @UseGuards(JwtAuthGuard)
-@Controller()
+@Controller('formas-pago')
 export class FormasPagoCambiosController {
   constructor(private readonly service: FormasPagoCambiosService) {}
 
-  @Get('catalogos/formas-pago')
+  @Get('catalogos')
   listCatalog() {
     return this.service.listCatalog();
   }
 
-  @Get('formas-pago/cambios/today')
+  @Get('cambios/today')
   listToday(
     @CurrentUser() user: JwtPayload,
     @Query() query: ListFormaPagoCambioTodayQueryDto,
@@ -36,7 +36,7 @@ export class FormasPagoCambiosController {
     return this.service.listToday(user, query);
   }
 
-  @Put('formas-pago/cambios/:idf')
+  @Put('cambios/:idf')
   updateForma(
     @Param('idf') idf: string,
     @Body() dto: UpdateFormaPagoCambioDto,

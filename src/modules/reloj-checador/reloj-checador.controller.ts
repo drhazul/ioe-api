@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -17,6 +19,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { CreateIncidenciaDto } from './dto/create-incidencia.dto';
 import { CreateOverrideDto } from './dto/create-override.dto';
+import { CreateAuditoriaDto } from './dto/create-auditoria.dto';
 import { CreateTimelogDto } from './dto/create-timelog.dto';
 import { GetPolicyDto } from './dto/get-policy.dto';
 import { ListDocumentosDto } from './dto/list-documentos.dto';
@@ -40,10 +43,11 @@ export class RelojChecadorController {
   @Get('context')
   getContext(
     @CurrentUser() user: JwtPayload,
-    @Query('suc') suc: string | undefined,
+    @Query() query: GetPolicyDto, // Cambiado para recibir el objeto DTO completo[cite: 2]
     @Req() req: any,
   ) {
-    return this.service.getContext(user, suc, this.requestMeta(req));
+    // Se extrae query.suc para enviarlo al servicio blindado
+    return this.service.getContext(user, query.suc, this.requestMeta(req));
   }
 
   @Post('timelog')
@@ -52,7 +56,27 @@ export class RelojChecadorController {
     @Body() dto: CreateTimelogDto,
     @Req() req: any,
   ) {
-    return this.service.createTimelog(user, dto, this.requestMeta(req, dto));
+    const normalized = this.normalizeCreateTimelogBody(
+      dto as unknown as Record<string, unknown>,
+    );
+    return this.service.createTimelog(
+      user,
+      normalized as unknown as CreateTimelogDto,
+      this.requestMeta(req, normalized),
+    );
+  }
+
+  @Post('auditoria')
+  createAuditoriaCliente(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateAuditoriaDto,
+    @Req() req: any,
+  ) {
+    return this.service.createClientAuditLog(
+      user,
+      dto,
+      this.requestMeta(req, dto),
+    );
   }
 
   @Get('timelogs')
@@ -62,6 +86,19 @@ export class RelojChecadorController {
     @Req() req: any,
   ) {
     return this.service.listTimelogs(user, query, this.requestMeta(req));
+  }
+
+  @Get('historial/:id_usuario')
+  getMarcajesHistorialByUsuario(
+    @CurrentUser() user: JwtPayload,
+    @Param('id_usuario') idUsuario: string,
+    @Req() req: any,
+  ) {
+    return this.service.getMarcajesHistorialByUsuario(
+      user,
+      idUsuario,
+      this.requestMeta(req),
+    );
   }
 
   @Put('timelog/:id')
@@ -77,6 +114,30 @@ export class RelojChecadorController {
       dto,
       this.requestMeta(req, dto),
     );
+  }
+
+  @Patch('timelog/:id')
+  patchTimelog(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateTimelogDto,
+    @Req() req: any,
+  ) {
+    return this.service.updateTimelog(
+      user,
+      id,
+      dto,
+      this.requestMeta(req, dto),
+    );
+  }
+
+  @Delete('timelog/:id')
+  deleteTimelog(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    return this.service.deleteTimelog(user, id, this.requestMeta(req));
   }
 
   @Post('incidencias')
@@ -143,7 +204,7 @@ export class RelojChecadorController {
       this.requestMeta(req),
     );
     const fileName = encodeURIComponent(
-      file.fileName || `documento-${file.idDoc}`,
+      file.fileName || `documento-${id}`,
     );
 
     res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
@@ -212,7 +273,31 @@ export class RelojChecadorController {
       url: String(req?.originalUrl ?? req?.url ?? ''),
       method: String(req?.method ?? '').toUpperCase(),
       ip: ip ? String(ip) : null,
+      userAgent: req?.headers?.['user-agent'] || 'unknown',
+      signature: String(req?.headers?.['x-signature'] ?? '').trim() || null,
+      deviceIdHeader: String(req?.headers?.['x-device-id'] ?? '').trim() || null,
+      clientTimestamp:
+        String(req?.headers?.['x-client-timestamp'] ?? '').trim() || null,
       body,
+    };
+  }
+
+  private normalizeCreateTimelogBody(input: Record<string, unknown>) {
+    return {
+      ...input,
+      id_usuario: input['id_usuario'] ?? input['ID_USUARIO'],
+      pin: input['pin'] ?? input['PIN'],
+      suc: input['suc'] ?? input['SUC'],
+      tipo: input['tipo'] ?? input['TIPO'],
+      verify_mode_label:
+        input['verify_mode_label'] ??
+        input['VERIFY_MODE_LABEL'] ??
+        input['auth_method'] ??
+        input['AUTH_METHOD'],
+      device_id: input['device_id'] ?? input['DEVICE_ID'],
+      client_id_unico: input['client_id_unico'] ?? input['CLIENT_ID_UNICO'],
+      fecha_hora_local: input['fecha_hora_local'] ?? input['FECHA_HORA_LOCAL'],
+      notes: input['notes'] ?? input['NOTES'],
     };
   }
 }

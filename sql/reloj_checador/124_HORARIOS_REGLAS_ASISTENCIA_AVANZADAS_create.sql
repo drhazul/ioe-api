@@ -1,0 +1,308 @@
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+/*
+  124_HORARIOS_REGLAS_AVANZADAS_create.sql
+  - Amplia HORARIOS con reglas avanzadas de asistencia
+  - Soporte multi-horario por colaborador
+  - Soporte de workday_id para jornadas con cruce de día
+  - Tabla de estatus definitivos nocturnos
+*/
+
+IF OBJECT_ID('dbo.ATT_RULES_HORARIOS', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.ATT_RULES_HORARIOS (
+    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_HORARIOS PRIMARY KEY,
+    nombre VARCHAR(120) NOT NULL,
+    hora_entrada TIME(0) NOT NULL,
+    hora_salida TIME(0) NOT NULL,
+    tolerancia_minutos INT NOT NULL CONSTRAINT DF_HORARIOS_tolerancia DEFAULT (0),
+    dia_festivo BIT NOT NULL CONSTRAINT DF_HORARIOS_dia_festivo DEFAULT (0)
+  );
+END;
+GO
+
+IF COL_LENGTH('dbo.ATT_RULES_HORARIOS', 'inicio_entrada') IS NULL
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS ADD inicio_entrada TIME(0) NULL;
+END;
+GO
+
+IF COL_LENGTH('dbo.ATT_RULES_HORARIOS', 'fin_entrada') IS NULL
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS ADD fin_entrada TIME(0) NULL;
+END;
+GO
+
+IF COL_LENGTH('dbo.ATT_RULES_HORARIOS', 'minutos_almuerzo') IS NULL
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS
+    ADD minutos_almuerzo INT NOT NULL
+      CONSTRAINT DF_HORARIOS_minutos_almuerzo DEFAULT (0);
+END;
+GO
+
+IF COL_LENGTH('dbo.ATT_RULES_HORARIOS', 'redondeo_entrada') IS NULL
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS
+    ADD redondeo_entrada INT NOT NULL
+      CONSTRAINT DF_HORARIOS_redondeo_entrada DEFAULT (0);
+END;
+GO
+
+IF COL_LENGTH('dbo.ATT_RULES_HORARIOS', 'es_flexible') IS NULL
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS
+    ADD es_flexible BIT NOT NULL
+      CONSTRAINT DF_HORARIOS_es_flexible DEFAULT (0);
+END;
+GO
+
+IF COL_LENGTH('dbo.ATT_RULES_HORARIOS', 'ot_minimo_minutos') IS NULL
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS
+    ADD ot_minimo_minutos INT NOT NULL
+      CONSTRAINT DF_HORARIOS_ot_minimo_minutos DEFAULT (0);
+END;
+GO
+
+IF COL_LENGTH('dbo.ATT_RULES_HORARIOS', 'ot_requiere_autorizacion') IS NULL
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS
+    ADD ot_requiere_autorizacion BIT NOT NULL
+      CONSTRAINT DF_HORARIOS_ot_requiere_autorizacion DEFAULT (0);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.check_constraints
+  WHERE name = 'CK_HORARIOS_minutos_almuerzo'
+    AND parent_object_id = OBJECT_ID('dbo.ATT_RULES_HORARIOS')
+)
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS
+    ADD CONSTRAINT CK_HORARIOS_minutos_almuerzo
+    CHECK (minutos_almuerzo >= 0 AND minutos_almuerzo <= 300);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.check_constraints
+  WHERE name = 'CK_HORARIOS_redondeo_entrada'
+    AND parent_object_id = OBJECT_ID('dbo.ATT_RULES_HORARIOS')
+)
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS
+    ADD CONSTRAINT CK_HORARIOS_redondeo_entrada
+    CHECK (redondeo_entrada >= 0 AND redondeo_entrada <= 60);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.check_constraints
+  WHERE name = 'CK_HORARIOS_ot_minimo_minutos'
+    AND parent_object_id = OBJECT_ID('dbo.ATT_RULES_HORARIOS')
+)
+BEGIN
+  ALTER TABLE dbo.ATT_RULES_HORARIOS
+    ADD CONSTRAINT CK_HORARIOS_ot_minimo_minutos
+    CHECK (ot_minimo_minutos >= 0 AND ot_minimo_minutos <= 720);
+END;
+GO
+
+UPDATE dbo.ATT_RULES_HORARIOS
+SET
+  inicio_entrada = ISNULL(inicio_entrada, hora_entrada),
+  fin_entrada = ISNULL(fin_entrada, hora_entrada)
+WHERE inicio_entrada IS NULL
+   OR fin_entrada IS NULL;
+GO
+
+IF OBJECT_ID('dbo.COLABORADORES_HORARIOS', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.COLABORADORES_HORARIOS (
+    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_COLABORADORES_HORARIOS PRIMARY KEY,
+    colaborador_id INT NOT NULL,
+    horario_id INT NOT NULL,
+    prioridad INT NOT NULL CONSTRAINT DF_COLABORADORES_HORARIOS_prioridad DEFAULT (1),
+    activo BIT NOT NULL CONSTRAINT DF_COLABORADORES_HORARIOS_activo DEFAULT (1),
+    fecha_creacion DATETIME NOT NULL CONSTRAINT DF_COLABORADORES_HORARIOS_fecha DEFAULT (GETDATE())
+  );
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'UQ_COLABORADORES_HORARIOS_colab_horario'
+    AND object_id = OBJECT_ID('dbo.COLABORADORES_HORARIOS')
+)
+BEGIN
+  CREATE UNIQUE INDEX UQ_COLABORADORES_HORARIOS_colab_horario
+    ON dbo.COLABORADORES_HORARIOS (colaborador_id, horario_id);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.foreign_keys
+  WHERE name = 'FK_COLABORADORES_HORARIOS_COLAB'
+    AND parent_object_id = OBJECT_ID('dbo.COLABORADORES_HORARIOS')
+)
+BEGIN
+  ALTER TABLE dbo.COLABORADORES_HORARIOS
+    ADD CONSTRAINT FK_COLABORADORES_HORARIOS_COLAB
+    FOREIGN KEY (colaborador_id)
+    REFERENCES dbo.COLABORADORES (id)
+    ON DELETE CASCADE;
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.foreign_keys
+  WHERE name = 'FK_COLABORADORES_HORARIOS_HORARIO'
+    AND parent_object_id = OBJECT_ID('dbo.COLABORADORES_HORARIOS')
+)
+BEGIN
+  ALTER TABLE dbo.COLABORADORES_HORARIOS
+    ADD CONSTRAINT FK_COLABORADORES_HORARIOS_HORARIO
+    FOREIGN KEY (horario_id)
+    REFERENCES dbo.ATT_RULES_HORARIOS (id)
+    ON DELETE CASCADE;
+END;
+GO
+
+IF OBJECT_ID('dbo.ATT_TIME_LOG', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.ATT_TIME_LOG', 'WORKDAY_ID') IS NULL
+BEGIN
+  ALTER TABLE dbo.ATT_TIME_LOG
+    ADD WORKDAY_ID AS CONVERT(
+      DATE,
+      DATEADD(
+        DAY,
+        CASE WHEN CAST(FCNR AS TIME) < '04:00:00' THEN -1 ELSE 0 END,
+        FCNR
+      )
+    ) PERSISTED;
+END;
+GO
+
+IF OBJECT_ID('dbo.ATT_TIME_LOG', 'U') IS NOT NULL
+   AND NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'IX_ATT_TIME_LOG_user_suc_fcnr'
+    AND object_id = OBJECT_ID('dbo.ATT_TIME_LOG')
+)
+BEGIN
+  CREATE INDEX IX_ATT_TIME_LOG_user_suc_fcnr
+    ON dbo.ATT_TIME_LOG (IDUSUARIO, SUC, FCNR DESC);
+END;
+GO
+
+IF OBJECT_ID('dbo.ATT_TIME_LOG', 'U') IS NOT NULL
+   AND NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'IX_ATT_TIME_LOG_workday'
+    AND object_id = OBJECT_ID('dbo.ATT_TIME_LOG')
+)
+BEGIN
+  CREATE INDEX IX_ATT_TIME_LOG_workday
+    ON dbo.ATT_TIME_LOG (WORKDAY_ID, IDUSUARIO, SUC, FCNR DESC);
+END;
+GO
+
+IF OBJECT_ID('dbo.ATT_ASISTENCIA_ESTATUS', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.ATT_ASISTENCIA_ESTATUS (
+    id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_ATT_ASISTENCIA_ESTATUS PRIMARY KEY,
+    colaborador_id INT NOT NULL,
+    sucursal_id INT NULL,
+    workday_id DATE NOT NULL,
+    fecha DATE NOT NULL,
+    entrada DATETIME2(0) NULL,
+    salida DATETIME2(0) NULL,
+    minutos_trabajados INT NOT NULL CONSTRAINT DF_ATT_ASISTENCIA_ESTATUS_min_trab DEFAULT (0),
+    minutos_extra INT NOT NULL CONSTRAINT DF_ATT_ASISTENCIA_ESTATUS_min_extra DEFAULT (0),
+    retardo_minutos INT NOT NULL CONSTRAINT DF_ATT_ASISTENCIA_ESTATUS_retardo DEFAULT (0),
+    salida_temprana_minutos INT NOT NULL CONSTRAINT DF_ATT_ASISTENCIA_ESTATUS_salida_temp DEFAULT (0),
+    estatus VARCHAR(20) NOT NULL,
+    flexible_cumplido BIT NOT NULL CONSTRAINT DF_ATT_ASISTENCIA_ESTATUS_flex DEFAULT (0),
+    creado_en DATETIME NOT NULL CONSTRAINT DF_ATT_ASISTENCIA_ESTATUS_creado DEFAULT (GETDATE()),
+    actualizado_en DATETIME NOT NULL CONSTRAINT DF_ATT_ASISTENCIA_ESTATUS_actualizado DEFAULT (GETDATE())
+  );
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'UQ_ATT_ASISTENCIA_ESTATUS_colab_workday'
+    AND object_id = OBJECT_ID('dbo.ATT_ASISTENCIA_ESTATUS')
+)
+BEGIN
+  CREATE UNIQUE INDEX UQ_ATT_ASISTENCIA_ESTATUS_colab_workday
+    ON dbo.ATT_ASISTENCIA_ESTATUS (colaborador_id, workday_id);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.foreign_keys
+  WHERE name = 'FK_ATT_ASISTENCIA_ESTATUS_COLAB'
+    AND parent_object_id = OBJECT_ID('dbo.ATT_ASISTENCIA_ESTATUS')
+)
+BEGIN
+  ALTER TABLE dbo.ATT_ASISTENCIA_ESTATUS
+    ADD CONSTRAINT FK_ATT_ASISTENCIA_ESTATUS_COLAB
+    FOREIGN KEY (colaborador_id)
+    REFERENCES dbo.COLABORADORES (id)
+    ON DELETE CASCADE;
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.foreign_keys
+  WHERE name = 'FK_ATT_ASISTENCIA_ESTATUS_SUC'
+    AND parent_object_id = OBJECT_ID('dbo.ATT_ASISTENCIA_ESTATUS')
+)
+BEGIN
+  ALTER TABLE dbo.ATT_ASISTENCIA_ESTATUS
+    ADD CONSTRAINT FK_ATT_ASISTENCIA_ESTATUS_SUC
+    FOREIGN KEY (sucursal_id)
+    REFERENCES dbo.SUCURSALES (id);
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.check_constraints
+  WHERE name = 'CK_ATT_ASISTENCIA_ESTATUS_estatus'
+    AND parent_object_id = OBJECT_ID('dbo.ATT_ASISTENCIA_ESTATUS')
+)
+BEGIN
+  ALTER TABLE dbo.ATT_ASISTENCIA_ESTATUS
+    ADD CONSTRAINT CK_ATT_ASISTENCIA_ESTATUS_estatus
+    CHECK (estatus IN ('ASISTIO', 'FALTA', 'RETARDO', 'SALIDA_TEMPRANA'));
+END;
+GO
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'IX_ATT_ASISTENCIA_ESTATUS_fecha'
+    AND object_id = OBJECT_ID('dbo.ATT_ASISTENCIA_ESTATUS')
+)
+BEGIN
+  CREATE INDEX IX_ATT_ASISTENCIA_ESTATUS_fecha
+    ON dbo.ATT_ASISTENCIA_ESTATUS (fecha DESC, sucursal_id, estatus);
+END;
+GO

@@ -16,12 +16,13 @@ export class RolesService {
     private readonly repo: Repository<RolEntity>,
   ) {}
 
-  findAll(q?: { codigo?: string; nombre?: string; activo?: string }) {
+  findAll(q?: { codigo?: string; nombre?: string; activo?: string; iddepo?: string }) {
     const where: any = {};
     if (q?.codigo) where.CODIGO = Like(`%${q.codigo}%`);
     if (q?.nombre) where.NOMBRE = Like(`%${q.nombre}%`);
     if (q?.activo === 'true') where.ACTIVO = true;
     if (q?.activo === 'false') where.ACTIVO = false;
+    if (q?.iddepo) where.IDDEPTO = Number(q.iddepo);
 
     return this.repo.find({
       where: Object.keys(where).length ? where : undefined,

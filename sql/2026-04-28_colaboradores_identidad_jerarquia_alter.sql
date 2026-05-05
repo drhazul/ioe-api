@@ -1,0 +1,52 @@
+/*
+  Proyecto IOE
+  Refactor Colaboradores: Identidad y Jerarquía
+  Fecha: 2026-04-28
+*/
+
+SET NOCOUNT ON;
+
+IF COL_LENGTH('dbo.COLABORADORES', 'id_empleado') IS NULL
+BEGIN
+  ALTER TABLE dbo.COLABORADORES
+    ADD id_empleado VARCHAR(40) NULL;
+END;
+
+IF COL_LENGTH('dbo.COLABORADORES', 'departamento') IS NULL
+BEGIN
+  ALTER TABLE dbo.COLABORADORES
+    ADD departamento VARCHAR(80) NULL;
+END;
+
+IF COL_LENGTH('dbo.COLABORADORES', 'cargo') IS NULL
+BEGIN
+  ALTER TABLE dbo.COLABORADORES
+    ADD cargo VARCHAR(120) NULL;
+END;
+
+IF NOT EXISTS (
+  SELECT 1
+  FROM sys.indexes
+  WHERE name = 'UX_COLABORADORES_ID_EMPLEADO'
+    AND object_id = OBJECT_ID('dbo.COLABORADORES')
+)
+BEGIN
+  CREATE UNIQUE INDEX UX_COLABORADORES_ID_EMPLEADO
+    ON dbo.COLABORADORES(id_empleado)
+    WHERE id_empleado IS NOT NULL;
+END;
+
+;WITH cte AS (
+  SELECT
+    id,
+    id_empleado,
+    ROW_NUMBER() OVER (ORDER BY id) AS rn
+  FROM dbo.COLABORADORES
+  WHERE id_empleado IS NULL OR LTRIM(RTRIM(id_empleado)) = ''
+)
+UPDATE c
+SET id_empleado = CONCAT('MAT-', RIGHT(CONCAT('000000', CAST(c.id AS VARCHAR(12))), 6))
+FROM dbo.COLABORADORES c
+INNER JOIN cte x
+  ON x.id = c.id;
+

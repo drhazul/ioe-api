@@ -189,7 +189,6 @@ export class MeService {
       relations: {
         ROL: true,
         DEPARTAMENTO: true,
-        PUESTO: true,
         SUCURSAL: true,
       },
     });
@@ -206,10 +205,6 @@ export class MeService {
       IDDEPTO: user.IDDEPTO,
       DEPARTAMENTO: user.DEPARTAMENTO
         ? { id: user.DEPARTAMENTO.IDDEPTO, nombre: user.DEPARTAMENTO.NOMBRE }
-        : null,
-      IDPUESTO: user.IDPUESTO,
-      PUESTO: user.PUESTO
-        ? { id: user.PUESTO.IDPUESTO, nombre: user.PUESTO.NOMBRE }
         : null,
       SUC: user.SUC,
       FORZAR_CAMBIO_PASS: !!user.FORZAR_CAMBIO_PASS,
