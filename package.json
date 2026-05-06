@@ -10,6 +10,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
+    "start:dev:safe": "powershell -ExecutionPolicy Bypass -File ./scripts/start-dev-safe.ps1",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main.js",
     "qa:sucursales": "node scripts/qa-sucursales.js",

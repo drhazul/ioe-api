@@ -15,7 +15,8 @@ Enlaces relacionados:
 - `/auth/login`, `/auth/refresh`, `/auth/change-password`, `/auth/logout-all`
 - `/me/profile`, `/me/front-menu`, `/me/datmodulos`, `/me/backend-perms`
 - Maestros:
-- `/roles`, `/deptos`, `/puestos`, `/users`, `/dat-suc`, `/datmodulos`
+- `/roles`, `/deptos`, `/puestos` (compat legacy sobre `ROL`), `/users`, `/dat-suc`, `/datmodulos`
+- `/masterdata/configuracion-maestra` (GET/PUT de configuración maestra consumida por frontend)
 - Datos Maestros / Módulos Front (2026-05-04): API mantiene CRUD `MOD_FRONT` en `/datmodulos`; el acceso de UI se consolidó en `/#/masterdata/access/mod-front` sin cambios de contrato backend.
 - Datos Maestros / Enrolamiento Front por usuario (2026-05-04): se agrega `USR_GRUPMOD_FRONT` y endpoints `/access/users/:id/enrolamientos-front`; Home aplica prioridad usuario y fallback a `ROL_GRUPMOD_FRONT`.
 - Datos Maestros / Enrolamiento Front por usuario (2026-05-04): `GET /access/users` ahora expone `SUC/SUC_DESC` y `IDDEPTO/DEPTO_NOMBRE`, con filtros opcionales `suc` e `idDepto`.

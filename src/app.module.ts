@@ -68,6 +68,7 @@ import { HorariosModule } from './modules/horarios/horarios.module';
 import { AsistenciaModule } from './modules/asistencia/asistencia.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 import { IncidenciasVacacionesModule } from './modules/incidencias-vacaciones/incidencias-vacaciones.module';
+import { MasterdataConfigModule } from './modules/masterdata-config/masterdata-config.module';
 
 @Module({
   imports: [
@@ -122,13 +123,22 @@ import { IncidenciasVacacionesModule } from './modules/incidencias-vacaciones/in
     UsrModSucModule,
     AltaMasivaModule,
     CatCtasModule,
+    CtrlCtasModule,
     OrdenesTrabajoModule,
+    PvDevolucionesModule,
+    PagosServiciosModule,
+    RetirosModule,
+    FormasPagoCambiosModule,
+    CajonEstadoModule,
+    CajaGeneralModule,
+    FacturacionModule,
     SucursalesModule,
     ColaboradoresModule,
     HorariosModule,
     AsistenciaModule,
     NotificacionesModule,
     IncidenciasVacacionesModule,
+    MasterdataConfigModule,
   ],
   providers: [
     {

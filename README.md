@@ -30,6 +30,9 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Datos Maestros / Enrolamiento Front por usuario (2026-05-04): backend incorpora tabla `USR_GRUPMOD_FRONT` y gestión `/access/users/:id/enrolamientos-front`; Home prioriza asignaciones activas por usuario y usa rol (`ROL_GRUPMOD_FRONT`) solo cuando usuario no tiene filas activas.
 - Datos Maestros / Enrolamiento Front por usuario (2026-05-04): `GET /access/users` agrega datos de `SUC`/`DEPARTAMENTO` y filtros opcionales `suc` e `idDepto` para filtrar el dropdown de usuarios en UI.
 - Datos Maestros / Acceso por sucursal (2026-05-04): `GET /usr-mod-suc` soporta filtros opcionales `sucUsuario` y `depto` para filtrar por sucursal del usuario y por departamento coincidente entre usuario (`DEPARTAMENTO`) y módulo front (`MOD_FRONT.DEPTO`).
+- Datos Maestros / Compatibilidad puestos con ROL (2026-05-05): endpoint legacy `/puestos` opera sobre `ROL` (`IDROL` como `IDPUESTO`) para mantener compatibilidad cuando la tabla `PUESTO` fue retirada; `USUARIO` continúa sin columna `IDPUESTO`.
+- Registro de módulos PV (2026-05-05): `AppModule` vuelve a incluir en `imports` los módulos `PvDevoluciones`, `PagosServicios`, `Retiros`, `FormasPagoCambios`, `CajonEstado`, `CajaGeneral`, `Facturacion` y `CtrlCtas`, corrigiendo `404` de rutas no montadas.
+- Datos Maestros / Configuración maestra (2026-05-05): se agrega endpoint `GET/PUT /masterdata/configuracion-maestra` para configuración corporativa y catálogos de `departamentos/cargos`.
 - Cotizaciones / Cierre (2026-04-09): al cerrar cotización (`sp_pv_cotizacion_cerrar`) ahora también sincroniza `PV_CTR_ORDS.RQFAC` con `REQF/RQFAC` del folio transmitido; se agrega script correctivo para históricos transmitidos.
 - Notas de documentación viva: este README se modifica solo por cambios de arquitectura, módulos o rutas principales; los ajustes funcionales se registran en los README/AGENTS del módulo correspondiente.
 
@@ -56,6 +59,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 
 ## Ejecucion
 - `npm run start:dev`
+- `npm run start:dev:safe` (libera `3001/8081` si los ocupa otra instancia de `ioe-api` y luego levanta `nest --watch`)
 - `npm test`
 
 ## Pruebas obligatorias

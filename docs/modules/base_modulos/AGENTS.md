@@ -12,19 +12,20 @@ Enlaces relacionados:
 ### Seguridad y accesos
 
 - `auth`: `USUARIO_TOKEN` (`IDTOKEN`, `IDUSUARIO`, `JTI`, `REFRESH_TOKEN_HASH`, `ISSUED_AT`, `EXPIRES_AT`, `REVOKED_AT`), `USUARIO`.
-- `users`: `USUARIO` (`IDUSUARIO`, `USERNAME`, `NOMBRE`, `APELLIDOS`, `MAIL`, `ESTATUS`, `NIVEL`, `IDROL`, `IDDEPTO`, `IDPUESTO`, `SUC`, `FORZAR_CAMBIO_PASS`).
+- `users`: `USUARIO` (`IDUSUARIO`, `USERNAME`, `NOMBRE`, `APELLIDOS`, `MAIL`, `ESTATUS`, `NIVEL`, `IDROL`, `IDDEPTO`, `SUC`, `FORZAR_CAMBIO_PASS`).
 - validacion `users`: `USERNAME` requiere minimo 3 caracteres.
 - alta usuarios (2026-03): backend acepta `PASSWORD` opcional; cuando no llega, genera contraseña temporal aleatoria de 6 dígitos y responde `PASSWORD_TEMPORAL`.
 - primer acceso (2026-03): al crear usuario se marca `FORZAR_CAMBIO_PASS=1`; login JWT incluye claim `mustChangePassword`; `POST /auth/change-password` actualiza contraseña y limpia la marca.
 - `roles`: `ROL` (`IDROL`, `CODIGO`, `NOMBRE`, `DESCRIPCION`, `ACTIVO`).
 - `deptos`: `DEPARTAMENTO` (`IDDEPTO`, `NOMBRE`, `ACTIVO`).
-- `puestos`: `PUESTO` (`IDPUESTO`, `IDDEPTO`, `NOMBRE`, `ACTIVO`).
+- `puestos` (compat legacy): `ROL` (`IDROL` expuesto como `IDPUESTO`, `IDDEPTO`, `NOMBRE`, `ACTIVO`).
 - `dat-suc`: `DAT_SUC` (`SUC`, `DESC`, `ENCAR`, `ZONA`, `RFC`, `DIRECCION`, `CONTACTO`, `IVA_INTEGRADO`).
 - `usr-mod-suc`: `USR_MOD_SUC` (`MODULO`, `USUARIO`, `SUC`, `ACTIVO`, `FCNR`).
 - `access` y `admin`:
 - `MODULO`, `GRUP_MODULO`, `GRUPMOD_MODULO`, `ROL_GRUP_MODULO_PERM`.
 - `MOD_FRONT`, `GRUPMOD_FRONT`, `GRUPMOD_FRONT_MOD`, `ROL_GRUPMOD_FRONT`.
 - `datmodulos`: opera sobre `MOD_FRONT`.
+- `masterdata-config`: endpoint `GET/PUT /masterdata/configuracion-maestra` para configuración maestra (empresa, flags y catálogos base de departamentos/cargos).
 - Datos Maestros / Módulos Front (2026-05-04): se mantiene `/datmodulos` como CRUD único de `MOD_FRONT`; ajuste de consumo en frontend hacia `/#/masterdata/access/mod-front` no requiere cambios de endpoints ni SPs en API.
 - Datos Maestros / Enrolamiento Front por usuario (2026-05-04): nueva tabla `USR_GRUPMOD_FRONT` con asignación `IDUSUARIO -> IDGRUPMOD_FRONT`; resolución de módulos front prioriza usuario y cae a rol cuando no hay filas activas.
 - Datos Maestros / Enrolamiento Front por usuario (2026-05-04): endpoint `GET /access/users` incluye `SUC/SUC_DESC` y `IDDEPTO/DEPTO_NOMBRE`, además de filtros `suc` e `idDepto`.

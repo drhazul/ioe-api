@@ -38,6 +38,9 @@
 - Datos Maestros / Enrolamiento Front por usuario (2026-05-04): se agrega `USR_GRUPMOD_FRONT` y endpoints `/access/users/:id/enrolamientos-front`; política de menú Home: primero asignaciones activas por usuario (`USR_GRUPMOD_FRONT`), si no existen se usa rol (`ROL_GRUPMOD_FRONT`).
 - Datos Maestros / Enrolamiento Front por usuario (2026-05-04): `GET /access/users` devuelve `SUC/SUC_DESC` y `IDDEPTO/DEPTO_NOMBRE`, con filtros opcionales `suc` e `idDepto` para selector de usuarios en frontend.
 - Datos Maestros / Acceso por sucursal (2026-05-04): `GET /usr-mod-suc` agrega filtros opcionales `sucUsuario` (contra `USUARIO.SUC`) y `depto` aplicando coincidencia simultánea entre `USUARIO->DEPARTAMENTO` y `MOD_FRONT.DEPTO`, para soportar filtros dropdown del CRUD/popup en frontend.
+- Datos Maestros / Compatibilidad puestos con ROL (2026-05-05): `/puestos` deja de depender de la tabla `PUESTO` y usa `ROL` como fuente compatible (`IDROL -> IDPUESTO`) para operación legacy en bases donde `PUESTO` ya no existe; `/users` mantiene contrato actual sin `IDPUESTO`.
+- AppModule / registro de módulos PV (2026-05-05): se restituye el registro en `imports` para `PvDevoluciones`, `PagosServicios`, `Retiros`, `FormasPagoCambios`, `CajonEstado`, `CajaGeneral`, `Facturacion` y `CtrlCtas` para evitar `404` por módulos no montados.
+- Datos Maestros / Configuración maestra (2026-05-05): se habilita `GET/PUT /masterdata/configuracion-maestra` para alinear contrato con frontend en el submódulo de datos maestros.
 - Seguridad / Excel uploads confiables (2026-05-04): `alta-masiva`, `datart` y `conteos` validan fuente de archivo antes de parsear (`extensión`, `MIME`, `firma binaria`, tamaño máximo y límites de hojas/renglones/columnas vía `src/common/security/trusted-excel-upload.ts`); parseo tabular crítico migra a `header:1` para evitar mapear encabezados no confiables a objetos JS.
 - Cotizaciones / Cierre (2026-04-09): `sp_pv_cotizacion_cerrar` sincroniza `PV_CTR_ORDS.RQFAC` al mover ORDs a `ESTATUS=2`; script `sql/2026-04-09_pv_cotizacion_cerrar_sync_rqfac_ords.sql` corrige transmitidos históricos.
 - Colaboradores / Alta (2026-04-29): `POST /colaboradores` adopta contrato con `horario_id` (sin `turno_id`) y ejecuta `upsert` por `id_empleado`; responde `201` en creación y `200` en actualización, con mensaje claro en fallos SQL Server.
@@ -64,6 +67,7 @@
 ## Pruebas
 - Ejecutar `npm test` antes de entregar.
 - Cuando el cambio involucre al frontend `ioe_app`, coordinar y correr también `flutter analyze` y `flutter test`.
+- Arranque dev recomendado en Windows: `npm run start:dev:safe` para liberar `3001/8081` cuando otra instancia previa de `ioe-api` quedó activa y evitar `EADDRINUSE`.
 
 ## Refactors
 - Incrementales y de bajo riesgo.
