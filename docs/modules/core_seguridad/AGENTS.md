@@ -19,6 +19,7 @@ Enlaces relacionados:
 - Admin (roleId `1`) mantiene bypass.
 - Compat legacy: sin filas en `USR_MOD_SUC`, fallback a `user.suc`.
 - Validar en backend en lectura y escritura; frontend solo refleja selección permitida.
+- Acceso por sucursal (2026-05-06): en `GET /usr-mod-suc`, el filtro `depto` coincide por `DEPARTAMENTO de USUARIO OR DEPTO de MOD_FRONT` para permitir búsquedas cruzadas.
 
 ## Regla principal FACTURA / FACTURA_VIEW (obligatoria)
 - `FACTURA` (compat: `FACTURACION`, `PV_FACTURACION`, `FACT_IOE`) habilita gestión; `FACTURA_VIEW` habilita consulta.

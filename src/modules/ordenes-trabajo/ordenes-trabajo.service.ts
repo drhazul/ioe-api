@@ -382,13 +382,54 @@ export class OrdenesTrabajoService {
     const tipo = this.normalizeCambioMermaTipo(query.tipo);
     await this.assertCambioMermaContextPermission(tipo, user);
 
-    const staging = await this.fetchCambioMermaStagingIfAny(iord, tipo);
+    let staging = await this.fetchCambioMermaStagingIfAny(iord, tipo);
     const original = await this.fetchCambioMermaOriginalContext(
       iord,
       user,
       tipo,
       { allowFinalized: true },
     );
+    if (staging) {
+      const actor = this.auditActor(user);
+      const finalIord =
+        this.normalizeText(original.row.REEORD) ??
+        this.normalizeText(original.row.REOORD) ??
+        '';
+      const estsegu = this.toFloat(original.row.ESTSEGU) ?? 0;
+      const isFinalizedFlow = Math.abs(estsegu - 4) <= 0.0001;
+      const finalIordExists = finalIord
+        ? await this.hasOrdHeader(finalIord)
+        : false;
+
+      // Cuando la ORD ya está finalizada, staging debe reflejar la IORD real creada
+      // y nunca regenerar una nueva reserva para evitar "fantasmas" en contexto.
+      if (isFinalizedFlow && finalIordExists) {
+        const stagedIord = this.normalizeText(staging.NVA_IORD) ?? '';
+        if (this.normalizeUpper(stagedIord) !== this.normalizeUpper(finalIord)) {
+          await this.markCambioMermaStagingCreated(
+            iord,
+            tipo,
+            finalIord,
+            this.toFloat(staging.DIFERENCIA_ECONOMICA),
+            actor,
+          );
+          staging = await this.fetchCambioMermaStaging(iord, tipo);
+        }
+      } else {
+        const ensuredIord = await this.resolveCambioMermaReservedIord(
+          this.normalizeText(original.row.SUC) ?? '',
+          staging,
+          {
+            iord,
+            tipo,
+            actor,
+          },
+        );
+        if (ensuredIord !== (this.normalizeText(staging.NVA_IORD) ?? '')) {
+          staging = await this.fetchCambioMermaStaging(iord, tipo);
+        }
+      }
+    }
     return this.buildCambioMermaContextResponse(iord, tipo, original.row, staging);
   }
 
@@ -439,6 +480,11 @@ export class OrdenesTrabajoService {
     const nvaIord = await this.resolveCambioMermaReservedIord(
       this.normalizeText(original.row.SUC) ?? '',
       stagingBefore,
+      {
+        iord,
+        tipo,
+        actor: this.auditActor(user),
+      },
     );
 
     await this.upsertCambioMermaStaging(
@@ -567,7 +613,11 @@ export class OrdenesTrabajoService {
     );
     this.assertCtdCMCompatible(ctdCM, ctdOriginal);
 
-    const nvaIord = await this.resolveCambioMermaReservedIord(suc, staging);
+    const nvaIord = await this.resolveCambioMermaReservedIord(suc, staging, {
+      iord,
+      tipo,
+      actor: this.auditActor(user),
+    });
 
     await this.upsertCambioMermaStaging(
       iord,
@@ -696,6 +746,11 @@ export class OrdenesTrabajoService {
     const nvaIord = await this.resolveCambioMermaReservedIord(
       suc,
       stagingBefore,
+      {
+        iord,
+        tipo,
+        actor: this.auditActor(user),
+      },
     );
 
     await this.upsertCambioMermaStaging(
@@ -2276,6 +2331,8 @@ export class OrdenesTrabajoService {
     return [
       'JEF_TALLER',
       'ANALISTA_ORD',
+      'ANALISTA_INV',
+      'INVJEF',
       'ENC_MAQUILA',
       'ENC_BISEL',
     ].includes(roleCode);
@@ -3694,10 +3751,37 @@ export class OrdenesTrabajoService {
   private async resolveCambioMermaReservedIord(
     sucRaw: string,
     stagingRow: Record<string, unknown> | null,
+    options?: {
+      iord?: string;
+      tipo?: number;
+      actor?: string;
+    },
   ) {
     const reserved = this.normalizeText(stagingRow?.NVA_IORD);
-    if (reserved) return reserved;
-    return this.reserveCambioMermaNvaIord(sucRaw);
+    if (reserved && !(await this.hasOrdHeader(reserved))) {
+      return reserved;
+    }
+    const regenerated = await this.reserveCambioMermaNvaIord(sucRaw);
+    if (
+      options?.iord &&
+      options.tipo != null &&
+      options.actor &&
+      stagingRow != null
+    ) {
+      await this.dataSource.query(
+        `
+        UPDATE dbo.PV_ORD_CAMBIO_MERMA_TMP
+        SET
+          NVA_IORD = @2,
+          USER_MOD = @3,
+          FCN_MOD = GETDATE()
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0)
+          AND TRY_CONVERT(INT, TIPOM) = @1
+        `,
+        [options.iord, options.tipo, regenerated, options.actor],
+      );
+    }
+    return regenerated;
   }
 
   private async ensureCambioMermaReservedIordAvailable(

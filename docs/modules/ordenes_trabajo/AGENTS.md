@@ -70,7 +70,12 @@ Enlaces relacionados:
 - solo `admin`, `ANALISTA_INV` e `INVJEF` pueden ejecutar `cambio-merma/autorizar`.
 - movimientos finales (2026-04-22): MB51 debe usar `DAT_CMOV` (`204/205` para cambio, `456/455/457` para merma) y `CTOT = CTDA * DAT_ART.CTOP`; no volver a usar `CLSM='ORD'` ni `CTOT=ABS(CTDA)`. Todo el caso debe quedar bajo `DOCP = IDFOL` original.
 - control de cuentas (2026-04-22): la diferencia se registra con `CTA=101001001` (`DAT_CAT_CTAS`, relación `AD`), `CMOV/CLSD=801|802` y `NDOC` consecutivo basado en `DAT_CMOV` + `DAT_CTR_DOC`. Para cambio/merma, todos los movimientos MB51 deben usar `DOCP = IDFOL` original. La nueva ORD derivada debe quedar sin colaborador asignado y la UI/PDF deben mostrar la diferencia contable sellada basada en `CTD_C_M`.
-- la cola del panel para `ANALISTA_INV` e `INVJEF` se filtra por `selCtrlOrd=14`, sin alterar el resto de matrices operativas.
+- `ANALISTA_INV` e `INVJEF` atienden revisión de cambio/merma (`selCtrlOrd=14`); la visibilidad efectiva del panel se rige por `DAT_JAO_ORD_FLUJO_VIS`.
+- panel ORDs (2026-05-06): `GET /ordenes-trabajo/asignar/colaboradores` permite también a `ANALISTA_INV` e `INVJEF` consultar catálogo de asignados para filtros sin error de rol.
+- panel ORDs (2026-05-06): script `sql/2026-05-06_ord_flujo_vis_analista_inv_invjef_expand.sql` amplía `DAT_JAO_ORD_FLUJO_VIS` operativo para `ANALISTA_INV/INVJEF` con el mismo set de flujos visibles de `ANALISTA_ORD`.
+- panel ORDs (2026-05-06): script `sql/2026-05-06_ordenes_trabajo_panel_analista_inv_selctrl14_fix.sql` actualiza `dbo.sp_ordenes_trabajo_panel` para contemplar `ANALISTA_INV/INVJEF` y exigir `selCtrlOrd=14` en su cola operativa de revisión.
+- reserva NVA_IORD (2026-05-06): script `sql/2026-05-06_ordenes_trabajo_nva_iord_reserva_colision_fix.sql` refuerza `sp_pv_ctr_ords_generate_iord` para tomar consecutivo también contra `PV_ORD_CAMBIO_MERMA_TMP.NVA_IORD` y evitar que punto de venta reutilice IORD reservadas por cambio/merma.
+- reserva NVA_IORD (2026-05-06): `GET /ordenes-trabajo/:iord/cambio-merma/context` y flujos de captura revalidan reserva; si `NVA_IORD` ya existe en `PV_CTR_ORDS`, backend regenera y sella nuevo consecutivo en staging.
 - catálogo de motivos de movimiento: `DAT_ORD_MOTM` (`IDM`, `MOTM`, `TIPO`, `RESPONSABLE`) + `@MOTR` en SPs para trazar motivo seleccionado.
 - staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` es obligatorio para la captura temporal previa a la creación definitiva.
 - los SPs de cambio/merma calculan diferencia económica usando precio real de origen (`PV_TICKET_LOG`) y aplican afectación contable solo si la diferencia sobre `CTD_C_M` es distinta de cero.

@@ -83,7 +83,12 @@ Enlaces relacionados:
 - `admin`, `ANALISTA_INV` e `INVJEF` son los únicos perfiles que pueden ejecutar `:iord/cambio-merma/autorizar` y `:iord/cambio-merma/retrabajo`.
 - afectación final (2026-04-22): `sp_ordenes_trabajo_registrar_mb51` ya no usa clase genérica; cambio material registra `204/205`, merma registra `456/455/457`, y `DAT_MB51.CTOT` se calcula con `DAT_ART.CTOP`. Todos los renglones MB51 del caso se concentran bajo `DOCP = IDFOL` original.
 - diferencia contable (2026-04-22): `sp_ordenes_trabajo_registrar_ctrl_ctas_diff` usa `DAT_CAT_CTAS.CTA=101001001` (`RELACION='AD'`), `DAT_CMOV` `801/802` para cargo/abono y genera `NDOC` consecutivo registrado también en `DAT_CTR_DOC`. La UI y los PDFs deben mostrar la diferencia sellada/contable basada en `CTD_C_M`, no el total completo de la nueva ORD.
-- el panel ORDs entrega a `ANALISTA_INV` e `INVJEF` solo la cola de revisión con `selCtrlOrd=14`; el resto de roles conserva su matriz operativa actual.
+- el panel ORDs usa matriz de visibilidad por rol en `DAT_JAO_ORD_FLUJO_VIS`; `ANALISTA_INV` e `INVJEF` siguen orientados al flujo de revisión de cambio/merma (`selCtrlOrd=14`).
+- panel ORDs (2026-05-06): `ANALISTA_INV` e `INVJEF` pueden cargar catálogo de asignados del panel sin bloqueo de rol.
+- panel ORDs (2026-05-06): script `sql/2026-05-06_ord_flujo_vis_analista_inv_invjef_expand.sql` amplía la visibilidad operativa en `DAT_JAO_ORD_FLUJO_VIS` para `ANALISTA_INV/INVJEF`.
+- panel ORDs (2026-05-06): script `sql/2026-05-06_ordenes_trabajo_panel_analista_inv_selctrl14_fix.sql` corrige `dbo.sp_ordenes_trabajo_panel` para incluir `ANALISTA_INV/INVJEF` y filtrar su cola por `selCtrlOrd=14`.
+- reserva NVA_IORD (2026-05-06): script `sql/2026-05-06_ordenes_trabajo_nva_iord_reserva_colision_fix.sql` ajusta `sp_pv_ctr_ords_generate_iord` para considerar reservas activas en `PV_ORD_CAMBIO_MERMA_TMP.NVA_IORD` y evitar colisiones con altas de punto de venta.
+- reserva NVA_IORD (2026-05-06): en contexto/captura cambio-merma, backend revalida la reserva y regenera `NVA_IORD` si ya fue ocupada en `PV_CTR_ORDS`.
 - `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` aceptan `@MOTR` y `@CTD_C_M`, calculan diferencia económica sobre la fracción afectada y cierran el proceso dejando la original relacionada por `REEORD`.
 - cálculo económico `Subtotal/IVA/Total` del contexto cambio/merma usa `DAT_SUC.IVA_INTEGRADO` + factor fiscal del folio (`PV_CTR_FOL_ASVR.REQF`/`RQFAC`) y tipo (`AUT/ORIGEN_AUT`), sin inferir `tipotran` por patrón de `IDFOL`.
 - staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` almacena captura temporal (artículo, motivo, laboratorio, docdif, `CTD_C_M`, `NVA_IORD`) antes del cierre final en control de ORDs.

@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { UsrModSucEntity } from './usr-mod-suc.entity';
 import { CreateUsrModSucDto } from './dto/create-usr-mod-suc.dto';
 import { UpdateUsrModSucDto } from './dto/update-usr-mod-suc.dto';
@@ -63,12 +63,17 @@ export class UsrModSucService {
 
     if (depto) {
       qb.andWhere(
-        "UPPER(LTRIM(RTRIM(ISNULL(d.NOMBRE, '')))) = UPPER(LTRIM(RTRIM(:depto)))",
-        { depto },
-      );
-      qb.andWhere(
-        "UPPER(LTRIM(RTRIM(ISNULL(mf.DEPTO, '')))) = UPPER(LTRIM(RTRIM(:depto)))",
-        { depto },
+        new Brackets((subQb) => {
+          subQb
+            .where(
+              "UPPER(LTRIM(RTRIM(ISNULL(d.NOMBRE, '')))) = UPPER(LTRIM(RTRIM(:depto)))",
+              { depto },
+            )
+            .orWhere(
+              "UPPER(LTRIM(RTRIM(ISNULL(mf.DEPTO, '')))) = UPPER(LTRIM(RTRIM(:depto)))",
+              { depto },
+            );
+        }),
       );
     }
 

@@ -142,6 +142,14 @@ BEGIN
     IF @iord IS NULL OR LTRIM(RTRIM(@iord)) = ''
       THROW 50068, 'No se pudo generar IORD para la orden.', 1;
 
+    IF (
+      UPPER(LTRIM(RTRIM(@iord))) LIKE '%AUX%'
+      OR LEFT(UPPER(LTRIM(RTRIM(@iord))), LEN(@sucNorm)) <> @sucNorm
+      OR LEN(LTRIM(RTRIM(@iord))) <> LEN(@sucNorm) + 9
+      OR TRY_CONVERT(BIGINT, SUBSTRING(LTRIM(RTRIM(@iord)), LEN(@sucNorm) + 1, 9)) IS NULL
+    )
+      THROW 50069, 'Formato de IORD invalido para nomenclatura estandar.', 1;
+
     INSERT INTO dbo.PV_CTR_ORDS
     (
       IORD,

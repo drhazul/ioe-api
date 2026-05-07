@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   HttpException,
   HttpStatus,
@@ -73,49 +74,9 @@ export class PvCtrOrdsService {
   }
 
   async create(dto: CreatePvCtrOrdsDto) {
-    const exists = await this.repo.exist({ where: { IORD: dto.IORD } });
-    if (exists) throw new ConflictException(`IORD ${dto.IORD} ya existe`);
-
-    const entity = this.repo.create({
-      IORD: dto.IORD,
-      IDFOL: dto.IDFOL ?? null,
-      TIPO: dto.TIPO ?? null,
-      OPV: dto.OPV ?? null,
-      FCNS: dto.FCNS ? new Date(dto.FCNS) : null,
-      FCNM: dto.FCNM ? new Date(dto.FCNM) : null,
-      CLIEN: dto.CLIEN ?? null,
-      MAT: dto.MAT ?? null,
-      CTD: dto.CTD ?? null,
-      ART: dto.ART ?? null,
-      COMAD: dto.COMAD ?? null,
-      ESTATUS: dto.ESTATUS ?? null,
-      ESTSEGU: dto.ESTSEGU ?? null,
-      ASIGN: dto.ASIGN ?? null,
-      FCNRT: dto.FCNRT ? new Date(dto.FCNRT) : null,
-      FCNAS: dto.FCNAS ? new Date(dto.FCNAS) : null,
-      FCNTE: dto.FCNTE ? new Date(dto.FCNTE) : null,
-      FCNTD: dto.FCNTD ? new Date(dto.FCNTD) : null,
-      FCNEN: dto.FCNEN ? new Date(dto.FCNEN) : null,
-      LABOR: dto.LABOR ?? null,
-      TPOM: dto.TPOM ?? null,
-      MOTR: dto.MOTR ?? null,
-      REOORD: dto.REOORD ?? null,
-      DOCIF: dto.DOCIF ?? null,
-      SEL: dto.SEL ?? null,
-      FCNMOD: dto.FCNMOD ? new Date(dto.FCNMOD) : null,
-      SUC: dto.SUC ?? null,
-      NCLIENTE: dto.NCLIENTE ?? null,
-      RQFAC: dto.RQFAC ?? null,
-      DESCART: dto.DESCART ?? null,
-      CTORD: dto.CTORD ?? null,
-      SELCTRLORD: dto.SELCTRLORD ?? null,
-      SELCTRORDT: dto.SELCTRORDT ?? null,
-      SELENT: dto.SELENT ?? null,
-      RESMEMR: dto.RESMEMR ?? null,
-      HR_ENT: dto.HR_ENT ? new Date(dto.HR_ENT) : null,
-    });
-
-    return this.repo.save(entity);
+    throw new BadRequestException(
+      'Creación manual de ORD deshabilitada. Use /pvctrords/create-from-quote-line para generar IORD con nomenclatura estándar.',
+    );
   }
 
   async createFromQuoteLine(

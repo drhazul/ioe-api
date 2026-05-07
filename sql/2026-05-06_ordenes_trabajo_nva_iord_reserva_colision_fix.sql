@@ -1,3 +1,13 @@
+/*
+  2026-05-06 - Fix colision de NVA_IORD reservada entre cambio/merma y alta POS.
+  - Refuerza sp_pv_ctr_ords_generate_iord para considerar reservas activas en PV_ORD_CAMBIO_MERMA_TMP.
+  - Regenera reservas colisionadas en staging para casos activos (selCtrlOrd 13/14/15/16, flujo 9.1/9.2).
+*/
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
 CREATE OR ALTER PROCEDURE dbo.sp_pv_ctr_ords_generate_iord
   @SUC NVARCHAR(10),
   @FCN DATETIME = NULL,
@@ -22,11 +32,6 @@ BEGIN
   IF @sucNorm = ''
     THROW 50064, 'SUC es requerida.', 1;
 
-  /*
-    SERIE_FECHA (logica "serie 1990"):
-    dias transcurridos desde 1990-01-01, con padding a 5 digitos.
-    Ejemplo: 2026-02-13 -> 13193 -> "13193"
-  */
   SET @serie = DATEDIFF(DAY, CONVERT(DATE, '19900101'), @fcnDate);
   IF @serie < 0
     THROW 50065, 'La fecha de serie no es valida para generar IORD.', 1;
@@ -84,5 +89,66 @@ BEGIN
       ROLLBACK TRANSACTION;
     THROW;
   END CATCH
+END
+GO
+
+IF OBJECT_ID('dbo.PV_ORD_CAMBIO_MERMA_TMP', 'U') IS NOT NULL
+BEGIN
+  DECLARE @iord NVARCHAR(255);
+  DECLARE @tipom INT;
+  DECLARE @suc NVARCHAR(10);
+  DECLARE @nextIord NVARCHAR(255);
+  DECLARE @fcnNow DATETIME;
+
+  DECLARE cur_reservas CURSOR LOCAL FAST_FORWARD FOR
+    SELECT
+      t.IORD,
+      TRY_CONVERT(INT, t.TIPOM) AS TIPOM,
+      LTRIM(RTRIM(ISNULL(o.SUC, ''))) AS SUC
+    FROM dbo.PV_ORD_CAMBIO_MERMA_TMP t
+    INNER JOIN dbo.PV_CTR_ORDS o
+      ON UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(LTRIM(RTRIM(ISNULL(t.IORD, ''))))
+    INNER JOIN dbo.PV_CTR_ORDS h
+      ON UPPER(LTRIM(RTRIM(ISNULL(h.IORD, '')))) = UPPER(LTRIM(RTRIM(ISNULL(t.NVA_IORD, ''))))
+    WHERE ISNULL(LTRIM(RTRIM(t.NVA_IORD)), '') <> ''
+      AND TRY_CONVERT(FLOAT, o.ESTSEGU) IN (9.1, 9.2)
+      AND TRY_CONVERT(INT, o.selCtrlOrd) IN (13, 14, 15, 16)
+      AND UPPER(LTRIM(RTRIM(ISNULL(h.IDFOL, '')))) <> UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, ''))));
+
+  OPEN cur_reservas;
+  FETCH NEXT FROM cur_reservas INTO @iord, @tipom, @suc;
+
+  WHILE @@FETCH_STATUS = 0
+  BEGIN
+    SET @nextIord = NULL;
+    SET @fcnNow = GETDATE();
+
+    EXEC dbo.sp_pv_ctr_ords_generate_iord
+      @SUC = @suc,
+      @FCN = @fcnNow,
+      @IORD_OUT = @nextIord OUTPUT;
+
+    IF ISNULL(LTRIM(RTRIM(@nextIord)), '') <> ''
+    BEGIN
+      UPDATE dbo.PV_ORD_CAMBIO_MERMA_TMP
+      SET
+        NVA_IORD = @nextIord,
+        USER_MOD = 'sql-fix-nva-iord',
+        FCN_MOD = GETDATE()
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@iord)
+        AND TRY_CONVERT(INT, TIPOM) = @tipom;
+
+      SELECT
+        'RESERVA_REGENERADA' AS EVENTO,
+        @iord AS IORD_ORIG,
+        @tipom AS TIPOM,
+        @nextIord AS NVA_IORD;
+    END;
+
+    FETCH NEXT FROM cur_reservas INTO @iord, @tipom, @suc;
+  END;
+
+  CLOSE cur_reservas;
+  DEALLOCATE cur_reservas;
 END
 GO

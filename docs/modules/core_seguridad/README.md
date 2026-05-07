@@ -43,6 +43,7 @@ Opcionales:
 - Control de cuentas/catalogo cuentas: validar `USR_MOD_SUC` para `DAT_CONS_CTAS`, `DAT_CTRL_CTAS`, `DAT_CTRL_CUENTAS`.
 - Caja general: validar `USR_MOD_SUC` para `DAT_FORM_ENTR_OPV`, `DAT_RES_ENTRE_CAJ`, `PV_ENTREGA_CG`.
 - Regla transversal: si un usuario no-admin tiene filas activas en `USR_MOD_SUC` para el modulo consultado, esas sucursales son las autorizadas; si no hay filas, fallback a `user.suc`.
+- Acceso por sucursal (2026-05-06): `GET /usr-mod-suc` interpreta `depto` como coincidencia por `departamento de usuario OR departamento de módulo front`.
 - Exportacion Excel caja general: incluye `REQF` original (`-1/0/1`) y exporta importes como numericos con formato moneda.
 - Admin (roleId `1`) mantiene bypass.
 
