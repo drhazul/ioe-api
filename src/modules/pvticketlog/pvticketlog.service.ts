@@ -10,6 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { PromocionesService } from '../promociones/promociones.service';
 import { PvTicketLogEntity } from './pvticketlog.entity';
 import { CreatePvTicketLogDto } from './dto/create-pvticketlog.dto';
 import { UpdatePvTicketLogDto } from './dto/update-pvticketlog.dto';
@@ -23,6 +24,7 @@ export class PvTicketLogService {
     private readonly repo: Repository<PvTicketLogEntity>,
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    private readonly promocionesService: PromocionesService,
   ) {}
 
   findAll(idfol?: string) {
@@ -42,7 +44,7 @@ export class PvTicketLogService {
     return row;
   }
 
-  async create(dto: CreatePvTicketLogDto) {
+  async create(dto: CreatePvTicketLogDto, user: JwtPayload) {
     const exists = await this.repo.exist({ where: { ID: dto.ID } });
     if (exists) throw new ConflictException(`ID ${dto.ID} ya existe`);
 
@@ -62,10 +64,12 @@ export class PvTicketLogService {
       UPDATED_AT: dto.UPDATED_AT ? new Date(dto.UPDATED_AT) : null,
     });
 
-    return this.repo.save(entity);
+    const saved = await this.repo.save(entity);
+    await this.applyPromocionesForLine(saved, user);
+    return this.findOne(saved.ID);
   }
 
-  async update(id: string, dto: UpdatePvTicketLogDto) {
+  async update(id: string, dto: UpdatePvTicketLogDto, user: JwtPayload) {
     const row = await this.findOne(id);
     const ordAssigned = this.normalizeOrd(row.ORD);
 
@@ -111,7 +115,9 @@ export class PvTicketLogService {
     }
 
     const updated = this.repo.merge(row, partial);
-    return this.repo.save(updated);
+    const saved = await this.repo.save(updated);
+    await this.applyPromocionesForLine(saved, user);
+    return this.findOne(saved.ID);
   }
 
   async updatePrice(
@@ -214,7 +220,8 @@ export class PvTicketLogService {
       IP: ip,
     });
 
-    return updated;
+    await this.applyPromocionesForLine(updated, user);
+    return this.findOne(updated.ID);
   }
 
   async authorizePrice(dto: AuthorizePvTicketLogPriceDto, _user: JwtPayload) {
@@ -290,6 +297,17 @@ export class PvTicketLogService {
 
       await queryRunner.query(
         `
+        IF OBJECT_ID('dbo.PROMO_TICKET_DESC_APLI', 'U') IS NOT NULL
+        BEGIN
+          DELETE FROM dbo.PROMO_TICKET_DESC_APLI
+          WHERE ID = @0
+        END
+        `,
+        [id],
+      );
+
+      await queryRunner.query(
+        `
         DELETE FROM dbo.PV_TICKET_LOG
         WHERE ID = @0
         `,
@@ -327,6 +345,19 @@ export class PvTicketLogService {
 
   private round2(value: number) {
     return Math.round(value * 100) / 100;
+  }
+
+  private async applyPromocionesForLine(
+    line: PvTicketLogEntity,
+    user: JwtPayload,
+  ) {
+    const idfol = String(line.IDFOL ?? '').trim();
+    if (!idfol) return;
+    await this.promocionesService.aplicarLinea(
+      line.ID,
+      { generarGratis: false },
+      user,
+    );
   }
 
   private async loadUserWithRole(idUsuario: number) {

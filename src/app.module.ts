@@ -69,6 +69,7 @@ import { AsistenciaModule } from './modules/asistencia/asistencia.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 import { IncidenciasVacacionesModule } from './modules/incidencias-vacaciones/incidencias-vacaciones.module';
 import { MasterdataConfigModule } from './modules/masterdata-config/masterdata-config.module';
+import { PromocionesModule } from './modules/promociones/promociones.module';
 
 @Module({
   imports: [
@@ -139,6 +140,7 @@ import { MasterdataConfigModule } from './modules/masterdata-config/masterdata-c
     NotificacionesModule,
     IncidenciasVacacionesModule,
     MasterdataConfigModule,
+    PromocionesModule,
   ],
   providers: [
     {

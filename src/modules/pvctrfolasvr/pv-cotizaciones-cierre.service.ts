@@ -77,6 +77,11 @@ type PrintTicketItem = {
   ord: string | null;
 };
 
+type PrintTicketItemsGroup = {
+  items: PrintTicketItem[];
+  itemsGratis: PrintTicketItem[];
+};
+
 type PrintFormaItem = {
   idf: string;
   form: string;
@@ -255,7 +260,7 @@ export class PvCotizacionesCierreService {
       rqfac,
     });
 
-    const [header, items, formas, ords] = await Promise.all([
+    const [header, ticketItems, formas, ords] = await Promise.all([
       this.loadPrintHeader(this.dataSource, context.suc),
       this.loadPrintTicketItems(this.dataSource, context.idfol),
       this.loadPrintFormas(this.dataSource, context.idfol),
@@ -289,7 +294,8 @@ export class PvCotizacionesCierreService {
       ok: true,
       idfol: context.idfol,
       header,
-      items,
+      items: ticketItems.items,
+      itemsGratis: ticketItems.itemsGratis,
       totals: {
         ...totals,
         sumPagos,
@@ -478,7 +484,13 @@ export class PvCotizacionesCierreService {
   private async loadPrintTicketItems(
     executor: SqlExecutor,
     idfol: string,
-  ): Promise<PrintTicketItem[]> {
+  ): Promise<PrintTicketItemsGroup> {
+    const colsSet = await this.loadTableColumns(executor, 'dbo.PV_TICKET_LOG');
+    const hasTipoPromo = colsSet.has('TIPOPROMO');
+    const tipoPromoSelect = hasTipoPromo
+      ? `LTRIM(RTRIM(ISNULL(TIPOPROMO, ''))) AS TIPOPROMO`
+      : `CAST('' AS NVARCHAR(50)) AS TIPOPROMO`;
+
     const rows = await executor.query(
       `
       SELECT
@@ -489,7 +501,8 @@ export class PvCotizacionesCierreService {
         CTD,
         PVTA,
         PVTAT,
-        ORD
+        ORD,
+        ${tipoPromoSelect}
       FROM dbo.PV_TICKET_LOG
       WHERE IDFOL = @0
       ORDER BY ID ASC
@@ -497,14 +510,16 @@ export class PvCotizacionesCierreService {
       [idfol],
     );
 
-    return (rows ?? [])
+    const items: PrintTicketItem[] = [];
+    const itemsGratis: PrintTicketItem[] = [];
+    (rows ?? [])
       .map((raw) => raw as Record<string, unknown>)
-      .map((row, index) => {
+      .forEach((row, index) => {
         const ctd = this.toNumber(row.CTD) ?? 0;
         const pvta = this.round2(this.toNumber(row.PVTA) ?? 0);
         const pvtat = this.toNumber(row.PVTAT);
         const importe = this.round2(pvtat ?? ctd * pvta);
-        return {
+        const item = {
           id: this.normalizeText(row.ID) || `ROW-${index + 1}`,
           art: this.normalizeText(row.ART) || null,
           upc: this.normalizeText(row.UPC) || null,
@@ -514,7 +529,15 @@ export class PvCotizacionesCierreService {
           importe,
           ord: this.normalizeText(row.ORD) || null,
         } satisfies PrintTicketItem;
+        const tipoPromo = this.normalizeUpper(row.TIPOPROMO);
+      if (tipoPromo === 'ART_GRATIS') {
+        itemsGratis.push(item);
+      } else {
+        items.push(item);
+      }
       });
+
+    return { items, itemsGratis };
   }
 
   private async loadPrintFormas(

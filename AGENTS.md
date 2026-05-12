@@ -47,6 +47,7 @@
 - Seguridad / Excel uploads confiables (2026-05-04): `alta-masiva`, `datart` y `conteos` validan fuente de archivo antes de parsear (`extensión`, `MIME`, `firma binaria`, tamaño máximo y límites de hojas/renglones/columnas vía `src/common/security/trusted-excel-upload.ts`); parseo tabular crítico migra a `header:1` para evitar mapear encabezados no confiables a objetos JS.
 - Cotizaciones / Cierre (2026-04-09): `sp_pv_cotizacion_cerrar` sincroniza `PV_CTR_ORDS.RQFAC` al mover ORDs a `ESTATUS=2`; script `sql/2026-04-09_pv_cotizacion_cerrar_sync_rqfac_ords.sql` corrige transmitidos históricos.
 - Colaboradores / Alta (2026-04-29): `POST /colaboradores` adopta contrato con `horario_id` (sin `turno_id`) y ejecuta `upsert` por `id_empleado`; responde `201` en creación y `200` en actualización, con mensaje claro en fallos SQL Server.
+- Punto de venta / Gestión de promociones (2026-05-09): se incorpora módulo backend `promociones` en `AppModule` con endpoints CRUD de cabecera (`PROMO_CAB`), criterios (`PROMO_REGLA_CRITERIO`), beneficios (`PROMO_REGLA_BENEFICIO`) y ejecución por folio (`/promociones/evaluar/:idfol`, `/promociones/aplicar/:idfol`, `/promociones/aplicadas/:idfol`). La administración queda restringida a `admin` y rol `JEFOPE`; operación requiere script `sql/2026-05-09_promociones_descuentos_base.sql`.
 
 ## Documentación por módulos
 - Base de módulos: `docs/modules/base_modulos/AGENTS.md` (README: `docs/modules/base_modulos/README.md`)

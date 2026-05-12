@@ -37,6 +37,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Registro de módulos PV (2026-05-05): `AppModule` vuelve a incluir en `imports` los módulos `PvDevoluciones`, `PagosServicios`, `Retiros`, `FormasPagoCambios`, `CajonEstado`, `CajaGeneral`, `Facturacion` y `CtrlCtas`, corrigiendo `404` de rutas no montadas.
 - Datos Maestros / Configuración maestra (2026-05-05): se agrega endpoint `GET/PUT /masterdata/configuracion-maestra` para configuración corporativa y catálogos de `departamentos/cargos`.
 - Cotizaciones / Cierre (2026-04-09): al cerrar cotización (`sp_pv_cotizacion_cerrar`) ahora también sincroniza `PV_CTR_ORDS.RQFAC` con `REQF/RQFAC` del folio transmitido; se agrega script correctivo para históricos transmitidos.
+- Punto de venta / Gestión de promociones (2026-05-09): se agrega módulo `promociones` con CRUD de `PROMO_CAB`, criterios (`PROMO_REGLA_CRITERIO`), beneficios (`PROMO_REGLA_BENEFICIO`) y aplicación por folio (`POST /promociones/evaluar/:idfol`, `POST /promociones/aplicar/:idfol`, `GET /promociones/aplicadas/:idfol`). El script `sql/2026-05-09_promociones_descuentos_base.sql` crea/altera tablas, índices y SPs `sp_promo_evaluar_folio` + `sp_promo_desc_aplicadas_folio`.
 - Notas de documentación viva: este README se modifica solo por cambios de arquitectura, módulos o rutas principales; los ajustes funcionales se registran en los README/AGENTS del módulo correspondiente.
 
 ## Arquitectura

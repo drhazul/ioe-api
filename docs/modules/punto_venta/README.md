@@ -11,6 +11,39 @@ Enlaces relacionados:
 - Endpoint involucrado: `PATCH /factclientshp/:id`.
 - Regla backend: la edición fiscal conserva la `SUC` original de `FACT_CLIENT_SHP` (no se reasigna por contexto JWT).
 
+## Gestión de promociones y descuentos (2026-05-09)
+- Módulo NestJS:
+- `src/modules/promociones/promociones.module.ts`
+- `src/modules/promociones/promociones.controller.ts`
+- `src/modules/promociones/promociones.service.ts`
+- `src/modules/promociones/dto/*`
+- Endpoints:
+- `GET /promociones`
+- `GET /promociones/:idProm`
+- `POST /promociones`
+- `PATCH /promociones/:idProm`
+- `DELETE /promociones/:idProm` (inactivación lógica por `EST=0`)
+- `GET /promociones/:idProm/criterios`
+- `POST /promociones/:idProm/criterios`
+- `PATCH /promociones/criterios/:idCriterio`
+- `DELETE /promociones/criterios/:idCriterio`
+- `GET /promociones/:idProm/beneficios`
+- `POST /promociones/:idProm/beneficios`
+- `PATCH /promociones/beneficios/:idBeneficio`
+- `DELETE /promociones/beneficios/:idBeneficio`
+- `POST /promociones/evaluar/:idfol`
+- `POST /promociones/aplicar/:idfol`
+- `GET /promociones/aplicadas/:idfol`
+- Script SQL obligatorio:
+- `sql/2026-05-09_promociones_descuentos_base.sql`
+- alcance SQL:
+- amplía `PROMO_CAB` con columnas de motor de descuentos (`TIPO_DESC`, `PRC_DESC`, `IMP_DESC`, `PRIORIDAD`, `COMBINABLE`, etc.).
+- crea `PROMO_REGLA_CRITERIO`, `PROMO_REGLA_BENEFICIO`, `PROMO_TICKET_DESC_APLI`, `PROMO_TICKET_GRATIS_REL` y `PROMO_TICKET_GRATIS_DET`.
+- crea `sp_promo_evaluar_folio` y `sp_promo_desc_aplicadas_folio`.
+- regla de seguridad:
+- administración de promociones restringida a `admin` y rol `JEFOPE` (jefe operaciones).
+- operación de aplicación actualiza `PV_TICKET_LOG.PVTAT` con importe neto tras descuento y deja trazabilidad por línea en `PROMO_TICKET_DESC_APLI`.
+
 ## Pago de Servicios PS (nuevo flujo 2026-03)
 
 - Modulo NestJS:
@@ -309,3 +342,9 @@ Enlaces relacionados:
 - `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación por evento VF.
 - `sql/2026-03-20_facturacion_sync_after_devoluciones.sql` depura registros históricos de `IDFOLDEV` en `FAC_SVR_SHAP/FACT_TICKET_SHP` y luego reprocesa folios origen elegibles (`AUT='VF'` + `REQF=1`).
 
+
+## Promociones (2026-05-10)
+- Configuracion unificada por promocion en PROMO_CONFIG.
+- Catalogos nuevos: PROMO_CAT_T_PROM, PROMO_CAT_TIPO_DESC, PROMO_CAT_T_BENEFICIO.
+- Endpoints nuevos: /promociones/catalogos/*, /promociones/:idProm/configuracion (GET/PUT), /promociones/:idProm/reordenar-prioridad (POST).
+- Regla de prioridad: al mover prioridad, se recorre automaticamente el orden existente (menor numero = mayor prioridad).

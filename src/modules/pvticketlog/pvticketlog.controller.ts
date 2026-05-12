@@ -38,13 +38,17 @@ export class PvTicketLogController {
   }
 
   @Post()
-  create(@Body() dto: CreatePvTicketLogDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreatePvTicketLogDto, @CurrentUser() user: JwtPayload) {
+    return this.service.create(dto, user);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdatePvTicketLogDto) {
-    return this.service.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePvTicketLogDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.update(id, dto, user);
   }
 
   @Post('precio/authorize')

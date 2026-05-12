@@ -11,6 +11,25 @@ Enlaces relacionados:
 - `PATCH /factclientshp/:id` no debe cambiar `SUC` en updates de datos fiscales.
 - El backend ignora reasignación de sucursal en update (sin trigger de reversa, para permitir cambios manuales controlados en BD).
 
+## Punto de venta: gestión de promociones/descuentos (2026-05-09)
+- módulo backend agregado:
+- `src/modules/promociones/promociones.module.ts`
+- `src/modules/promociones/promociones.controller.ts`
+- `src/modules/promociones/promociones.service.ts`
+- `src/modules/promociones/dto/*`
+- endpoints habilitados:
+- CRUD cabecera promo (`/promociones`)
+- CRUD criterios (`/promociones/:idProm/criterios`, `/promociones/criterios/:idCriterio`)
+- CRUD beneficios (`/promociones/:idProm/beneficios`, `/promociones/beneficios/:idBeneficio`)
+- evaluación y aplicación por folio (`/promociones/evaluar/:idfol`, `/promociones/aplicar/:idfol`)
+- consulta de histórico aplicado (`/promociones/aplicadas/:idfol`)
+- seguridad:
+- la gestión queda restringida a `admin` y `JEFOPE` (jefe operaciones).
+- script base requerido:
+- `sql/2026-05-09_promociones_descuentos_base.sql` (altera `PROMO_CAB`, crea tablas `PROMO_REGLA_*`, `PROMO_TICKET_DESC_APLI`, `PROMO_TICKET_GRATIS_*`, e instala SPs `sp_promo_evaluar_folio` + `sp_promo_desc_aplicadas_folio`).
+- regla operativa:
+- al aplicar descuentos, backend recalcula `PV_TICKET_LOG.PVTAT` con neto y registra cada descuento de renglón en `PROMO_TICKET_DESC_APLI`.
+
 ## Punto de venta: cierre transaccional de cotizacion (implementado)
 - Controller/Service:
 - `src/modules/pvctrfolasvr/pv-cotizaciones-cierre.controller.ts`
