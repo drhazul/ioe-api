@@ -24,7 +24,8 @@ Enlaces relacionados:
 - evaluación y aplicación por folio (`/promociones/evaluar/:idfol`, `/promociones/aplicar/:idfol`)
 - consulta de histórico aplicado (`/promociones/aplicadas/:idfol`)
 - seguridad:
-- la gestión queda restringida a `admin` y `JEFOPE` (jefe operaciones).
+- la gestión queda habilitada para `admin`, `JEFOPE/JEFOPER` y supervisor (`SUPERPV/SUPERVISOR/SUPERVP`).
+- alcance por sucursal validado desde `USR_MOD_SUC` para módulo `PV_PROMO_GES` (fallback a `SUC` del JWT si no existen filas).
 - script base requerido:
 - `sql/2026-05-09_promociones_descuentos_base.sql` (altera `PROMO_CAB`, crea tablas `PROMO_REGLA_*`, `PROMO_TICKET_DESC_APLI`, `PROMO_TICKET_GRATIS_*`, e instala SPs `sp_promo_evaluar_folio` + `sp_promo_desc_aplicadas_folio`).
 - regla operativa:

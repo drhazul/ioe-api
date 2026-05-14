@@ -36,16 +36,39 @@ export class UsrModSucService {
 
     const qb = this.repo
       .createQueryBuilder('ums')
-      .leftJoin(UsuarioEntity, 'u', 'u.USERNAME = ums.USUARIO')
+      .leftJoin(
+        UsuarioEntity,
+        'u',
+        "UPPER(LTRIM(RTRIM(ISNULL(u.USERNAME, '')))) = UPPER(LTRIM(RTRIM(ISNULL(ums.USUARIO, ''))))",
+      )
       .leftJoin(DepartamentoEntity, 'd', 'd.IDDEPTO = u.IDDEPTO')
-      .leftJoin(ModFrontEntity, 'mf', 'mf.CODIGO = ums.MODULO')
+      .leftJoin(
+        ModFrontEntity,
+        'mf',
+        "UPPER(LTRIM(RTRIM(ISNULL(mf.CODIGO, '')))) = UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, ''))))",
+      )
       .orderBy('ums.MODULO', 'ASC')
       .addOrderBy('ums.USUARIO', 'ASC')
       .addOrderBy('ums.SUC', 'ASC');
 
-    if (modulo) qb.andWhere('ums.MODULO = :modulo', { modulo });
-    if (usuario) qb.andWhere('ums.USUARIO = :usuario', { usuario });
-    if (suc) qb.andWhere('ums.SUC = :suc', { suc });
+    if (modulo) {
+      qb.andWhere(
+        "UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, '')))) = UPPER(LTRIM(RTRIM(:modulo)))",
+        { modulo },
+      );
+    }
+    if (usuario) {
+      qb.andWhere(
+        "UPPER(LTRIM(RTRIM(ISNULL(ums.USUARIO, '')))) = UPPER(LTRIM(RTRIM(:usuario)))",
+        { usuario },
+      );
+    }
+    if (suc) {
+      qb.andWhere(
+        "UPPER(LTRIM(RTRIM(ISNULL(ums.SUC, '')))) = UPPER(LTRIM(RTRIM(:suc)))",
+        { suc },
+      );
+    }
 
     if (activo !== undefined && activo !== null && activo !== '') {
       const normalized = activo.toLowerCase();
@@ -58,7 +81,10 @@ export class UsrModSucService {
     }
 
     if (sucUsuario) {
-      qb.andWhere('u.SUC = :sucUsuario', { sucUsuario });
+      qb.andWhere(
+        "UPPER(LTRIM(RTRIM(ISNULL(u.SUC, '')))) = UPPER(LTRIM(RTRIM(:sucUsuario)))",
+        { sucUsuario },
+      );
     }
 
     if (depto) {

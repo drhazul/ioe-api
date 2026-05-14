@@ -39,18 +39,23 @@ export class PromocionesController {
     @Query('suc') suc?: string,
     @Query('tipo') tipo?: string,
     @Query('search') search?: string,
+    @CurrentUser() user?: JwtPayload,
   ) {
-    return this.service.findAll({ includeInactive, suc, tipo, search });
+    return this.service.findAll({ includeInactive, suc, tipo, search }, user);
   }
 
   @Get('catalogos/sucursales')
-  sucursales() {
-    return this.service.listSucursales();
+  sucursales(@CurrentUser() user?: JwtPayload) {
+    return this.service.listSucursales(user);
   }
 
   @Get('catalogos/clientes')
-  clientes(@Query('suc') suc?: string, @Query('search') search?: string) {
-    return this.service.listClientes(suc, search);
+  clientes(
+    @Query('suc') suc?: string,
+    @Query('search') search?: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    return this.service.listClientes(suc, search, user);
   }
 
   @Get('catalogos/t-prom')
@@ -132,6 +137,7 @@ export class PromocionesController {
     @Query('scla2') scla2?: string,
     @Query('guia') guia?: string,
     @Query('search') search?: string,
+    @CurrentUser() user?: JwtPayload,
   ) {
     return this.service.listArticulos({
       suc,
@@ -142,12 +148,12 @@ export class PromocionesController {
       scla2,
       guia,
       search,
-    });
+    }, user);
   }
 
   @Get(':idProm')
-  findOne(@Param('idProm') idProm: string) {
-    return this.service.findOne(idProm);
+  findOne(@Param('idProm') idProm: string, @CurrentUser() user?: JwtPayload) {
+    return this.service.findOne(idProm, user);
   }
 
   @Post()
@@ -164,14 +170,19 @@ export class PromocionesController {
     return this.service.update(idProm, dto, user);
   }
 
+  @Delete(':idProm/hard')
+  removeHard(@Param('idProm') idProm: string, @CurrentUser() user: JwtPayload) {
+    return this.service.removeHard(idProm, user);
+  }
+
   @Delete(':idProm')
   remove(@Param('idProm') idProm: string, @CurrentUser() user: JwtPayload) {
     return this.service.remove(idProm, user);
   }
 
   @Get(':idProm/configuracion')
-  getConfig(@Param('idProm') idProm: string) {
-    return this.service.getConfig(idProm);
+  getConfig(@Param('idProm') idProm: string, @CurrentUser() user?: JwtPayload) {
+    return this.service.getConfig(idProm, user);
   }
 
   @Put(':idProm/configuracion')
@@ -193,8 +204,8 @@ export class PromocionesController {
   }
 
   @Get(':idProm/criterios')
-  listCriterios(@Param('idProm') idProm: string) {
-    return this.service.listCriterios(idProm);
+  listCriterios(@Param('idProm') idProm: string, @CurrentUser() user?: JwtPayload) {
+    return this.service.listCriterios(idProm, user);
   }
 
   @Post(':idProm/criterios')
@@ -224,8 +235,8 @@ export class PromocionesController {
   }
 
   @Get(':idProm/beneficios')
-  listBeneficios(@Param('idProm') idProm: string) {
-    return this.service.listBeneficios(idProm);
+  listBeneficios(@Param('idProm') idProm: string, @CurrentUser() user?: JwtPayload) {
+    return this.service.listBeneficios(idProm, user);
   }
 
   @Post(':idProm/beneficios')

@@ -9,12 +9,18 @@ foreach ($port in $ports) {
     $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)" -ErrorAction SilentlyContinue
     if (-not $proc) { continue }
 
-    $name = ($proc.Name ?? '').ToLowerInvariant()
-    $cmd = ($proc.CommandLine ?? '')
-    $isProjectNode = $name -eq 'node.exe' -and $cmd.ToLowerInvariant().Contains($workspaceHint)
+    $name = ''
+    if ($null -ne $proc.Name) { $name = [string]$proc.Name }
+    $name = $name.ToLowerInvariant()
+
+    $cmd = ''
+    if ($null -ne $proc.CommandLine) { $cmd = [string]$proc.CommandLine }
+    $cmdLower = $cmd.ToLowerInvariant()
+
+    $isProjectNode = $name -eq 'node.exe' -and $cmdLower.Contains($workspaceHint)
 
     if ($isProjectNode) {
-      Write-Host "[safe-start] Liberando puerto $port: PID=$($proc.ProcessId) $($proc.Name)"
+      Write-Host "[safe-start] Liberando puerto ${port}: PID=$($proc.ProcessId) $($proc.Name)"
       Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
       Start-Sleep -Milliseconds 300
     } else {
@@ -25,4 +31,3 @@ foreach ($port in $ports) {
 
 Write-Host "[safe-start] Iniciando API en modo watch..."
 npx nest start --watch
-

@@ -41,7 +41,8 @@ Enlaces relacionados:
 - crea `PROMO_REGLA_CRITERIO`, `PROMO_REGLA_BENEFICIO`, `PROMO_TICKET_DESC_APLI`, `PROMO_TICKET_GRATIS_REL` y `PROMO_TICKET_GRATIS_DET`.
 - crea `sp_promo_evaluar_folio` y `sp_promo_desc_aplicadas_folio`.
 - regla de seguridad:
-- administración de promociones restringida a `admin` y rol `JEFOPE` (jefe operaciones).
+- administración de promociones habilitada para `admin`, `JEFOPE/JEFOPER` y supervisor (`SUPERPV/SUPERVISOR/SUPERVP`).
+- alcance por sucursal: lectura/escritura validada con `USR_MOD_SUC` para módulo `PV_PROMO_GES` (fallback a `SUC` del JWT cuando no hay filas).
 - operación de aplicación actualiza `PV_TICKET_LOG.PVTAT` con importe neto tras descuento y deja trazabilidad por línea en `PROMO_TICKET_DESC_APLI`.
 
 ## Pago de Servicios PS (nuevo flujo 2026-03)

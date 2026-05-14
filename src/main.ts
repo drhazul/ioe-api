@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import type { Server } from 'node:http';
 import { existsSync, mkdirSync } from 'node:fs';
 import * as path from 'node:path';
@@ -11,6 +11,7 @@ import { AppModule } from './app.module';
 process.env.TZ = process.env.TZ || 'America/Mexico_City';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const uploadsRoot = path.resolve(process.cwd(), 'uploads');
   const asistenciaUploadsDir = path.join(uploadsRoot, 'asistencia');
 
@@ -19,7 +20,11 @@ async function bootstrap() {
   }
 
   // Se crea la instancia de la aplicación
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Fuerza cierre de conexiones keep-alive al hacer shutdown.
+    forceCloseConnections: true,
+  });
+  app.enableShutdownHooks();
 
   app.useStaticAssets(uploadsRoot, {
     prefix: '/uploads',
@@ -80,10 +85,11 @@ async function bootstrap() {
   console.log(`🌐 Red: http://10.99.0.3:${port}/docs\n`);
 
   // Configuración para puerto ADMS Push
+  let admsServer: Server | null = null;
   if (admsPort !== port) {
     try {
       const expressApp = app.getHttpAdapter().getInstance();
-      const admsServer: Server = expressApp.listen(admsPort, '0.0.0.0', () => {
+      admsServer = expressApp.listen(admsPort, '0.0.0.0', () => {
         console.log(`📡 Puerto ADMS Push activo en puerto ${admsPort}`);
       });
 
@@ -93,6 +99,42 @@ async function bootstrap() {
     } catch (e) {
       console.error('❌ Error al iniciar servidor ADMS.');
     }
+  }
+
+  let shuttingDown = false;
+  const closeAdmsServer = async () => {
+    if (!admsServer) return;
+    await new Promise<void>((resolve) => {
+      admsServer?.close(() => resolve());
+    });
+    admsServer = null;
+  };
+
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.log(`Apagando API por señal ${signal}...`);
+    try {
+      await closeAdmsServer();
+    } catch (error) {
+      logger.warn('No se pudo cerrar servidor ADMS limpiamente');
+    }
+
+    try {
+      await app.close();
+      logger.log('API detenida correctamente');
+      process.exit(0);
+    } catch (error) {
+      logger.error('Error al cerrar API', error as Error);
+      process.exit(1);
+    }
+  };
+
+  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGBREAK', 'SIGHUP'];
+  for (const signal of signals) {
+    process.once(signal, () => {
+      void shutdown(signal);
+    });
   }
 }
 bootstrap();

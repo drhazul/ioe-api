@@ -70,18 +70,24 @@ type ApplyPromocionesLineaOptions = {
 
 @Injectable()
 export class PromocionesService {
+  private static readonly PROMO_GESTION_MODULE_CODES = ['PV_PROMO_GES'];
   private static readonly GESTION_ROLE_CODES = new Set([
     'ADMIN',
     'JEFOPE',
     'JEFOPER',
     'JEFE_OPERACIONES',
     'JEFOPERACIONES',
+    'SUPERPV',
+    'SUPERVISOR',
+    'SUPERVP',
   ]);
 
   constructor(private readonly dataSource: DataSource) {}
 
-  async findAll(query?: PromoQuery) {
+  async findAll(query?: PromoQuery, user?: JwtPayload) {
     await this.ensurePromoCabColumns();
+    const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
+    const userId = this.resolveAccessUserId(user);
 
     const includeInactive = this.toBool(query?.includeInactive);
     const where: string[] = [];
@@ -95,6 +101,23 @@ export class PromocionesService {
     if (suc) {
       where.push(`UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @${params.length}`);
       params.push(suc.toUpperCase());
+    }
+
+    if (allowedSucs.length) {
+      const rules = allowedSucs
+        .map(
+          (s) =>
+            `CHARINDEX(',${s},', ',' + REPLACE(REPLACE(UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))), ' ', ''), ';', ',') + ',') > 0`,
+        )
+        .join(' OR ');
+      const ownDraftRule = `(
+        (LTRIM(RTRIM(ISNULL(SUC, ''))) = '' OR LTRIM(RTRIM(ISNULL(SUC, ''))) = '*')
+        AND ISNULL(TRY_CONVERT(INT, CREADO_POR), 0) = @${params.length}
+      )`;
+      params.push(userId > 0 ? userId : -1);
+      where.push(
+        `(${ownDraftRule} OR ${rules})`,
+      );
     }
 
     const tipo = this.normalizeText(query?.tipo);
@@ -149,9 +172,10 @@ export class PromocionesService {
     return (rows ?? []).map((row) => this.mapPromoRow(row));
   }
 
-  async findOne(idPromRaw: string) {
+  async findOne(idPromRaw: string, user?: JwtPayload) {
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
     await this.ensurePromoCabColumns();
+    await this.assertPromoScopeAccess(idProm, user);
     const rows = await this.dataSource.query(
       `
       SELECT TOP 1
@@ -189,7 +213,8 @@ export class PromocionesService {
     return this.mapPromoRow(rows[0]);
   }
 
-  async listSucursales() {
+  async listSucursales(user?: JwtPayload) {
+    const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
     const rows = await this.dataSource.query(
       `
       SELECT
@@ -200,20 +225,32 @@ export class PromocionesService {
       ORDER BY SUC ASC
       `,
     );
+    const mapped = (rows ?? []).map((row) => {
+      const r = row as Record<string, unknown>;
+      return {
+        suc: this.normalizeText(r.SUC),
+        descripcion: this.normalizeText(r.DESCRIPCION),
+      };
+    });
+    const filtered = allowedSucs.length
+      ? mapped.filter((row) => allowedSucs.includes(this.normalizeUpper(row.suc)))
+      : mapped;
     return [
-      { suc: '*', descripcion: 'TODAS' },
-      ...(rows ?? []).map((row) => {
+      ...(allowedSucs.length ? [] : [{ suc: '*', descripcion: 'TODAS' }]),
+      ...filtered.map((row) => {
         const r = row as Record<string, unknown>;
         return {
-          suc: this.normalizeText(r.SUC),
-          descripcion: this.normalizeText(r.DESCRIPCION),
+          suc: this.normalizeText(r.suc),
+          descripcion: this.normalizeText(r.descripcion),
         };
       }),
     ];
   }
 
-  async listClientes(sucRaw?: string, searchRaw?: string) {
+  async listClientes(sucRaw?: string, searchRaw?: string, user?: JwtPayload) {
+    const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
     const suc = this.normalizeText(sucRaw);
+    this.assertRequestedSucWithinAllowed(suc, allowedSucs);
     const search = this.normalizeText(searchRaw);
     const where: string[] = [
       "TRY_CONVERT(INT, ISNULL(ESTATUS, 1)) <> 0",
@@ -437,7 +474,8 @@ export class PromocionesService {
     });
   }
 
-  async listArticulos(query: ArticuloCatalogQuery) {
+  async listArticulos(query: ArticuloCatalogQuery, user?: JwtPayload) {
+    const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
     const where: string[] = ["LTRIM(RTRIM(ISNULL(a.ART, ''))) <> ''"];
     const params: unknown[] = [];
     const addEq = (expr: string, val?: string) => {
@@ -447,10 +485,19 @@ export class PromocionesService {
       params.push(text.toUpperCase());
     };
     const sucVals = this.parseMultiTexts(query.suc).map((x) => x.toUpperCase());
+    for (const suc of sucVals) {
+      this.assertRequestedSucWithinAllowed(suc, allowedSucs);
+    }
     if (sucVals.length) {
       const placeholders = sucVals.map((_, i) => `@${params.length + i}`).join(', ');
       where.push(`UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) IN (${placeholders})`);
       params.push(...sucVals);
+    } else if (allowedSucs.length) {
+      const placeholders = allowedSucs
+        .map((_, i) => `@${params.length + i}`)
+        .join(', ');
+      where.push(`UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) IN (${placeholders})`);
+      params.push(...allowedSucs);
     }
 
     const addInFloat = (col: string, raw?: string) => {
@@ -540,20 +587,27 @@ export class PromocionesService {
     await this.ensurePromoCabColumns();
 
     const data = this.normalizePromoPayload(dto);
+    if (data.SUC !== undefined) {
+      const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
+      this.assertPromoSucTextWithinAllowed(data.SUC, allowedSucs);
+    }
+    const userId = this.resolveAccessUserId(user) || null;
     const requestedPriority = this.toNullableInt(data.PRIORIDAD);
     const maxPriority = await this.getMaxPromoPriority();
     data.PRIORIDAD = maxPriority + 1;
-    const idProm = await this.insertPromoCab(data, Number(user.sub ?? 0) || null);
+    const idProm = await this.insertPromoCab(data, userId);
     if (requestedPriority != null && requestedPriority > 0) {
-      await this.reorderPromoPriority(idProm, requestedPriority, Number(user.sub ?? 0) || null);
+      await this.reorderPromoPriority(idProm, requestedPriority, userId);
     }
-    return this.findOne(String(idProm));
+    return this.findOne(String(idProm), user);
   }
 
   async update(idPromRaw: string, dto: UpdatePromocionDto, user: JwtPayload) {
     await this.assertGestionAccess(user);
     await this.ensurePromoCabColumns();
+    const userId = this.resolveAccessUserId(user) || null;
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
 
     const sets: string[] = [];
@@ -564,15 +618,19 @@ export class PromocionesService {
     };
 
     const normalized = this.normalizePromoPayload(dto);
+    const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
+    if (normalized.SUC !== undefined) {
+      this.assertPromoSucTextWithinAllowed(normalized.SUC, allowedSucs);
+    }
     const requestedPriority =
       normalized.PRIORIDAD === undefined ? undefined : this.toNullableInt(normalized.PRIORIDAD);
     normalized.PRIORIDAD = undefined;
     this.patchPromoSets(sets, params, normalized);
 
-    addSet('MOD_POR', Number(user.sub ?? 0) || null);
+    addSet('MOD_POR', userId);
     sets.push('FCMOD = GETDATE()');
 
-    if (!sets.length) return this.findOne(String(idProm));
+    if (!sets.length) return this.findOne(String(idProm), user);
 
     params.push(idProm);
     await this.dataSource.query(
@@ -585,16 +643,18 @@ export class PromocionesService {
     );
 
     if (requestedPriority != null && requestedPriority > 0) {
-      await this.reorderPromoPriority(idProm, requestedPriority, Number(user.sub ?? 0) || null);
+      await this.reorderPromoPriority(idProm, requestedPriority, userId);
     }
 
-    return this.findOne(String(idProm));
+    return this.findOne(String(idProm), user);
   }
 
   async remove(idPromRaw: string, user: JwtPayload) {
     await this.assertGestionAccess(user);
     await this.ensurePromoCabColumns();
+    const userId = this.resolveAccessUserId(user) || null;
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
 
     await this.dataSource.query(
@@ -603,15 +663,74 @@ export class PromocionesService {
       SET EST = 0, MOD_POR = @0, FCMOD = GETDATE()
       WHERE ID_PROM = @1
       `,
-      [Number(user.sub ?? 0) || null, idProm],
+      [userId, idProm],
     );
 
     return { deleted: true, idProm };
   }
 
-  async getConfig(idPromRaw: string) {
+  async removeHard(idPromRaw: string, user: JwtPayload) {
+    this.assertAdminOnly(user);
+    await this.ensurePromoCabColumns();
+    const userId = this.resolveAccessUserId(user) || null;
+    const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.ensurePromoExists(idProm);
+
+    const hasConfig = await this.tableExists('dbo.PROMO_CONFIG');
+    const hasCriterio = await this.tableExists('dbo.PROMO_REGLA_CRITERIO');
+    const hasBeneficio = await this.tableExists('dbo.PROMO_REGLA_BENEFICIO');
+    const hasDescApli = await this.tableExists('dbo.PROMO_TICKET_DESC_APLI');
+    const hasGratisRel = await this.tableExists('dbo.PROMO_TICKET_GRATIS_REL');
+    const hasGratisDet = await this.tableExists('dbo.PROMO_TICKET_GRATIS_DET');
+
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+    try {
+      if (hasGratisDet && hasGratisRel) {
+        await qr.query(
+          `
+          DELETE d
+          FROM dbo.PROMO_TICKET_GRATIS_DET d
+          INNER JOIN dbo.PROMO_TICKET_GRATIS_REL r
+            ON r.ID_REL = d.ID_REL
+          WHERE r.IDDESC = @0
+          `,
+          [idProm],
+        );
+      }
+      if (hasGratisRel) {
+        await qr.query(`DELETE FROM dbo.PROMO_TICKET_GRATIS_REL WHERE IDDESC = @0`, [idProm]);
+      }
+      if (hasDescApli) {
+        await qr.query(`DELETE FROM dbo.PROMO_TICKET_DESC_APLI WHERE IDDESC = @0`, [idProm]);
+      }
+      if (hasConfig) {
+        await qr.query(`DELETE FROM dbo.PROMO_CONFIG WHERE ID_PROM = @0`, [idProm]);
+      }
+      if (hasCriterio) {
+        await qr.query(`DELETE FROM dbo.PROMO_REGLA_CRITERIO WHERE ID_PROM = @0`, [idProm]);
+      }
+      if (hasBeneficio) {
+        await qr.query(`DELETE FROM dbo.PROMO_REGLA_BENEFICIO WHERE ID_PROM = @0`, [idProm]);
+      }
+
+      await qr.query(`DELETE FROM dbo.PROMO_CAB WHERE ID_PROM = @0`, [idProm]);
+      await qr.commitTransaction();
+    } catch (error) {
+      await qr.rollbackTransaction();
+      throw error;
+    } finally {
+      await qr.release();
+    }
+
+    return { deleted: true, hard: true, idProm, modPor: userId };
+  }
+
+  async getConfig(idPromRaw: string, user?: JwtPayload) {
     await this.ensureConfigTables();
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
     const rows = await this.dataSource.query(
       `
@@ -629,7 +748,9 @@ export class PromocionesService {
   async saveConfig(idPromRaw: string, dto: SavePromoConfigDto, user: JwtPayload) {
     await this.assertGestionAccess(user);
     await this.ensureConfigTables();
+    const userId = this.resolveAccessUserId(user) || null;
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
 
     const tBeneficio = this.normalizeUpper(dto.T_BENEFICIO);
@@ -642,6 +763,12 @@ export class PromocionesService {
 
     const sucTodas = dto.SUC_TODAS !== false;
     const sucList = sucTodas ? [] : this.sanitizeTextList(dto.SUC_LIST, true);
+    const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
+    if (sucTodas) {
+      this.assertPromoSucTextWithinAllowed('*', allowedSucs);
+    } else {
+      this.assertRequestedSucsWithinAllowed(sucList, allowedSucs);
+    }
     const clienteRaw = this.toNullableNumber(dto.CLIENTE);
     const cliente = clienteRaw != null && clienteRaw > 0 ? clienteRaw : null;
     if (cliente != null && sucTodas) {
@@ -700,7 +827,7 @@ export class PromocionesService {
         upcList.join(','),
         precioGratis,
         dto.ACTIVO == null ? 1 : Math.trunc(dto.ACTIVO),
-        Number(user.sub ?? 0) || null,
+        userId,
       ];
       if (idConfig == null) {
         await qr.query(
@@ -785,7 +912,7 @@ export class PromocionesService {
                   : 'ART_GRATIS',
           prcDesc,
           impDesc,
-          Number(user.sub ?? 0) || null,
+          userId,
         ],
       );
 
@@ -827,18 +954,21 @@ export class PromocionesService {
     user: JwtPayload,
   ) {
     await this.assertGestionAccess(user);
+    const userId = this.resolveAccessUserId(user) || null;
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
     const target = this.toInt(dto.prioridad);
     if (target == null || target <= 0) {
       throw new BadRequestException('prioridad inválida');
     }
-    await this.reorderPromoPriority(idProm, target, Number(user.sub ?? 0) || null);
-    return this.findOne(String(idProm));
+    await this.reorderPromoPriority(idProm, target, userId);
+    return this.findOne(String(idProm), user);
   }
 
-  async listCriterios(idPromRaw: string) {
+  async listCriterios(idPromRaw: string, user?: JwtPayload) {
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
     await this.ensureTableExists('dbo.PROMO_REGLA_CRITERIO');
 
@@ -863,6 +993,7 @@ export class PromocionesService {
   ) {
     await this.assertGestionAccess(user);
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
     await this.ensureTableExists('dbo.PROMO_REGLA_CRITERIO');
 
@@ -902,7 +1033,8 @@ export class PromocionesService {
     await this.assertGestionAccess(user);
     await this.ensureTableExists('dbo.PROMO_REGLA_CRITERIO');
     const idCriterio = this.parseBigIntStrict(idCriterioRaw, 'idCriterio');
-    await this.ensureCriterioExists(idCriterio);
+    const idProm = await this.ensureCriterioExists(idCriterio);
+    await this.assertPromoScopeAccess(idProm, user);
 
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -951,7 +1083,8 @@ export class PromocionesService {
     await this.assertGestionAccess(user);
     await this.ensureTableExists('dbo.PROMO_REGLA_CRITERIO');
     const idCriterio = this.parseBigIntStrict(idCriterioRaw, 'idCriterio');
-    await this.ensureCriterioExists(idCriterio);
+    const idProm = await this.ensureCriterioExists(idCriterio);
+    await this.assertPromoScopeAccess(idProm, user);
     await this.dataSource.query(
       `DELETE FROM dbo.PROMO_REGLA_CRITERIO WHERE ID_CRITERIO = @0`,
       [idCriterio],
@@ -959,8 +1092,9 @@ export class PromocionesService {
     return { deleted: true, idCriterio };
   }
 
-  async listBeneficios(idPromRaw: string) {
+  async listBeneficios(idPromRaw: string, user?: JwtPayload) {
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
     await this.ensureTableExists('dbo.PROMO_REGLA_BENEFICIO');
 
@@ -985,6 +1119,7 @@ export class PromocionesService {
   ) {
     await this.assertGestionAccess(user);
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
+    await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
     await this.ensureTableExists('dbo.PROMO_REGLA_BENEFICIO');
 
@@ -1029,7 +1164,8 @@ export class PromocionesService {
     await this.assertGestionAccess(user);
     await this.ensureTableExists('dbo.PROMO_REGLA_BENEFICIO');
     const idBeneficio = this.parseBigIntStrict(idBeneficioRaw, 'idBeneficio');
-    await this.ensureBeneficioExists(idBeneficio);
+    const idProm = await this.ensureBeneficioExists(idBeneficio);
+    await this.assertPromoScopeAccess(idProm, user);
 
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -1082,7 +1218,8 @@ export class PromocionesService {
     await this.assertGestionAccess(user);
     await this.ensureTableExists('dbo.PROMO_REGLA_BENEFICIO');
     const idBeneficio = this.parseBigIntStrict(idBeneficioRaw, 'idBeneficio');
-    await this.ensureBeneficioExists(idBeneficio);
+    const idProm = await this.ensureBeneficioExists(idBeneficio);
+    await this.assertPromoScopeAccess(idProm, user);
     await this.dataSource.query(
       `DELETE FROM dbo.PROMO_REGLA_BENEFICIO WHERE ID_BENEFICIO = @0`,
       [idBeneficio],
@@ -1903,21 +2040,125 @@ export class PromocionesService {
 
   private async ensureCriterioExists(idCriterio: bigint) {
     const rows = await this.dataSource.query(
-      `SELECT TOP 1 ID_CRITERIO FROM dbo.PROMO_REGLA_CRITERIO WHERE ID_CRITERIO = @0`,
+      `SELECT TOP 1 ID_CRITERIO, ID_PROM FROM dbo.PROMO_REGLA_CRITERIO WHERE ID_CRITERIO = @0`,
       [idCriterio.toString()],
     );
     if (!rows?.length) {
       throw new NotFoundException(`PROMO_REGLA_CRITERIO ${idCriterio} no existe`);
     }
+    return this.toInt((rows[0] as Record<string, unknown>).ID_PROM) ?? 0;
   }
 
   private async ensureBeneficioExists(idBeneficio: bigint) {
     const rows = await this.dataSource.query(
-      `SELECT TOP 1 ID_BENEFICIO FROM dbo.PROMO_REGLA_BENEFICIO WHERE ID_BENEFICIO = @0`,
+      `SELECT TOP 1 ID_BENEFICIO, ID_PROM FROM dbo.PROMO_REGLA_BENEFICIO WHERE ID_BENEFICIO = @0`,
       [idBeneficio.toString()],
     );
     if (!rows?.length) {
       throw new NotFoundException(`PROMO_REGLA_BENEFICIO ${idBeneficio} no existe`);
+    }
+    return this.toInt((rows[0] as Record<string, unknown>).ID_PROM) ?? 0;
+  }
+
+  private parsePromoSucText(value: unknown) {
+    const raw = this.normalizeText(value).toUpperCase();
+    if (!raw || raw === '*') return { all: true, sucs: [] as string[] };
+    const sucs = this.parseMultiTexts(raw).map((x) => this.normalizeUpper(x));
+    return { all: false, sucs };
+  }
+
+  private assertRequestedSucWithinAllowed(sucRaw: string, allowedSucs: string[]) {
+    if (!allowedSucs.length) return;
+    const suc = this.normalizeUpper(sucRaw);
+    if (!suc) return;
+    if (!allowedSucs.includes(suc)) {
+      throw new ForbiddenException(`Sin acceso a sucursal ${suc}`);
+    }
+  }
+
+  private assertRequestedSucsWithinAllowed(sucList: string[], allowedSucs: string[]) {
+    if (!allowedSucs.length) return;
+    for (const suc of sucList) {
+      this.assertRequestedSucWithinAllowed(suc, allowedSucs);
+    }
+  }
+
+  private assertPromoSucTextWithinAllowed(sucRaw: unknown, allowedSucs: string[]) {
+    if (!allowedSucs.length) return;
+    const parsed = this.parsePromoSucText(sucRaw);
+    if (parsed.all) {
+      throw new ForbiddenException(
+        'No autorizado para gestionar promociones con TODAS las sucursales',
+      );
+    }
+    this.assertRequestedSucsWithinAllowed(parsed.sucs, allowedSucs);
+  }
+
+  private async resolvePromoGestionAllowedSucs(user?: JwtPayload | null) {
+    if (this.isAdmin(user)) return [] as string[];
+
+    const userId = this.resolveAccessUserId(user);
+    if (!userId) {
+      throw new ForbiddenException('Usuario inválido para resolver sucursales');
+    }
+
+    const safeCodes = PromocionesService.PROMO_GESTION_MODULE_CODES
+      .map((code) => code.replace(/'/g, "''"))
+      .map((code) => `'${code}'`)
+      .join(', ');
+
+    const rows = await this.dataSource.query(
+      `SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(CAST(ums.SUC AS NVARCHAR(20)), '')))) AS SUC
+       FROM dbo.USR_MOD_SUC ums
+       INNER JOIN dbo.USUARIO u
+         ON UPPER(LTRIM(RTRIM(ISNULL(u.USERNAME, '')))) = UPPER(LTRIM(RTRIM(ISNULL(ums.USUARIO, ''))))
+       WHERE u.IDUSUARIO = @0
+         AND ISNULL(ums.ACTIVO, 1) = 1
+         AND UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, '')))) IN (${safeCodes})`,
+      [userId],
+    );
+
+    const sucs = this.sanitizeTextList(
+      (rows ?? []).map((row) => (row as Record<string, unknown>).SUC),
+      true,
+    );
+    if (sucs.length) return sucs;
+
+    const fallbackSuc = this.normalizeUpper(user?.suc ?? '');
+    if (fallbackSuc) return [fallbackSuc];
+
+    throw new ForbiddenException(
+      `Usuario sin sucursales autorizadas para módulo ${PromocionesService.PROMO_GESTION_MODULE_CODES.join(', ')}`,
+    );
+  }
+
+  private async assertPromoScopeAccess(idProm: number, user?: JwtPayload | null) {
+    const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
+    if (!allowedSucs.length) return;
+    const userId = this.resolveAccessUserId(user);
+
+    const rows = await this.dataSource.query(
+      `SELECT TOP 1 SUC, CREADO_POR FROM dbo.PROMO_CAB WHERE ID_PROM = @0`,
+      [idProm],
+    );
+    if (!rows?.length) {
+      throw new NotFoundException(`PROMO_CAB ${idProm} no existe`);
+    }
+
+    const row = rows[0] as Record<string, unknown>;
+    const createdBy = this.toInt(row.CREADO_POR) ?? 0;
+    if (userId > 0 && createdBy === userId) return;
+
+    const promoSucs = this.parsePromoSucText(row.SUC);
+    if (promoSucs.all) {
+      throw new ForbiddenException('Sin acceso para gestionar promoción global');
+    }
+
+    const intersects = promoSucs.sucs.some((suc) => allowedSucs.includes(suc));
+    if (!intersects) {
+      throw new ForbiddenException(
+        `Sin acceso a la promoción ${idProm} por sucursal`,
+      );
     }
   }
 
@@ -2517,7 +2758,7 @@ export class PromocionesService {
   private async assertGestionAccess(user: JwtPayload) {
     if (this.isAdmin(user)) return;
 
-    const userId = Number(user?.sub ?? 0);
+    const userId = this.resolveAccessUserId(user);
     if (!Number.isFinite(userId) || userId <= 0) {
       throw new ForbiddenException('Usuario inválido para gestionar promociones');
     }
@@ -2535,15 +2776,56 @@ export class PromocionesService {
     const roleCode = this.normalizeUpper((rows?.[0] as Record<string, unknown>)?.ROLE_CODE);
     if (!PromocionesService.GESTION_ROLE_CODES.has(roleCode)) {
       throw new ForbiddenException(
-        'Solo admin y jefe operaciones pueden gestionar promociones',
+        'Solo admin, jefe operaciones y supervisor pueden gestionar promociones',
       );
     }
   }
 
+  private assertAdminOnly(user?: JwtPayload | null) {
+    if (this.isAdmin(user)) return;
+    throw new ForbiddenException('Solo admin puede eliminar promociones');
+  }
+
   private isAdmin(user?: JwtPayload | null) {
-    if (Number(user?.roleId ?? 0) === 1) return true;
-    const username = this.normalizeUpper(user?.username ?? '');
+    const raw = (user ?? {}) as Record<string, unknown>;
+    const roleId = Number(raw.roleId ?? raw.IDROL ?? 0);
+    if (Number.isFinite(roleId) && roleId === 1) return true;
+    const username = this.normalizeUpper(
+      raw.username ?? raw.USERNAME ?? raw.usuario ?? '',
+    );
     return username === 'ADMIN';
+  }
+
+  private resolveAccessUserId(user?: JwtPayload | null) {
+    const raw = (user ?? {}) as Record<string, unknown>;
+    const sub = Number(raw.sub ?? raw.SUB ?? 0);
+    if (Number.isFinite(sub) && sub > 0) return sub;
+    const idUsuario = Number(
+      raw.idUsuario ?? raw.IDUSUARIO ?? raw.userId ?? raw.USER_ID ?? 0,
+    );
+    if (Number.isFinite(idUsuario) && idUsuario > 0) return idUsuario;
+    return 0;
+  }
+
+  private async resolveAccessUsername(user?: JwtPayload | null) {
+    const raw = (user ?? {}) as Record<string, unknown>;
+    const tokenUsername = this.normalizeUpper(
+      raw.username ?? raw.USERNAME ?? raw.usuario ?? '',
+    );
+    if (tokenUsername) return tokenUsername;
+
+    const userId = this.resolveAccessUserId(user);
+    if (!userId) return '';
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 UPPER(LTRIM(RTRIM(ISNULL(u.USERNAME, '')))) AS USERNAME
+      FROM dbo.USUARIO u
+      WHERE u.IDUSUARIO = @0
+      `,
+      [userId],
+    );
+    return this.normalizeUpper((rows?.[0] as Record<string, unknown>)?.USERNAME);
   }
 
   private normalizeUpper(value: unknown) {
