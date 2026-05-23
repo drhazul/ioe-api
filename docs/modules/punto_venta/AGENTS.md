@@ -30,6 +30,9 @@ Enlaces relacionados:
 - `sql/2026-05-09_promociones_descuentos_base.sql` (altera `PROMO_CAB`, crea tablas `PROMO_REGLA_*`, `PROMO_TICKET_DESC_APLI`, `PROMO_TICKET_GRATIS_*`, e instala SPs `sp_promo_evaluar_folio` + `sp_promo_desc_aplicadas_folio`).
 - regla operativa:
 - al aplicar descuentos, backend recalcula `PV_TICKET_LOG.PVTAT` con neto y registra cada descuento de renglón en `PROMO_TICKET_DESC_APLI`.
+- ajuste cotizaciones precio manual (2026-05-23):
+- `PATCH /pvticketlog/:id/precio` ya no relanza `aplicarLinea`; conserva `PVTA` manual y limpia trazabilidad/marcadores promo de la línea para independizar cambio de precio.
+- script de optimización recomendado para evaluación por línea: `sql/2026-05-23_pv_promociones_linea_indexes.sql`.
 
 ## Punto de venta: cierre transaccional de cotizacion (implementado)
 - Controller/Service:

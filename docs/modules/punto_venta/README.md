@@ -195,6 +195,9 @@ Enlaces relacionados:
 - `PV_TICKET_LOG.PVTA` = nuevo precio
 - `PV_TICKET_LOG.PVTAT` = `CTD * PVTA` recalculado
 - `PV_TICKET_LOG.updated_at` = fecha actual
+- Cotizaciones precio manual vs promoción (2026-05-23):
+- al actualizar por `PATCH /pvticketlog/:id/precio`, backend conserva `PVTA` manual y limpia trazabilidad/marcadores de promoción de la línea (sin relanzar cálculo promo sobre ese renglón).
+- optimización SQL recomendada para evaluación por línea: `sql/2026-05-23_pv_promociones_linea_indexes.sql`.
 - Auditoria:
 - inserta registro especifico en `AUDIT_LOG` con `ACTION='PVTA_OVERRIDE'`, entidad `PV_TICKET_LOG`, id renglón y metadata de antes/despues + autorizador.
 - `AUDIT_LOG.IDUSUARIO` se guarda con el `IDUSUARIO` del `SUPERPV` que validó la contraseña (o el propio supervisor cuando aplica autorización directa).

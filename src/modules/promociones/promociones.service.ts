@@ -1972,6 +1972,52 @@ export class PromocionesService {
     }
   }
 
+  async clearPromoStateForLine(lineIdRaw: string) {
+    const lineId = this.normalizeText(lineIdRaw);
+    if (!lineId) throw new BadRequestException('ID de linea es requerido');
+
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    try {
+      const ticketLogCols = await this.loadTableColumns('dbo.PV_TICKET_LOG');
+      const setParts: string[] = [];
+      if (ticketLogCols.has('IDPROMO')) setParts.push('IDPROMO = NULL');
+      if (ticketLogCols.has('TIPOPROMO')) setParts.push('TIPOPROMO = NULL');
+      if (setParts.length) {
+        setParts.push('UPDATED_AT = GETDATE()');
+        await qr.query(
+          `
+          UPDATE dbo.PV_TICKET_LOG
+          SET ${setParts.join(', ')}
+          WHERE ID = @0
+          `,
+          [lineId],
+        );
+      }
+
+      const hasDescApli = await this.tableExists('dbo.PROMO_TICKET_DESC_APLI');
+      if (hasDescApli) {
+        await qr.query(
+          `
+          DELETE FROM dbo.PROMO_TICKET_DESC_APLI
+          WHERE ID = @0
+          `,
+          [lineId],
+        );
+      }
+
+      await qr.commitTransaction();
+      return { ok: true, lineId };
+    } catch (error) {
+      await qr.rollbackTransaction();
+      throw error;
+    } finally {
+      await qr.release();
+    }
+  }
+
   async aplicadasPorFolio(idfolRaw: string) {
     const idfol = this.normalizeText(idfolRaw);
     if (!idfol) throw new BadRequestException('IDFOL es requerido');

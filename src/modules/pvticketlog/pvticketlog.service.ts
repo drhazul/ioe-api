@@ -220,7 +220,7 @@ export class PvTicketLogService {
       IP: ip,
     });
 
-    await this.applyPromocionesForLine(updated, user);
+    await this.promocionesService.clearPromoStateForLine(updated.ID);
     return this.findOne(updated.ID);
   }
 

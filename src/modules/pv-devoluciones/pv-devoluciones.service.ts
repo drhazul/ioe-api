@@ -2035,10 +2035,11 @@ export class PvDevolucionesService {
     const cols = await this.loadTableColumns(executor, tableName);
     if (!cols.has('FORM')) return [];
 
-    const selectedCols = ['FORM', 'AUT', 'IMPP', 'IMPD']
+    const selectedColsBase = ['FORM', 'AUT', 'IMPP', 'IMPD']
       .map((name) => this.normalizeUpper(name))
       .filter((name) => cols.has(name))
       .map((name) => `[${name}]`);
+    const selectedCols = selectedColsBase.map((name) => `f.${name}`);
     const hasImpp = cols.has('IMPP');
     const hasImpd = cols.has('IMPD');
     if (!hasImpp && !hasImpd) return [];
@@ -2047,7 +2048,7 @@ export class PvDevolucionesService {
       `
       SELECT
         ${selectedCols.join(',\n        ')}
-      FROM ${tableName}
+      FROM ${tableName} f
       WHERE IDFOL = @0
       `,
       [idfolOrig],
