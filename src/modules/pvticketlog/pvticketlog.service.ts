@@ -116,7 +116,9 @@ export class PvTicketLogService {
 
     const updated = this.repo.merge(row, partial);
     const saved = await this.repo.save(updated);
-    await this.applyPromocionesForLine(saved, user);
+    if (this.shouldReapplyPromocionesAfterUpdate(row, saved)) {
+      await this.applyPromocionesForLine(saved, user);
+    }
     return this.findOne(saved.ID);
   }
 
@@ -345,6 +347,37 @@ export class PvTicketLogService {
 
   private round2(value: number) {
     return Math.round(value * 100) / 100;
+  }
+
+  private shouldReapplyPromocionesAfterUpdate(
+    previous: PvTicketLogEntity,
+    current: PvTicketLogEntity,
+  ) {
+    const idfolChanged =
+      this.normalizeText(previous.IDFOL) !== this.normalizeText(current.IDFOL);
+    if (idfolChanged) return true;
+
+    const artChanged =
+      this.normalizeText(previous.ART) !== this.normalizeText(current.ART);
+    if (artChanged) return true;
+
+    const upcChanged =
+      this.normalizeText(previous.UPC) !== this.normalizeText(current.UPC);
+    if (upcChanged) return true;
+
+    const prevQty = Number(previous.CTD ?? NaN);
+    const nextQty = Number(current.CTD ?? NaN);
+    return !this.isSameNumber(prevQty, nextQty);
+  }
+
+  private isSameNumber(a: number, b: number, epsilon = 0.0001) {
+    if (!Number.isFinite(a) && !Number.isFinite(b)) return true;
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    return Math.abs(a - b) <= epsilon;
+  }
+
+  private normalizeText(value: unknown) {
+    return String(value ?? '').trim();
   }
 
   private async applyPromocionesForLine(

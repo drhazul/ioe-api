@@ -54,6 +54,7 @@
 - Colaboradores / Alta (2026-04-29): `POST /colaboradores` adopta contrato con `horario_id` (sin `turno_id`) y ejecuta `upsert` por `id_empleado`; responde `201` en creación y `200` en actualización, con mensaje claro en fallos SQL Server.
 - Punto de venta / Gestión de promociones (2026-05-09): se incorpora módulo backend `promociones` en `AppModule` con endpoints CRUD de cabecera (`PROMO_CAB`), criterios (`PROMO_REGLA_CRITERIO`), beneficios (`PROMO_REGLA_BENEFICIO`) y ejecución por folio (`/promociones/evaluar/:idfol`, `/promociones/aplicar/:idfol`, `/promociones/aplicadas/:idfol`). La administración queda restringida a `admin` y rol `JEFOPE`; operación requiere script `sql/2026-05-09_promociones_descuentos_base.sql`.
 - Punto de venta / Cotizaciones precio manual vs promoción (2026-05-23): `PATCH /pvticketlog/:id/precio` deja de recalcular promociones sobre la línea para preservar `PVTA` manual; el proceso limpia trazas/marcadores de promo del renglón. Script recomendado de rendimiento para evaluación por línea: `sql/2026-05-23_pv_promociones_linea_indexes.sql`.
+- Punto de venta / Cotizaciones ORD vs precio manual (2026-05-23): `PATCH /pvticketlog/:id` solo reaplica promoción cuando cambian campos de cálculo (`IDFOL/ART/UPC/CTD`); al asignar/quitar `ORD` no recalcula promo ni regresa `PVTA` a catálogo.
 
 ## Documentación por módulos
 - Base de módulos: `docs/modules/base_modulos/AGENTS.md` (README: `docs/modules/base_modulos/README.md`)
