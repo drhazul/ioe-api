@@ -134,6 +134,7 @@ export class PvCotizacionesCierreService {
     'DEUDOR',
   ]);
   private static readonly FORMA_CREDITO = 'CREDITO';
+  private static readonly FORMAS_NO_MEZCLABLES = new Set(['CREDITO', 'DEUDOR']);
   private static readonly NDOC_LOCK_RESOURCE = 'PV_CIERRE_NDOC_602';
 
   private static readonly FORMAS_PERMITIDAS = new Set([
@@ -322,14 +323,30 @@ export class PvCotizacionesCierreService {
         'Debe registrar al menos una forma de pago',
       );
     }
-    this.assertCreditoNoCombinado(formas);
+    this.assertCreditoDeudorNoCombinado(formas);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
 
     try {
       // El SP realiza el cierre transaccional; aqui solo prevalidamos acceso/contexto.
-      await this.resolveContext(queryRunner, idfol, user, dto.suc, false);
+      const context = await this.resolveContext(
+        queryRunner,
+        idfol,
+        user,
+        dto.suc,
+        false,
+      );
+      const totals = this.calculateTotals({
+        totalBase: context.totalBase,
+        ivaIntegrado: context.ivaIntegrado,
+        tipotran,
+        rqfac,
+      });
+      this.validateSecuenciaFormasContraPendiente({
+        formas,
+        total: totals.total,
+      });
       const procedureName = 'dbo.sp_pv_cotizacion_cerrar';
       const hasProcedure = await this.procedureExists(
         queryRunner,
@@ -985,16 +1002,37 @@ export class PvCotizacionesCierreService {
     });
   }
 
-  private assertCreditoNoCombinado(formas: FormaNormalizada[]) {
-    const creditoCount = formas.filter(
-      (item) => item.form === PvCotizacionesCierreService.FORMA_CREDITO,
+  private assertCreditoDeudorNoCombinado(formas: FormaNormalizada[]) {
+    const noMezclablesCount = formas.filter((item) =>
+      PvCotizacionesCierreService.FORMAS_NO_MEZCLABLES.has(item.form),
     ).length;
-    if (!creditoCount) return;
+    if (!noMezclablesCount) return;
 
-    if (formas.length > 1 || creditoCount > 1) {
+    if (formas.length > 1 || noMezclablesCount > 1) {
       throw new BadRequestException(
-        'La forma CREDITO no se puede combinar con otras formas de pago',
+        'Las formas CREDITO y DEUDOR no se pueden combinar con otras formas de pago',
       );
+    }
+  }
+
+  private validateSecuenciaFormasContraPendiente(input: {
+    formas: FormaNormalizada[];
+    total: number;
+  }) {
+    const total = this.round2(input.total);
+    let acumulado = 0;
+    const epsilon = 0.0001;
+
+    for (const item of input.formas) {
+      const impp = this.round2(item.impp);
+      const pendiente = this.round2(Math.max(total - acumulado, 0));
+      const isEfectivo = item.form === 'EFECTIVO';
+      if (!isEfectivo && impp - pendiente > epsilon) {
+        throw new BadRequestException(
+          `La forma ${item.form} no puede exceder el pendiente por pagar (${pendiente.toFixed(2)})`,
+        );
+      }
+      acumulado = this.round2(acumulado + impp);
     }
   }
 
@@ -1069,7 +1107,11 @@ export class PvCotizacionesCierreService {
         }
       }
     }
-    this.assertCreditoNoCombinado(formas);
+    this.assertCreditoDeudorNoCombinado(formas);
+    this.validateSecuenciaFormasContraPendiente({
+      formas,
+      total: input.total,
+    });
 
     if (PvCotizacionesCierreService.FORMAS_NO_EFECTIVO.size > 0) {
       const hasNoEfectivo = formas.some((item) =>

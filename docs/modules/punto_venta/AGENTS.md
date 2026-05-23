@@ -71,7 +71,8 @@ Enlaces relacionados:
 - service no envuelve en transaccion TypeORM para evitar `EABORT`; atomicidad en SP.
 - errores de validacion SQL retornan `400/409` (mensaje negocio).
 - inserta formas en `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`); `CREDITO/DEUDOR` guarda `AUT=IDFOL` y `IMPP>0`; `IMPD` = `IMPP-IMPC` (en no-efectivo coincide con `IMPP`).
-- `CREDITO` no se mezcla con otras formas; valida saldo neto `DAT_CTRL_CTAS` (`CTA='101001002'`) y registra cargo (`CMOV=602`, `CTA='101001002'`, `CLIENT`, `IDFOL`, `NDOC`, `IMPT` negativo).
+- `CREDITO` y `DEUDOR` no se mezclan con otras formas; `CREDITO` valida saldo neto `DAT_CTRL_CTAS` (`CTA='101001002'`) y registra cargo (`CMOV=602`, `CTA='101001002'`, `CLIENT`, `IDFOL`, `NDOC`, `IMPT` negativo).
+- validación secuencial de formas: cada forma no `EFECTIVO` se valida contra pendiente acumulado en orden de captura; solo `EFECTIVO` puede exceder total para generar cambio.
 - compatibilidad columnas: usa `CMOV` o `CLSD`; llena `FCND/RTXT` si existen.
 - genera `NDOC` en transacción (lock + max), base `N6000001+`, usando `COL_LENGTH` para evitar errores cuando la columna falta.
 - valida suma de formas (`sum(impp)` <= total salvo efectivo con cambio) y referencias `REF_DETALLE.ESTATUS='PROCESADO'` usadas.
@@ -98,6 +99,11 @@ Enlaces relacionados:
 - `POST /pv/devoluciones/:idfolDev/pago/preview`
 - `POST /pv/devoluciones/:idfolDev/pago/finalizar`
 - `GET /pv/devoluciones/:idfolDev/print-preview`
+- Reglas devolución simplificada (2026-05-22):
+- devolución parcial solo cuando el ticket origen tiene una sola forma y es `EFECTIVO`.
+- si ticket origen tiene forma mixta o no-efectivo, devolución debe ser total y respetar cada forma/referencia de origen.
+- finalización valida que payload de `formas` coincida con forma(s) esperada(s) del origen; si no coincide responde `409`.
+- soporte SQL sugerido: `sql/2026-05-14_pv_devoluciones_formas_mixtas_prorrata_indexes.sql` (índices para `IDFOLORIG` y tabla de formas).
 
 ## Pago de Servicios PS (implementado 2026-03)
 - Modulo backend:
@@ -137,8 +143,10 @@ Enlaces relacionados:
 - formas no `EFECTIVO` requieren referencia/aut y no pueden exceder faltante; candado al quedar `PAGADO` lleva a `CERRADO_PS` vía `PATCH /pvctrfolasvr/:idfol`.
 - compatibilidad PS (2026-04): backend/UI aceptan `TRANSMITIR` como estado cerrado legacy para folios históricos, pero el cierre operativo vigente de PS usa `CERRADO_PS`.
 - impresión PS: vouchers por forma no `EFECTIVO`, segundo PDF, línea de recorte `RESUMEN DE ORDS` / `ORDS`.
+- PS comprobantes múltiples (2026-05-22): al finalizar pago, `sp_ps_pago_finalize` persiste `IMPD` por forma (`IMPP-IMPC`) para evitar duplicados cuando hay más de un comprobante no-efectivo en la misma transacción.
+- PS reparación incidente (2026-05-22): script `sql/2026-05-22_ps_fix_comprobantes_duplicados_df01_20260520_vf_0061.sql` corrige formas del caso `DF01-20260520-VF-0061` y re-sincroniza entrega OPV del día.
 - Panel PS: folios `PAGADO` abren directo pago.
-- Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen, pago reutiliza formas origen y exige misma forma para no `CREDITO/DEUDOR`, sincroniza facturación con `sp_fact_sync_folio_vf`, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.
+- Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen y aplica regla parcial solo-efectivo, pago valida forma(s) origen, sincroniza facturación con `sp_fact_sync_folio_vf`, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.
 
 ## Punto de venta: alta de cotizacion desde panel (trazabilidad app)
 - Flujo frontend: confirmacion de alta -> modal de cliente filtrado por SUC.

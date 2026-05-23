@@ -1978,7 +1978,7 @@ BEGIN
         @pFORM = @formaForm,
         @pIMPP = @formaImpp,
         @pIMPC = @impc,
-        @pIMPD = @total,
+        @pIMPD = ROUND(@formaImpp - @impc, 4),
         @pAUT = @formaAut;
 
       FETCH NEXT FROM forma_cursor INTO @formaForm, @formaImpp, @formaAut;

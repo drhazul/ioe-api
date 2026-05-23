@@ -1,4 +1,3 @@
-
 CREATE   PROCEDURE dbo.sp_ordenes_trabajo_cambio_material
   @IORD NVARCHAR(255),
   @ART_NUEVO NVARCHAR(255),
@@ -7,6 +6,8 @@ CREATE   PROCEDURE dbo.sp_ordenes_trabajo_cambio_material
   @DOCDIF NVARCHAR(255) = NULL,
   @MOTR INT = NULL,
   @CTD_C_M FLOAT = 1,
+  @PVTA_NUEVO FLOAT = NULL,
+  @IORD_NUEVA NVARCHAR(255) = NULL,
   @USER NVARCHAR(255) = NULL,
   @IP NVARCHAR(100) = NULL,
   @IS_ADMIN BIT = 0,
@@ -128,19 +129,26 @@ BEGIN
 
   SET @ctdAfectada = @CTD_C_M;
   SET @remanente = @ctdOrig - @ctdAfectada;
-  SET @newIord = LEFT(CONCAT(
-      ISNULL(@idfol, 'ORD'),
-      '-CM-',
-      FORMAT(GETDATE(), 'yyyyMMddHHmmss'),
-      '-',
-      RIGHT(CONVERT(VARCHAR(36), NEWID()), 4)
-    ), 255);
+  SET @newIord = NULLIF(LTRIM(RTRIM(ISNULL(@IORD_NUEVA, ''))), '');
+
+  IF @newIord IS NULL
+  BEGIN
+    DECLARE @fcnGenCM DATETIME = GETDATE();
+    EXEC dbo.sp_pv_ctr_ords_generate_iord
+      @SUC = @sucOrd,
+      @FCN = @fcnGenCM,
+      @IORD_OUT = @newIord OUTPUT;
+  END;
+
+  IF @newIord IS NULL OR LTRIM(RTRIM(@newIord)) = ''
+    THROW 58028, 'No se pudo generar la nueva IORD para cambio material', 1;
+
   SET @ctdAbs = ABS(@ctdAfectada);
   SET @ctdSalida = -ABS(@ctdAfectada);
   SET @docpOrig = ISNULL(@idfol, @IORD);
-  SET @docpNew = ISNULL(@idfol, @newIord);
-  SET @txtReingreso = CONCAT('Reintegracion por cambio material ORD ', @IORD);
-  SET @txtSalida = CONCAT('Salida por cambio material ORD ', @newIord);
+  SET @docpNew = @docpOrig;
+  SET @txtReingreso = CONCAT('Cambio - Reintegracion stock ORD', @IORD);
+  SET @txtSalida = CONCAT('Cambio - Descuento stock ORD', @newIord);
   SET @txtDiff = CONCAT('Diferencia cambio material ORD ', @IORD, ' -> ', @newIord);
 
   BEGIN TRY
@@ -150,8 +158,8 @@ BEGIN
       @IORD_ORIG = @IORD,
       @IORD_NEW = @newIord,
       @NEW_ART = @ART_NUEVO,
-      @NEW_CTD = @ctdAfectada,
-      @TIPOM = @tipom,
+      @NEW_CTD = @ctdOrig,
+      @TIPOM = 0,
       @MOTR = @motrInt,
       @REEORD = @IORD,
       @DOCDIF = @doc,
@@ -160,8 +168,21 @@ BEGIN
 
     IF OBJECT_ID('dbo.PV_CTR_ORDS_DET', 'U') IS NOT NULL
     BEGIN
-      INSERT INTO dbo.PV_CTR_ORDS_DET (IORD, ART, JOB, ESF, CIL, EJE)
+      INSERT INTO dbo.PV_CTR_ORDS_DET (IORDP, IORD, ART, JOB, ESF, CIL, EJE)
       SELECT
+        CONCAT(
+          ROW_NUMBER() OVER (
+            ORDER BY
+              CASE UPPER(LTRIM(RTRIM(ISNULL(d.JOB, ''))))
+                WHEN 'OD' THEN 1
+                WHEN 'OI' THEN 2
+                WHEN 'ADD' THEN 3
+                ELSE 99
+              END,
+              UPPER(LTRIM(RTRIM(ISNULL(d.IORDP, ''))))
+          ),
+          @newIord
+        ),
         @newIord,
         COALESCE(NULLIF(@ART_NUEVO, ''), d.ART),
         d.JOB,
@@ -174,10 +195,11 @@ BEGIN
 
     UPDATE dbo.PV_CTR_ORDS
     SET
-      CTD = CASE WHEN @remanente > 0 THEN @remanente ELSE CTD END,
+      CTD = @ctdOrig,
       CTD_C_M = @ctdAfectada,
+      REEORD = @newIord,
       selCtrlOrd = NULL,
-      ESTSEGU = CASE WHEN @remanente > 0 THEN ESTSEGU ELSE 4 END,
+      ESTSEGU = 4,
       ESTATUS = 2,
       FCNMOD = GETDATE(),
       COMAD = LEFT(
@@ -197,6 +219,7 @@ BEGIN
 
     UPDATE dbo.PV_CTR_ORDS
     SET
+      ASIGN = NULL,
       CTD_C_M = @ctdAfectada,
       selCtrlOrd = NULL,
       FCNMOD = GETDATE()
@@ -209,7 +232,7 @@ BEGIN
       @TXT = @txtReingreso,
       @DOCP = @docpOrig,
       @USR = @USER,
-      @CLSM = 'ORD';
+      @CLSM = '204';
 
     EXEC dbo.sp_ordenes_trabajo_registrar_mb51
       @SUC = @sucOrd,
@@ -218,7 +241,7 @@ BEGIN
       @TXT = @txtSalida,
       @DOCP = @docpNew,
       @USR = @USER,
-      @CLSM = 'ORD';
+      @CLSM = '205';
 
     IF OBJECT_ID('dbo.PV_TICKET_LOG', 'U') IS NOT NULL
     BEGIN
@@ -268,10 +291,55 @@ BEGIN
         AND UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@artOrig, ''))))
       ORDER BY TRY_CONVERT(INT, ISNULL(a.BLOQ, 0)) ASC;
     END;
-
+    SET @precioNuevo = COALESCE(@PVTA_NUEVO, @precioNuevo, @precioOrig, 0);
     SET @importeOrig = ROUND(ISNULL(@precioOrig, 0) * @ctdAfectada, 2);
     SET @importeNuevo = ROUND(ISNULL(@precioNuevo, 0) * @ctdAfectada, 2);
-    SET @diffVenta = ROUND(@importeNuevo - @importeOrig, 2);
+
+    DECLARE @ivaIntegrado INT = 0;
+    DECLARE @rqfacFolio INT = 0;
+    DECLARE @tipoTran NVARCHAR(2) = 'VF';
+    DECLARE @totalOrig FLOAT = 0;
+    DECLARE @totalNuevo FLOAT = 0;
+
+    SELECT TOP 1
+      @ivaIntegrado = ISNULL(TRY_CONVERT(INT, s.IVA_INTEGRADO), 0)
+    FROM dbo.DAT_SUC s
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(s.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@sucOrd, ''))));
+
+    SELECT TOP 1
+      @rqfacFolio = ISNULL(TRY_CONVERT(INT, f.REQF), 0),
+      @tipoTran = CASE
+        WHEN UPPER(LTRIM(RTRIM(ISNULL(f.ORIGEN_AUT, '')))) IN ('CA', 'VF') THEN UPPER(LTRIM(RTRIM(ISNULL(f.ORIGEN_AUT, ''))))
+        WHEN UPPER(LTRIM(RTRIM(ISNULL(f.AUT, '')))) IN ('DCA', 'CA', 'DC', 'DG', 'CP', 'PS') THEN 'CA'
+        WHEN UPPER(LTRIM(RTRIM(ISNULL(f.AUT, '')))) IN ('DVF', 'VF') THEN 'VF'
+        ELSE 'VF'
+      END
+    FROM dbo.PV_CTR_FOL_ASVR f
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@idfol, ''))))
+    ORDER BY ISNULL(f.FCNM, f.FCN) DESC;
+
+    IF @tipoTran = 'CA'
+    BEGIN
+      SET @totalOrig = ROUND(@importeOrig, 2);
+      SET @totalNuevo = ROUND(@importeNuevo, 2);
+    END
+    ELSE IF @ivaIntegrado = -1
+    BEGIN
+      SET @totalOrig = ROUND(@importeOrig, 2);
+      SET @totalNuevo = ROUND(@importeNuevo, 2);
+    END
+    ELSE IF @rqfacFolio = 1
+    BEGIN
+      SET @totalOrig = ROUND(@importeOrig * 1.16, 2);
+      SET @totalNuevo = ROUND(@importeNuevo * 1.16, 2);
+    END
+    ELSE
+    BEGIN
+      SET @totalOrig = ROUND(@importeOrig, 2);
+      SET @totalNuevo = ROUND(@importeNuevo, 2);
+    END;
+
+    SET @diffVenta = ROUND(@totalNuevo - @totalOrig, 2);
 
     EXEC dbo.sp_ordenes_trabajo_registrar_ctrl_ctas_diff
       @SUC = @sucOrd,
@@ -279,7 +347,8 @@ BEGIN
       @IDFOL = @idfol,
       @DIFF = @diffVenta,
       @DOCDIF = @doc,
-      @DESC_MOV = @txtDiff;
+      @DESC_MOV = @txtDiff,
+      @USR = @USER;
 
     COMMIT TRANSACTION;
   END TRY

@@ -91,6 +91,8 @@ Enlaces relacionados:
 - trazabilidad UI (app, 2026-03): en pago PS, AppBar usa flecha mientras `ESTA != PAGADO`; en `PAGADO` cambia a candado para salida a `CERRADO_PS`. En panel PS, filas `PAGADO` navegan directo a `/ps/:idFol/pago`.
 - compatibilidad PS (2026-04): backend/UI aceptan `TRANSMITIR` como estado cerrado legacy para folios históricos, pero el cierre operativo vigente de PS usa `CERRADO_PS`.
 - trazabilidad UI (app, 2026-03): en impresión de ticket PS, si existen formas no `EFECTIVO`, la app agrega al final voucher `SOPORTE RECEPCION PAGO` por cada forma no efectivo usando datos de `FORMAS_JSON`, totales y contexto del folio.
+- trazabilidad backend (2026-05-22): `sp_ps_pago_finalize` persiste `IMPD` por forma (`IMPP-IMPC`) en `PV_CTR_FOL_FORM(_SVR)`; evita duplicidad de importes cuando el pago PS usa múltiples comprobantes no-efectivo.
+- trazabilidad operación/soporte (2026-05-22): script `sql/2026-05-22_ps_fix_comprobantes_duplicados_df01_20260520_vf_0061.sql` repara caso `DF01-20260520-VF-0061` y re-sincroniza resumen de entrega OPV.
 - trazabilidad UI (app, 2026-03): el voucher PS incluye espacio en blanco para firma y renglón `Firma cliente` después de `FCN`.
 - trazabilidad UI (app, 2026-03): en PS, el voucher se imprime en un segundo PDF; al cerrar la vista previa del ticket principal, la app solicita confirmación y luego abre la vista previa del voucher.
 - trazabilidad UI (app, 2026-03): se agrega línea de recorte entre `RESUMEN DE ORDS` y `ORDS`; `GRACIAS POR SU CONFIANZA` se imprime después de `RESUMEN DE ORDS` y antes del recorte hacia `ORDS`.
@@ -263,11 +265,12 @@ Enlaces relacionados:
 - `DAT_CTRL_CTAS` en `CREDITO/DEUDOR`: inserta cargo con `CMOV=602`, `CTA='101001002'`, `CLIENT`, `IDFOL`, `NDOC`, `IMPT` negativo.
 - Compatibilidad de esquema en `DAT_CTRL_CTAS`: si no existe `CMOV` usa `CLSD`; ademas llena `FCND` y `RTXT` cuando esas columnas existen.
 - Validacion de credito: disponible = `FACT_CLIENT_SHP.L_CRED - MAX(-SUM(DAT_CTRL_CTAS.IMPT), 0)` (misma `CTA` y `CLIENT`; cargos negativos consumen crédito y abonos positivos lo liberan).
-- `CREDITO` no se puede combinar con otras formas de pago en el mismo cierre.
+- `CREDITO` y `DEUDOR` no se pueden combinar con otras formas de pago en el mismo cierre.
 - `NDOC` se genera concurrente en transaccion (sin `DCount`) con base `N6000001+`.
 - compatibilidad SQL: para obtener maximo `NDOC` en cierre se valida existencia de columna con `COL_LENGTH` + SQL dinamico, evitando errores `Invalid column name 'NDOC'` en variantes de esquema.
 - El cierre exige `REF_DETALLE.ESTATUS='PROCESADO'` en formas no efectivo con referencia y rechaza referencias sobrantes sin usar.
-- El cierre rechaza pagos que excedan el total (`sum(formas.impp) > total`) excepto cuando hay `EFECTIVO`, donde se permite excedente para cambio.
+- En validación secuencial por orden de captura, cada forma no `EFECTIVO` no puede exceder el pendiente acumulado; solo `EFECTIVO` puede exceder para generar cambio.
+- El cierre rechaza pagos que excedan el total (`sum(formas.impp) > total`) cuando no existe `EFECTIVO`; con `EFECTIVO` se permite excedente para cambio.
 - La operacion es transaccional con rollback completo; no permite cierres parciales.
 - Preview de impresion (`GET /pv/cotizaciones/:idfol/cierre/print-preview`):
 - arma un payload de 5 bloques para PDF: cabecera (`DAT_SUC`), detalle ticket (`PV_TICKET_LOG`), totales/formas/cambio (`PV_CTR_FOL_FORM_SVR` fallback `PV_CTR_FOL_FORM`), pie transaccional (`PV_CTR_FOL_ASVR` + `PV_OPV` + `FACT_CLIENT_SHP`) y ORDs con detalle (`PV_CTR_ORDS` + `PV_CTR_ORDS_DET`) por `IDFOL`.
@@ -334,6 +337,8 @@ Enlaces relacionados:
 - marca ORDs afectadas como anuladas (`PV_CTR_ORDS.ESTATUS=4`).
 - sincronización facturación devolución VF (2026-03-20): al finalizar `POST /pv/devoluciones/:idfolDev/pago/finalizar`, backend ejecuta `dbo.sp_fact_sync_folio_vf` sobre el folio origen para recalcular `FAC_SVR_SHAP/FACT_TICKET_SHP` con base en `CTD-CTDDF`; devolución total deja `ESTATUS='VTA DEV'` e `IMPT=0`, y devolución parcial disminuye `IMPT` en facturación.
 - forma devolución = forma origen (2026-03-20): para devoluciones no `CREDITO/DEUDOR`, backend valida que el pago se cierre en la misma forma del ticket origen (`EFECTIVO`, `TRANSFERENCIA`, `TARJETA`, `CHEQUE`, `DEPOSITO 3RO`); para `CREDITO/DEUDOR` se conserva la política vigente.
+- devoluciones regla simplificada (2026-05-22): devolución parcial solo cuando el ticket origen se pagó únicamente con `EFECTIVO`.
+- devoluciones regla simplificada (2026-05-22): si ticket origen tiene forma mixta o forma no-efectivo, `POST /pv/devoluciones/:idfolDev/pago/finalizar` exige devolución total y que `formas` respete cada forma/referencia origen; en discrepancia devuelve `409`.
 - limpieza preventiva DVF en facturación (2026-03-20): al finalizar devolución, backend depura cualquier registro residual del folio devolución en `FAC_SVR_SHAP` y `FACT_TICKET_SHP` para evitar cabeceras no deseadas ligadas a devolución.
 - respuesta cierre devolución (2026-03-20): el endpoint devuelve bloque `facturacionSync` (`idfol`, `syncApplied`, `estatus`, `impt`, `detailRows`, `evento`) para trazabilidad de sincronización en frontend.
 - transmisión MB51/stock devolución (2026-03): al finalizar pago de devolución, backend ejecuta `dbo.sp_mb51_transmitir_folio` para insertar renglones en `DAT_MB51` y ajustar `DAT_ART.STOCK` por resumen de `ART+SUC`; el estado del folio se mantiene en `PAGADO`.
@@ -342,6 +347,7 @@ Enlaces relacionados:
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta la tabla staging `PV_DEV_DET_TMP`.
 - `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación por evento VF.
 - `sql/2026-03-20_facturacion_sync_after_devoluciones.sql` depura registros históricos de `IDFOLDEV` en `FAC_SVR_SHAP/FACT_TICKET_SHP` y luego reprocesa folios origen elegibles (`AUT='VF'` + `REQF=1`).
+- `sql/2026-05-14_pv_devoluciones_formas_mixtas_prorrata_indexes.sql` agrega índices para acelerar consultas por `IDFOLORIG` y formas.
 
 
 ## Promociones (2026-05-10)

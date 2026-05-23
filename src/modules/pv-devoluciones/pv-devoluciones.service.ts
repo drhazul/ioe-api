@@ -90,9 +90,14 @@ type FormaNormalizada = {
   aut: string | null;
 };
 
-type FormaOrigenPrincipal = {
+type FormaOrigenBucket = {
   form: string;
   aut: string | null;
+  amountOriginal: number;
+  amountRefunded: number;
+  amountAvailable: number;
+  isCreditoDeudor: boolean;
+  key: string;
 };
 
 type SupervisorInfo = {
@@ -559,6 +564,11 @@ export class PvDevolucionesService {
       tipotran: context.tipotran,
       rqfac,
     });
+    await this.assertPartialRefundPolicy(
+      this.dataSource,
+      context,
+      lines,
+    );
     const formasSugeridas = await this.suggestFormasPago(
       this.dataSource,
       context.idfolOrig,
@@ -640,9 +650,12 @@ export class PvDevolucionesService {
         tipotran: context.tipotran,
         rqfac,
       });
+      await this.assertPartialRefundPolicy(queryRunner, context, lines);
       await this.assertFormasPagoContraOrigen(
         queryRunner,
         context.idfolOrig,
+        context.idfolDev,
+        totals.total,
         formas,
       );
 
@@ -1666,6 +1679,41 @@ export class PvDevolucionesService {
     );
   }
 
+  private calculateTotalBaseDisponible(lines: DevolucionLine[]) {
+    return this.round2(
+      lines.reduce((acc, line) => {
+        const difd = this.round4(Math.max(line.difd, 0));
+        return difd > 0 ? acc + difd * line.pvta : acc;
+      }, 0),
+    );
+  }
+
+  private async assertPartialRefundPolicy(
+    executor: SqlExecutor,
+    context: DevolucionContext,
+    lines: DevolucionLine[],
+  ) {
+    const totalBaseSelected = this.calculateTotalBase(lines);
+    if (totalBaseSelected <= PvDevolucionesService.EPSILON) return;
+
+    const totalBaseDisponible = this.calculateTotalBaseDisponible(lines);
+    const isPartial =
+      totalBaseSelected + PvDevolucionesService.EPSILON < totalBaseDisponible;
+    if (!isPartial) return;
+
+    const formasOrigen = await this.loadDistinctOriginalForms(
+      executor,
+      context.idfolOrig,
+    );
+    const isSingleCash =
+      formasOrigen.size === 1 && formasOrigen.has('EFECTIVO');
+    if (isSingleCash) return;
+
+    throw new ConflictException(
+      'Solo se permiten devoluciones parciales cuando el ticket origen se pagó únicamente en EFECTIVO. Si el ticket tiene forma no efectivo o pago mixto, debe devolverse el total respetando cada forma de pago origen.',
+    );
+  }
+
   private async validateSelectedLines(
     executor: SqlExecutor,
     context: DevolucionContext,
@@ -1819,14 +1867,23 @@ export class PvDevolucionesService {
   ) {
     if (total <= 0) return [];
 
-    const formaOrig = await this.loadPrimaryFormaOriginal(executor, idfolOrig);
-    const sugeridas: Array<{ form: string; impp: number; aut: string | null }> =
-      [];
+    const buckets = await this.loadFormaOrigenBuckets(
+      executor,
+      idfolOrig,
+      idfolDev,
+    );
+    if (!buckets.length) {
+      return [
+        {
+          form: 'EFECTIVO',
+          impp: this.round2(total),
+          aut: null,
+        },
+      ];
+    }
 
-    if (
-      formaOrig?.form === 'CREDITO' ||
-      formaOrig?.form === 'DEUDOR'
-    ) {
+    const creditBuckets = buckets.filter((item) => item.isCreditoDeudor);
+    if (creditBuckets.length) {
       const debeRows = await executor.query(
         `
         SELECT SUM(ISNULL(IMPT, 0)) AS DEBE
@@ -1836,123 +1893,400 @@ export class PvDevolucionesService {
         [idfolOrig],
       );
       const debe = this.toNumber((debeRows?.[0] ?? {})['DEBE']) ?? 0;
-      const abonoCr = this.round2(Math.min(total, Math.max(-debe, 0)));
-      const efectivo = this.round2(Math.max(total - abonoCr, 0));
-
-      if (abonoCr > 0) {
-        sugeridas.push({
-          form: formaOrig.form,
-          impp: abonoCr,
-          aut: idfolDev,
-        });
+      const maxByDebt = this.round2(Math.max(-debe, 0));
+      const maxByCreditAvailable = this.round2(
+        creditBuckets.reduce((acc, item) => acc + item.amountAvailable, 0),
+      );
+      const abonoCreditoTotal = this.round2(
+        Math.min(total, maxByDebt, maxByCreditAvailable),
+      );
+      const sugeridas: Array<{ form: string; impp: number; aut: string | null }> =
+        [];
+      if (abonoCreditoTotal > 0) {
+        const creditAlloc = this.allocateByAvailability(
+          abonoCreditoTotal,
+          creditBuckets.map((item) => item.amountAvailable),
+        );
+        for (let i = 0; i < creditBuckets.length; i += 1) {
+          const amount = this.round2(creditAlloc[i] ?? 0);
+          if (amount <= 0) continue;
+          const bucket = creditBuckets[i];
+          sugeridas.push({
+            form: bucket.form,
+            impp: amount,
+            aut: bucket.aut ?? idfolDev,
+          });
+        }
       }
-      if (efectivo > 0) {
-        sugeridas.push({
-          form: 'EFECTIVO',
-          impp: efectivo,
-          aut: null,
-        });
+
+      const restante = this.round2(
+        Math.max(total - abonoCreditoTotal, 0),
+      );
+      if (restante > 0) {
+        const nonCreditBuckets = buckets.filter((item) => !item.isCreditoDeudor);
+        const availableNonCredit = this.round2(
+          nonCreditBuckets.reduce((acc, item) => acc + item.amountAvailable, 0),
+        );
+        if (availableNonCredit > 0) {
+          const nonCreditAlloc = this.allocateByAvailability(
+            Math.min(restante, availableNonCredit),
+            nonCreditBuckets.map((item) => item.amountAvailable),
+          );
+          for (let i = 0; i < nonCreditBuckets.length; i += 1) {
+            const amount = this.round2(nonCreditAlloc[i] ?? 0);
+            if (amount <= 0) continue;
+            const bucket = nonCreditBuckets[i];
+            sugeridas.push({
+              form: bucket.form,
+              impp: amount,
+              aut: bucket.form === 'EFECTIVO' ? null : bucket.aut,
+            });
+          }
+        }
+
+        const covered = this.round2(
+          sugeridas.reduce((acc, item) => acc + item.impp, 0),
+        );
+        const faltante = this.round2(Math.max(total - covered, 0));
+        if (faltante > 0) {
+          sugeridas.push({
+            form: 'EFECTIVO',
+            impp: faltante,
+            aut: null,
+          });
+        }
       }
-      if (sugeridas.length) return sugeridas;
+
+      return this.sortSuggestedFormas(sugeridas);
     }
 
-    if (formaOrig?.form) {
-      return [
-        {
-          form: formaOrig.form,
-          impp: this.round2(total),
-          aut: formaOrig.form === 'EFECTIVO' ? null : formaOrig.aut,
-        },
-      ];
-    }
-
-    return [
-      {
-        form: 'EFECTIVO',
-        impp: this.round2(total),
-        aut: null,
-      },
-    ];
-  }
-
-  private async loadPrimaryFormaOriginal(
-    executor: SqlExecutor,
-    idfolOrig: string,
-  ): Promise<FormaOrigenPrincipal | null> {
-    const tableName = await this.resolveFolioFormTable(executor);
-    const cols = await this.loadTableColumns(executor, tableName);
-    if (!cols.has('FORM')) return null;
-
-    const selectedCols = ['FORM'];
-    if (cols.has('AUT')) {
-      selectedCols.push('AUT');
-    }
-
-    const orderByParts: string[] = [];
-    if (cols.has('IMPP')) {
-      orderByParts.push('ABS(TRY_CONVERT(MONEY, IMPP)) DESC');
-    }
-    if (cols.has('FCN')) {
-      orderByParts.push('[FCN] ASC');
-    } else if (cols.has('IDF')) {
-      orderByParts.push('[IDF] ASC');
-    }
-    orderByParts.push('[FORM] ASC');
-    const orderBy = orderByParts.join(', ');
-
-    const rows = await executor.query(
-      `
-      SELECT TOP 1
-        ${selectedCols.join(', ')}
-      FROM ${tableName}
-      WHERE IDFOL = @0
-      ORDER BY ${orderBy}
-      `,
-      [idfolOrig],
+    const totalDisponible = this.round2(
+      buckets.reduce((acc, item) => acc + item.amountAvailable, 0),
     );
+    if (total > totalDisponible + PvDevolucionesService.EPSILON) {
+      throw new ConflictException(
+        `El total de devolución (${total.toFixed(2)}) excede el saldo disponible por forma del ticket origen (${totalDisponible.toFixed(2)})`,
+      );
+    }
 
-    const row = ((rows?.[0] ?? {}) as Record<string, unknown>) ?? {};
-    const forma = this.normalizeForma(row.FORM);
-    if (!forma) return null;
-    return {
-      form: forma,
-      aut: this.nullableText(row.AUT),
-    };
+    const allocations = this.allocateByAvailability(
+      total,
+      buckets.map((item) => item.amountAvailable),
+    );
+    const sugeridas = buckets
+      .map((bucket, index) => {
+        const amount = this.round2(allocations[index] ?? 0);
+        if (amount <= 0) return null;
+        return {
+          form: bucket.form,
+          impp: amount,
+          aut: bucket.form === 'EFECTIVO' ? null : bucket.aut,
+        };
+      })
+      .filter(
+        (item): item is { form: string; impp: number; aut: string | null } =>
+          item != null,
+      );
+
+    return this.sortSuggestedFormas(sugeridas);
   }
 
   private async assertFormasPagoContraOrigen(
     executor: SqlExecutor,
     idfolOrig: string,
+    idfolDev: string,
+    total: number,
     formas: FormaNormalizada[],
   ) {
-    const formaOrig = await this.loadPrimaryFormaOriginal(executor, idfolOrig);
-    if (!formaOrig?.form) return;
-    if (formaOrig.form === 'CREDITO' || formaOrig.form === 'DEUDOR') {
-      return;
-    }
-
-    const distinctForms = Array.from(
-      new Set(formas.map((item) => this.normalizeUpper(item.form)).filter(Boolean)),
+    const esperadas = await this.suggestFormasPago(
+      executor,
+      idfolOrig,
+      idfolDev,
+      total,
     );
-    if (distinctForms.length !== 1 || distinctForms[0] !== formaOrig.form) {
+    const actualMap = this.aggregateFormas(formas);
+    const expectedMap = this.aggregateFormas(esperadas);
+
+    if (actualMap.size !== expectedMap.size) {
       throw new ConflictException(
-        `La devolución debe pagarse en la forma del ticket origen (${formaOrig.form})`,
+        `Las formas de devolución no coinciden con la distribución esperada del ticket origen. Esperado: ${this.formatFormasDetalle(esperadas)}`,
       );
     }
 
-    if (formaOrig.form !== 'EFECTIVO') {
-      const autOrigNorm = this.normalizeUpper(formaOrig.aut);
-      if (autOrigNorm) {
-        const hasMismatchAut = formas.some(
-          (item) => this.normalizeUpper(item.aut) !== autOrigNorm,
+    for (const [key, expectedAmount] of expectedMap.entries()) {
+      const actualAmount = this.round2(actualMap.get(key) ?? -1);
+      if (
+        actualAmount < 0 ||
+        Math.abs(actualAmount - expectedAmount) > PvDevolucionesService.EPSILON
+      ) {
+        throw new ConflictException(
+          `Las formas de devolución no coinciden con la distribución esperada del ticket origen. Esperado: ${this.formatFormasDetalle(esperadas)}`,
         );
-        if (hasMismatchAut) {
-          throw new ConflictException(
-            `La devolución en ${formaOrig.form} debe conservar la referencia original (${formaOrig.aut})`,
-          );
-        }
       }
     }
+  }
+
+  private async loadFormaOrigenBuckets(
+    executor: SqlExecutor,
+    idfolOrig: string,
+    idfolDev: string,
+  ): Promise<FormaOrigenBucket[]> {
+    const tableName = await this.resolveFolioFormTable(executor);
+    const cols = await this.loadTableColumns(executor, tableName);
+    if (!cols.has('FORM')) return [];
+
+    const selectedCols = ['FORM', 'AUT', 'IMPP', 'IMPD']
+      .map((name) => this.normalizeUpper(name))
+      .filter((name) => cols.has(name))
+      .map((name) => `[${name}]`);
+    const hasImpp = cols.has('IMPP');
+    const hasImpd = cols.has('IMPD');
+    if (!hasImpp && !hasImpd) return [];
+
+    const origenRows = await executor.query(
+      `
+      SELECT
+        ${selectedCols.join(',\n        ')}
+      FROM ${tableName}
+      WHERE IDFOL = @0
+      `,
+      [idfolOrig],
+    );
+
+    const map = new Map<string, FormaOrigenBucket>();
+    for (const raw of origenRows ?? []) {
+      const row = raw as Record<string, unknown>;
+      const form = this.normalizeForma(this.getRowValue(row, 'FORM'));
+      if (!form || !PvDevolucionesService.FORMAS_PERMITIDAS.has(form)) continue;
+      const aut = form === 'EFECTIVO' ? null : this.nullableText(this.getRowValue(row, 'AUT'));
+      const amount = this.extractFormaAmountFromRow(row, {
+        hasImpp,
+        hasImpd,
+      });
+      if (amount <= 0) continue;
+      const key = this.buildFormaKey(form, aut);
+      const current = map.get(key);
+      if (current) {
+        current.amountOriginal = this.round2(current.amountOriginal + amount);
+      } else {
+        map.set(key, {
+          form,
+          aut,
+          amountOriginal: this.round2(amount),
+          amountRefunded: 0,
+          amountAvailable: this.round2(amount),
+          isCreditoDeudor: form === 'CREDITO' || form === 'DEUDOR',
+          key,
+        });
+      }
+    }
+
+    if (!map.size) return [];
+
+    const refundRows = await executor.query(
+      `
+      SELECT
+        ${selectedCols.join(',\n        ')}
+      FROM ${tableName} f
+      INNER JOIN dbo.PV_CTR_FOL_ASVR dev
+        ON dev.IDFOL = f.IDFOL
+      WHERE dev.IDFOLORIG = @0
+        AND dev.IDFOL <> @1
+        AND UPPER(LTRIM(RTRIM(ISNULL(dev.AUT, '')))) IN ('DCA','DVF')
+      `,
+      [idfolOrig, idfolDev],
+    );
+
+    for (const raw of refundRows ?? []) {
+      const row = raw as Record<string, unknown>;
+      const form = this.normalizeForma(this.getRowValue(row, 'FORM'));
+      if (!form) continue;
+      const aut = form === 'EFECTIVO' ? null : this.nullableText(this.getRowValue(row, 'AUT'));
+      const key = this.buildFormaKey(form, aut);
+      const bucket = map.get(key);
+      const amount = this.extractFormaAmountFromRow(row, {
+        hasImpp,
+        hasImpd,
+      });
+      if (!bucket || amount <= 0) continue;
+      bucket.amountRefunded = this.round2(bucket.amountRefunded + amount);
+      bucket.amountAvailable = this.round2(
+        Math.max(bucket.amountOriginal - bucket.amountRefunded, 0),
+      );
+    }
+
+    return Array.from(map.values())
+      .filter((item) => item.amountAvailable > PvDevolucionesService.EPSILON)
+      .sort((a, b) => {
+        if (a.isCreditoDeudor !== b.isCreditoDeudor) {
+          return a.isCreditoDeudor ? -1 : 1;
+        }
+        if (b.amountAvailable !== a.amountAvailable) {
+          return b.amountAvailable - a.amountAvailable;
+        }
+        if (a.form !== b.form) return a.form.localeCompare(b.form);
+        return this.normalizeUpper(a.aut).localeCompare(this.normalizeUpper(b.aut));
+      });
+  }
+
+  private async loadDistinctOriginalForms(
+    executor: SqlExecutor,
+    idfolOrig: string,
+  ) {
+    const tableName = await this.resolveFolioFormTable(executor);
+    const cols = await this.loadTableColumns(executor, tableName);
+    if (!cols.has('FORM')) return new Set<string>();
+
+    const selectedCols = ['FORM', 'IMPP', 'IMPD']
+      .map((name) => this.normalizeUpper(name))
+      .filter((name) => cols.has(name))
+      .map((name) => `[${name}]`);
+    const hasImpp = cols.has('IMPP');
+    const hasImpd = cols.has('IMPD');
+    if (!hasImpp && !hasImpd) return new Set<string>();
+
+    const rows = await executor.query(
+      `
+      SELECT
+        ${selectedCols.join(',\n        ')}
+      FROM ${tableName}
+      WHERE IDFOL = @0
+      `,
+      [idfolOrig],
+    );
+
+    const forms = new Set<string>();
+    for (const raw of rows ?? []) {
+      const row = raw as Record<string, unknown>;
+      const form = this.normalizeForma(this.getRowValue(row, 'FORM'));
+      if (!form) continue;
+      const amount = this.extractFormaAmountFromRow(row, {
+        hasImpp,
+        hasImpd,
+      });
+      if (amount <= PvDevolucionesService.EPSILON) continue;
+      forms.add(form);
+    }
+    return forms;
+  }
+
+  private extractFormaAmountFromRow(
+    row: Record<string, unknown>,
+    cols: { hasImpp: boolean; hasImpd: boolean },
+  ) {
+    const impd = cols.hasImpd
+      ? this.toNumber(this.getRowValue(row, 'IMPD'))
+      : null;
+    const impp = cols.hasImpp
+      ? this.toNumber(this.getRowValue(row, 'IMPP'))
+      : null;
+    const preferred =
+      impd != null && Math.abs(impd) > PvDevolucionesService.EPSILON
+        ? impd
+        : (impp ?? impd ?? 0);
+    return this.round2(Math.abs(preferred));
+  }
+
+  private allocateByAvailability(total: number, availability: number[]) {
+    const targetCents = Math.max(0, Math.round(this.round2(total) * 100));
+    if (targetCents <= 0 || !availability.length) {
+      return availability.map(() => 0);
+    }
+
+    const availableCents = availability.map((value) =>
+      Math.max(0, Math.round(this.round2(value) * 100)),
+    );
+    const availableTotalCents = availableCents.reduce((acc, value) => acc + value, 0);
+    if (availableTotalCents <= 0) {
+      throw new ConflictException('No hay saldo disponible por forma para aplicar devolución');
+    }
+    if (targetCents > availableTotalCents) {
+      throw new ConflictException(
+        'El importe de devolución excede el saldo disponible por forma del ticket origen',
+      );
+    }
+
+    const base = availableCents.map((avail, index) => {
+      const raw = (targetCents * avail) / availableTotalCents;
+      return Math.min(avail, Math.floor(raw));
+    });
+    let assigned = base.reduce((acc, value) => acc + value, 0);
+    let remainder = targetCents - assigned;
+
+    const fractions = availableCents.map((avail, index) => {
+      const raw = (targetCents * avail) / availableTotalCents;
+      return { index, fraction: raw - Math.floor(raw), avail };
+    });
+    fractions.sort((a, b) => {
+      if (b.fraction !== a.fraction) return b.fraction - a.fraction;
+      if (b.avail !== a.avail) return b.avail - a.avail;
+      return a.index - b.index;
+    });
+
+    while (remainder > 0) {
+      let moved = false;
+      for (const candidate of fractions) {
+        if (remainder <= 0) break;
+        const idx = candidate.index;
+        if (base[idx] >= availableCents[idx]) continue;
+        base[idx] += 1;
+        remainder -= 1;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+
+    if (remainder > 0) {
+      throw new ConflictException(
+        'No se pudo distribuir el importe de devolución por forma de pago',
+      );
+    }
+
+    return base.map((value) => this.round2(value / 100));
+  }
+
+  private buildFormaKey(formRaw: string, autRaw: string | null) {
+    const form = this.normalizeUpper(formRaw);
+    const aut = form === 'EFECTIVO' ? '' : this.normalizeUpper(autRaw);
+    return `${form}|${aut}`;
+  }
+
+  private aggregateFormas(
+    formas: Array<{ form: string; impp: number; aut: string | null }>,
+  ) {
+    const map = new Map<string, number>();
+    for (const item of formas) {
+      const form = this.normalizeForma(item.form);
+      if (!form) continue;
+      const aut = form === 'EFECTIVO' ? null : this.nullableText(item.aut);
+      const key = this.buildFormaKey(form, aut);
+      const prev = this.round2(map.get(key) ?? 0);
+      map.set(key, this.round2(prev + Math.abs(item.impp)));
+    }
+    return map;
+  }
+
+  private sortSuggestedFormas(
+    formas: Array<{ form: string; impp: number; aut: string | null }>,
+  ) {
+    return [...formas].sort((a, b) => {
+      if (b.impp !== a.impp) return b.impp - a.impp;
+      if (a.form !== b.form) return a.form.localeCompare(b.form);
+      return this.normalizeUpper(a.aut).localeCompare(this.normalizeUpper(b.aut));
+    });
+  }
+
+  private formatFormasDetalle(
+    formas: Array<{ form: string; impp: number; aut: string | null }>,
+  ) {
+    if (!formas.length) return 'sin formas';
+    return formas
+      .map((item) => {
+        const ref = (item.aut ?? '').trim();
+        const suffix = ref ? ` [ref:${ref}]` : '';
+        return `${item.form}=${this.round2(item.impp).toFixed(2)}${suffix}`;
+      })
+      .join(', ');
   }
 
   private normalizeForma(value: unknown) {
