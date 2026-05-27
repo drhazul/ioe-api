@@ -43,10 +43,7 @@ export class PvCotizacionesCierreController {
   }
 
   @Post(':idfol/cierre/mb51-retry')
-  retryMb51(
-    @Param('idfol') idfol: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  retryMb51(@Param('idfol') idfol: string, @CurrentUser() user: JwtPayload) {
     return this.service.retryMb51(idfol, user);
   }
 }

@@ -28,4 +28,3 @@ export class ApplyPromocionesDto {
   @IsBoolean()
   generarGratis?: boolean;
 }
-

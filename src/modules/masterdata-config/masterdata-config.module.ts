@@ -7,4 +7,3 @@ import { MasterdataConfigService } from './masterdata-config.service';
   providers: [MasterdataConfigService],
 })
 export class MasterdataConfigModule {}
-

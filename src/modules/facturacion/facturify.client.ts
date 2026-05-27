@@ -38,8 +38,7 @@ export class FacturifyClient {
 
   private getEmailPath() {
     return (
-      this.config.get<string>('FACTURIFY_EMAIL_PATH') ||
-      '/api/v1/invoice/email'
+      this.config.get<string>('FACTURIFY_EMAIL_PATH') || '/api/v1/invoice/email'
     );
   }
 
@@ -69,7 +68,7 @@ export class FacturifyClient {
       }),
     });
 
-    const payload = (await resp.json().catch(() => ({}))) as any;
+    const payload = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       throw new UnauthorizedException(
         `Facturify auth falló (${resp.status}): ${payload?.message ?? 'sin detalle'}`,
@@ -78,9 +77,7 @@ export class FacturifyClient {
 
     const token = payload?.jwt?.token as string | undefined;
     if (!token) {
-      throw new UnauthorizedException(
-        'Facturify auth sin token en respuesta',
-      );
+      throw new UnauthorizedException('Facturify auth sin token en respuesta');
     }
 
     return {
@@ -207,13 +204,16 @@ export class FacturifyClient {
 
   async getInvoiceByUuid(cfdiUuid: string) {
     const auth = await this.requestToken();
-    const resp = await fetch(`${this.getBaseUrl()}/api/v1/factura/${cfdiUuid}`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${auth.token}`,
-        'cache-control': 'no-cache',
+    const resp = await fetch(
+      `${this.getBaseUrl()}/api/v1/factura/${cfdiUuid}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+          'cache-control': 'no-cache',
+        },
       },
-    });
+    );
 
     const raw = await resp.text();
     let data: any = raw;
@@ -241,8 +241,7 @@ export class FacturifyClient {
     const page = params?.page ?? 1;
     const limit = params?.limit ?? 50;
     const from = params?.from ?? '2018-01-01';
-    const to =
-      params?.to ?? new Date().toISOString().slice(0, 10);
+    const to = params?.to ?? new Date().toISOString().slice(0, 10);
     const search = encodeURIComponent(params?.search ?? '');
 
     const url = `${this.getBaseUrl()}/api/v1/factura/?page=${page}&limit=${limit}&orderBy=created_at&sort=DESC&from=${from}&to=${to}&search=${search}&invoiceType&invoiceSource&download=&empresa_session_rfc=&include=documentos_relacionados`;
@@ -297,7 +296,9 @@ export class FacturifyClient {
     });
 
     const buffer = Buffer.from(await resp.arrayBuffer());
-    const contentType = String(resp.headers.get('content-type') ?? '').toLowerCase();
+    const contentType = String(
+      resp.headers.get('content-type') ?? '',
+    ).toLowerCase();
     const rawText = buffer.toString('utf8');
 
     if (!resp.ok) {
@@ -311,12 +312,7 @@ export class FacturifyClient {
     if (contentType.includes('application/json')) {
       const parsed = this.parseJsonSafe(rawText) ?? {};
       const data = parsed?.data ?? {};
-      const candidates = [
-        parsed?.pdf,
-        parsed?.PDF,
-        data?.pdf,
-        data?.PDF,
-      ];
+      const candidates = [parsed?.pdf, parsed?.PDF, data?.pdf, data?.PDF];
       const pdfBase64 = candidates.find(
         (item) => typeof item === 'string' && item.trim().length > 0,
       ) as string | undefined;
@@ -356,7 +352,9 @@ export class FacturifyClient {
     });
 
     const buffer = Buffer.from(await resp.arrayBuffer());
-    const contentType = String(resp.headers.get('content-type') ?? '').toLowerCase();
+    const contentType = String(
+      resp.headers.get('content-type') ?? '',
+    ).toLowerCase();
     const rawText = buffer.toString('utf8');
 
     if (!resp.ok) {
@@ -370,12 +368,7 @@ export class FacturifyClient {
     if (contentType.includes('application/json')) {
       const parsed = this.parseJsonSafe(rawText) ?? {};
       const data = parsed?.data ?? {};
-      const candidates = [
-        parsed?.xml,
-        parsed?.XML,
-        data?.xml,
-        data?.XML,
-      ];
+      const candidates = [parsed?.xml, parsed?.XML, data?.xml, data?.XML];
       const xmlText = candidates.find(
         (item) => typeof item === 'string' && item.trim().length > 0,
       ) as string | undefined;

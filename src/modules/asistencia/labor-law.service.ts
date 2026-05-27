@@ -68,7 +68,9 @@ export class LaborLawService {
         ((row.entrada ?? '').trim().length > 0 ||
           (row.salida ?? '').trim().length > 0);
 
-      const estatus = String(row.estatus ?? '').trim().toUpperCase();
+      const estatus = String(row.estatus ?? '')
+        .trim()
+        .toUpperCase();
       const workedOrJustified = !['FALTA', 'ERROR_MARCAJE'].includes(estatus);
       if (workedOrJustified) {
         weeklyAssistanceAccumulator.set(
@@ -106,16 +108,19 @@ export class LaborLawService {
 
     return rows.map((row) => {
       const key = `${Number(row.colaborador_id)}|${String(row.fecha).substring(0, 10)}`;
-      return precomputed.get(key) ?? ({
-        ...row,
-        jornada_tipo: 'DIURNA',
-        jornada_horas_objetivo: 8,
-        cumple_jornada_lft: false,
-        horas_extra_dobles: 0,
-        horas_extra_triples: 0,
-        aplica_prima_dominical: false,
-        aplica_septimo_dia_descanso: false,
-      } satisfies EnrichedAsistenciaRow);
+      return (
+        precomputed.get(key) ??
+        ({
+          ...row,
+          jornada_tipo: 'DIURNA',
+          jornada_horas_objetivo: 8,
+          cumple_jornada_lft: false,
+          horas_extra_dobles: 0,
+          horas_extra_triples: 0,
+          aplica_prima_dominical: false,
+          aplica_septimo_dia_descanso: false,
+        } satisfies EnrichedAsistenciaRow)
+      );
     });
   }
 
@@ -145,7 +150,9 @@ export class LaborLawService {
       const weekEnd = this.sundayOf(weekStart);
       const weekKey = `${colaboradorId}|${weekStart}`;
 
-      const estatus = String(row.estatus ?? '').trim().toUpperCase();
+      const estatus = String(row.estatus ?? '')
+        .trim()
+        .toUpperCase();
       const workedOrJustified = !['FALTA', 'ERROR_MARCAJE'].includes(estatus);
       const pin = String(row.pin ?? '').trim();
 
@@ -231,7 +238,9 @@ export class LaborLawService {
     for (const row of (rows as Record<string, unknown>[]) ?? []) {
       const id = Number(row.id ?? row.ID ?? 0);
       if (!Number.isFinite(id) || id <= 0) continue;
-      const jornada = this.normalizeJornada(row.jornada_tipo ?? row.JORNADA_TIPO);
+      const jornada = this.normalizeJornada(
+        row.jornada_tipo ?? row.JORNADA_TIPO,
+      );
       map.set(id, jornada);
     }
 
@@ -239,7 +248,9 @@ export class LaborLawService {
   }
 
   private normalizeJornada(value: unknown): JornadaTipo {
-    const normalized = String(value ?? '').trim().toUpperCase();
+    const normalized = String(value ?? '')
+      .trim()
+      .toUpperCase();
     if (normalized === 'NOCTURNA') return 'NOCTURNA';
     if (normalized === 'MIXTA') return 'MIXTA';
     return 'DIURNA';

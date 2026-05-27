@@ -42,14 +42,14 @@ async function bootstrap() {
 
   // --- CONFIGURACIÓN DE CORS PARA PROYECTO IOE ---
   app.enableCors({
-    origin: true, 
+    origin: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
     allowedHeaders: [
-      'Content-Type', 
-      'Authorization', 
-      'X-Device-Id', 
-      'X-Cajon-Estado-Token'
+      'Content-Type',
+      'Authorization',
+      'X-Device-Id',
+      'X-Cajon-Estado-Token',
     ],
   });
 

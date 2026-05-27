@@ -8,10 +8,22 @@ export class IncentivoEntity {
   @Column({ type: 'varchar', length: 60, name: 'tipo_incentivo' })
   tipoIncentivo: string | undefined;
 
-  @Column({ type: 'decimal', precision: 6, scale: 2, name: 'porcentaje', nullable: true })
+  @Column({
+    type: 'decimal',
+    precision: 6,
+    scale: 2,
+    name: 'porcentaje',
+    nullable: true,
+  })
   porcentaje: number | null;
 
-  @Column({ type: 'decimal', precision: 18, scale: 2, name: 'importe', nullable: true })
+  @Column({
+    type: 'decimal',
+    precision: 18,
+    scale: 2,
+    name: 'importe',
+    nullable: true,
+  })
   importe: number | null;
 
   @Column({ type: 'bit', name: 'estado', default: () => '1' })

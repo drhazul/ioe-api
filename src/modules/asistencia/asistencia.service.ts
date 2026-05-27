@@ -64,7 +64,9 @@ export type TimelogHashInput = {
   lon: number | null;
 };
 
-export function buildCanonicalTimelogTimestampIso(timestampIso?: string): string {
+export function buildCanonicalTimelogTimestampIso(
+  timestampIso?: string,
+): string {
   const base = timestampIso != null ? new Date(timestampIso) : new Date();
   if (Number.isNaN(base.getTime())) {
     throw new BadRequestException('timestampIso invalido para hash de marcaje');
@@ -75,7 +77,9 @@ export function buildCanonicalTimelogTimestampIso(timestampIso?: string): string
 
 export function buildTimelogVerificationHash(input: TimelogHashInput): string {
   const timestamp = buildCanonicalTimelogTimestampIso(input.timestampIso);
-  const tipo = String(input.tipoEvento ?? '').trim().toUpperCase();
+  const tipo = String(input.tipoEvento ?? '')
+    .trim()
+    .toUpperCase();
   const lat =
     input.lat == null || !Number.isFinite(input.lat)
       ? 'NULL'
@@ -149,7 +153,8 @@ export class AsistenciaService implements OnModuleInit {
       }),
     );
 
-    const enrichedRows = await this.laborLawService.enrichReporteRows(normalizedRows);
+    const enrichedRows =
+      await this.laborLawService.enrichReporteRows(normalizedRows);
 
     return {
       ok: true,
@@ -524,14 +529,18 @@ export class AsistenciaService implements OnModuleInit {
     const end = hasFin ? new Date(String(query.fecha_fin)) : defaultEnd;
 
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      throw new BadRequestException('Fechas inválidas. Usa formato ISO YYYY-MM-DD');
+      throw new BadRequestException(
+        'Fechas inválidas. Usa formato ISO YYYY-MM-DD',
+      );
     }
 
     const startIso = this.toDateIso(start);
     const endIso = this.toDateIso(end);
 
     if (startIso > endIso) {
-      throw new BadRequestException('fecha_inicio no puede ser mayor a fecha_fin');
+      throw new BadRequestException(
+        'fecha_inicio no puede ser mayor a fecha_fin',
+      );
     }
 
     const rangeDays =
@@ -1022,7 +1031,11 @@ export class AsistenciaService implements OnModuleInit {
 
   private async runNightlyProcessing() {
     const now = new Date();
-    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const target = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 1,
+    );
     const dateIso = this.toDateIso(target);
 
     try {
@@ -1090,7 +1103,9 @@ export class AsistenciaService implements OnModuleInit {
   }
 
   private normalizeUpperNullable(value: unknown) {
-    const text = String(value ?? '').trim().toUpperCase();
+    const text = String(value ?? '')
+      .trim()
+      .toUpperCase();
     return text.length ? text : null;
   }
 

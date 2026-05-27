@@ -70,6 +70,7 @@ import { NotificacionesModule } from './modules/notificaciones/notificaciones.mo
 import { IncidenciasVacacionesModule } from './modules/incidencias-vacaciones/incidencias-vacaciones.module';
 import { MasterdataConfigModule } from './modules/masterdata-config/masterdata-config.module';
 import { PromocionesModule } from './modules/promociones/promociones.module';
+import { MermasModule } from './modules/mermas/mermas.module';
 
 @Module({
   imports: [
@@ -141,6 +142,7 @@ import { PromocionesModule } from './modules/promociones/promociones.module';
     IncidenciasVacacionesModule,
     MasterdataConfigModule,
     PromocionesModule,
+    MermasModule,
   ],
   providers: [
     {

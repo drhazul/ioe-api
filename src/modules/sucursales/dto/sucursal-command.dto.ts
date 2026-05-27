@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, Length, MaxLength } from 'class-validator';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  Length,
+  MaxLength,
+} from 'class-validator';
 
 export enum SucursalCommandAction {
   REBOOT = 'REBOOT',
@@ -14,7 +20,10 @@ export class SucursalCommandDto {
   @Length(1, 30)
   suc: string;
 
-  @ApiProperty({ enum: SucursalCommandAction, example: SucursalCommandAction.REBOOT })
+  @ApiProperty({
+    enum: SucursalCommandAction,
+    example: SucursalCommandAction.REBOOT,
+  })
   @IsEnum(SucursalCommandAction)
   command: SucursalCommandAction;
 
@@ -24,4 +33,3 @@ export class SucursalCommandDto {
   @MaxLength(80)
   device_id?: string;
 }
-

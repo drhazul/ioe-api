@@ -203,9 +203,7 @@ export class RelojChecadorController {
       id,
       this.requestMeta(req),
     );
-    const fileName = encodeURIComponent(
-      file.fileName || `documento-${id}`,
-    );
+    const fileName = encodeURIComponent(file.fileName || `documento-${id}`);
 
     res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
@@ -275,7 +273,8 @@ export class RelojChecadorController {
       ip: ip ? String(ip) : null,
       userAgent: req?.headers?.['user-agent'] || 'unknown',
       signature: String(req?.headers?.['x-signature'] ?? '').trim() || null,
-      deviceIdHeader: String(req?.headers?.['x-device-id'] ?? '').trim() || null,
+      deviceIdHeader:
+        String(req?.headers?.['x-device-id'] ?? '').trim() || null,
       clientTimestamp:
         String(req?.headers?.['x-client-timestamp'] ?? '').trim() || null,
       body,

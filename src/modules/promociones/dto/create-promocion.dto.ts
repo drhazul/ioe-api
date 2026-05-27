@@ -121,4 +121,3 @@ export class CreatePromocionDto {
   @IsInt()
   MAX_APLI_FOLIO?: number;
 }
-

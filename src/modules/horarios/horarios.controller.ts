@@ -36,7 +36,11 @@ export class HorariosController {
     @Query('sucursal') sucursal?: string,
     @Query('departamento') departamento?: string,
   ) {
-    return this.service.getWeeklySchedule({ weekStart, sucursal, departamento });
+    return this.service.getWeeklySchedule({
+      weekStart,
+      sucursal,
+      departamento,
+    });
   }
 
   @Post('semana/generar')
@@ -65,10 +69,7 @@ export class HorariosController {
   }
 
   @Patch(':id')
-  update(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: UpdateHorarioDto,
-  ) {
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateHorarioDto) {
     return this.service.update(id, dto);
   }
 

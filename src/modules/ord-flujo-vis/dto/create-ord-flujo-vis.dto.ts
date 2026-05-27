@@ -58,5 +58,4 @@ export class CreateOrdFlujoVisDto {
   @IsOptional()
   @IsBoolean()
   ACTIVO?: boolean;
-
 }

@@ -50,12 +50,14 @@ const FACTURIFY_REGIMEN_DESC_FALLBACK: Record<string, string> = {
   '614': 'Ingresos por intereses',
   '615': 'Régimen de los ingresos por obtención de premios',
   '616': 'Sin obligaciones fiscales',
-  '620': 'Sociedades Cooperativas de Producción que optan por diferir sus ingresos',
+  '620':
+    'Sociedades Cooperativas de Producción que optan por diferir sus ingresos',
   '621': 'Incorporación Fiscal',
   '622': 'Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras',
   '623': 'Opcional para Grupos de Sociedades',
   '624': 'Coordinados',
-  '625': 'Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas',
+  '625':
+    'Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas',
   '626': 'Régimen Simplificado de Confianza',
 };
 
@@ -653,13 +655,18 @@ export class FacturacionService {
     await this.assertFacturacionReadAccess(user, 'consultar facturación');
     const columns = await this.getFacSvrShapColumns();
     const canWrite = await this.hasFacturacionWriteAccess(user);
-    const forcedUserSuc = canWrite ? null : this.normalizeUpper(user?.suc ?? '');
+    const forcedUserSuc = canWrite
+      ? null
+      : this.normalizeUpper(user?.suc ?? '');
     if (!canWrite && (!forcedUserSuc || forcedUserSuc === '000')) {
       return {
         data: [],
         total: 0,
         page: 1,
-        pageSize: Math.min(Math.max(Number(input.pageSize ?? 60) || 60, 1), 200),
+        pageSize: Math.min(
+          Math.max(Number(input.pageSize ?? 60) || 60, 1),
+          200,
+        ),
         totalPages: 0,
         hasPrevPage: false,
         hasNextPage: false,
@@ -776,10 +783,7 @@ export class FacturacionService {
     addContainsFilter(rfcReceptorExpr, input.rfcReceptor);
     const clienFilter = this.normalizeTextFilter(input.clien);
     if (clienFilter) {
-      if (
-        /^\d+$/.test(clienFilter) &&
-        clienFilter.length <= 19
-      ) {
+      if (/^\d+$/.test(clienFilter) && clienFilter.length <= 19) {
         where.push(
           `(TRY_CONVERT(BIGINT, ${clienRef}) = TRY_CONVERT(BIGINT, ${addParam(clienFilter)}) OR ${clienExpr} LIKE ${addParam(`%${clienFilter}%`)})`,
         );
@@ -852,10 +856,7 @@ export class FacturacionService {
     };
   }
 
-  async validarIdFolsPendientes(
-    idFols: string[],
-    user?: JwtPayload | null,
-  ) {
+  async validarIdFolsPendientes(idFols: string[], user?: JwtPayload | null) {
     await this.assertFacturacionReadAccess(
       user,
       'validar lista de folios de facturación',
@@ -876,7 +877,9 @@ export class FacturacionService {
     }
 
     const canWrite = await this.hasFacturacionWriteAccess(user);
-    const forcedUserSuc = canWrite ? null : this.normalizeUpper(user?.suc ?? '');
+    const forcedUserSuc = canWrite
+      ? null
+      : this.normalizeUpper(user?.suc ?? '');
 
     const rows =
       normalizedForQuery.length === 0
@@ -1050,15 +1053,11 @@ LEFT JOIN dbo.FAC_SVR_SHAP f
     const data = scopedRows.slice(offset, offset + pageSize);
 
     for (const row of data) {
-      const imptValue = Number(
-        (row as Record<string, unknown>).IMPT ??
-          (row as Record<string, unknown>).impt ??
-          0,
-      );
+      const imptValue = Number(row.IMPT ?? row.impt ?? 0);
       if (Number.isFinite(imptValue)) {
         const rounded = Number(imptValue.toFixed(2));
-        (row as Record<string, unknown>).IMPT = rounded;
-        (row as Record<string, unknown>).impt = rounded;
+        row.IMPT = rounded;
+        row.impt = rounded;
       }
     }
 
@@ -1147,18 +1146,25 @@ LEFT JOIN dbo.FAC_SVR_SHAP f
           [idFol],
         );
 
-        const folio = (folioRows?.[0] ?? null) as Record<string, unknown> | null;
+        const folio = (folioRows?.[0] ?? null) as Record<
+          string,
+          unknown
+        > | null;
         if (!folio) {
           throw new NotFoundException(`No existe folio ${idFol}`);
         }
 
-        const resolvedIdFol = this.normalizeUpper(this.readRowValue(folio, 'IDFOL'));
+        const resolvedIdFol = this.normalizeUpper(
+          this.readRowValue(folio, 'IDFOL'),
+        );
         const folioSuc = this.normalizeUpper(this.readRowValue(folio, 'SUC'));
         const aut = this.normalizeUpper(this.readRowValue(folio, 'AUT'));
         const esta = this.normalizeUpper(this.readRowValue(folio, 'ESTA'));
 
         if (!resolvedIdFol) {
-          throw new NotFoundException(`No se pudo resolver IDFOL para ${idFol}`);
+          throw new NotFoundException(
+            `No se pudo resolver IDFOL para ${idFol}`,
+          );
         }
 
         if (!isAdmin) {
@@ -1254,7 +1260,9 @@ LEFT JOIN dbo.FAC_SVR_SHAP f
           this.normalizeText(this.readRowValue(row, 'MENSAJE')) ||
           'Validación de unificación procesada',
         cantidad: this.toIntValue(this.readRowValue(row, 'CANTIDAD')) ?? 0,
-        total: this.round2(this.toNumberValue(this.readRowValue(row, 'TOTAL')) ?? 0),
+        total: this.round2(
+          this.toNumberValue(this.readRowValue(row, 'TOTAL')) ?? 0,
+        ),
         clien: this.normalizeText(this.readRowValue(row, 'CLIEN')),
         formaPago: this.normalizeText(this.readRowValue(row, 'FORMAPAGO')),
         tipoVta: this.normalizeText(this.readRowValue(row, 'TIPOVTA')),
@@ -1337,9 +1345,10 @@ LEFT JOIN dbo.FAC_SVR_SHAP f
         idFolUnificado: this.normalizeText(
           this.readRowValue(row, 'IDFOL_UNIFICADO'),
         ),
-        total: this.round2(this.toNumberValue(this.readRowValue(row, 'TOTAL')) ?? 0),
-        ticketsOrigen:
-          ticketsOrigen.length > 0 ? ticketsOrigen : uniqueIdFols,
+        total: this.round2(
+          this.toNumberValue(this.readRowValue(row, 'TOTAL')) ?? 0,
+        ),
+        ticketsOrigen: ticketsOrigen.length > 0 ? ticketsOrigen : uniqueIdFols,
         ticketsOrigenCount:
           this.toIntValue(this.readRowValue(row, 'TICKETS_ORIGEN')) ??
           uniqueIdFols.length,
@@ -1537,8 +1546,9 @@ LEFT JOIN dbo.FAC_SVR_SHAP f
       throw new ForbiddenException('Usuario sin username');
     }
 
-    const safeCodes = FacturacionService.FACTURACION_REQF_MODULE_CODES
-      .map((code) => code.replace(/'/g, "''"))
+    const safeCodes = FacturacionService.FACTURACION_REQF_MODULE_CODES.map(
+      (code) => code.replace(/'/g, "''"),
+    )
       .map((code) => `'${code}'`)
       .join(', ');
 
@@ -1818,15 +1828,16 @@ SET NUMERIC_ROUNDABORT OFF;`;
     );
     const exists = (this.toIntValue(rows?.[0]?.HAS_SP) ?? 0) === 1;
     if (!exists) {
-      throw new ConflictException(
-        `No existe ${name}. Ejecute ${scriptPath}`,
-      );
+      throw new ConflictException(`No existe ${name}. Ejecute ${scriptPath}`);
     }
   }
 
   private async ensureCfdiSerieControlProcedures() {
     const scriptPath = 'sql/2026-03-27_fact_cfdi_serie_control.sql';
-    await this.ensureStoredProcedure('dbo.sp_fact_cfdi_serie_reserve', scriptPath);
+    await this.ensureStoredProcedure(
+      'dbo.sp_fact_cfdi_serie_reserve',
+      scriptPath,
+    );
     await this.ensureStoredProcedure(
       'dbo.sp_fact_cfdi_serie_update_status',
       scriptPath,
@@ -1947,7 +1958,9 @@ SET NUMERIC_ROUNDABORT OFF;`;
     if (error instanceof QueryFailedError) {
       const message = this.extractSqlMessage(error);
       if (message) {
-        if (message.toUpperCase().includes('NO EXISTE DBO.SP_FACT_UNIFICACION')) {
+        if (
+          message.toUpperCase().includes('NO EXISTE DBO.SP_FACT_UNIFICACION')
+        ) {
           return new ConflictException(message);
         }
         return new BadRequestException(message);
@@ -1981,10 +1994,7 @@ SET NUMERIC_ROUNDABORT OFF;`;
 
   private async getFolioData(idFol: string) {
     const headerSql = await this.buildHeaderSelectSql();
-    const cab = await this.dataSource.query(
-      headerSql,
-      [idFol],
-    );
+    const cab = await this.dataSource.query(headerSql, [idFol]);
     if (!cab.length) {
       throw new NotFoundException(`Folio ${idFol} no existe en FAC_SVR_SHAP`);
     }
@@ -2499,21 +2509,23 @@ SET NUMERIC_ROUNDABORT OFF;`;
     );
   }
 
-  private async toFacturifyPayload(full: {
-    header: any;
-    detail: any[];
-    sucursal: any;
-    cliente: any;
-  }, serieControl: {
-    serie: string;
-    folio: string;
-    consecutivoGlobal?: number | null;
-    nomenclatura?: string | null;
-  }) {
+  private async toFacturifyPayload(
+    full: {
+      header: any;
+      detail: any[];
+      sucursal: any;
+      cliente: any;
+    },
+    serieControl: {
+      serie: string;
+      folio: string;
+      consecutivoGlobal?: number | null;
+      nomenclatura?: string | null;
+    },
+  ) {
     const round2 = (value: number) => this.round2(Number(value || 0));
     const round6 = (value: number) =>
-      Math.round((Number(value || 0) + Number.EPSILON) * 1_000_000) /
-      1_000_000;
+      Math.round((Number(value || 0) + Number.EPSILON) * 1_000_000) / 1_000_000;
 
     const h = full.header;
     const c = full.cliente || {};
@@ -2552,7 +2564,9 @@ SET NUMERIC_ROUNDABORT OFF;`;
         : 0;
 
       return {
-        clave_producto_servicio: String(d.ClaveProdServ ?? '01010101').split('.')[0],
+        clave_producto_servicio: String(d.ClaveProdServ ?? '01010101').split(
+          '.',
+        )[0],
         clave_unidad_de_medida: String(d.Unidad ?? 'H87'),
         cantidad,
         descripcion: String(d.Descripcion ?? 'CONCEPTO'),
@@ -2594,7 +2608,9 @@ SET NUMERIC_ROUNDABORT OFF;`;
       h.exportacion ?? h.Exportacion ?? '01',
     ).trim();
     const normalizeUsoCfdi = (value: unknown) => {
-      const text = String(value ?? '').trim().toUpperCase();
+      const text = String(value ?? '')
+        .trim()
+        .toUpperCase();
       if (
         !text ||
         text === '-' ||
@@ -2625,7 +2641,11 @@ SET NUMERIC_ROUNDABORT OFF;`;
           0,
       ),
     );
-    if (!serieFacturify || !Number.isInteger(folioFacturify) || folioFacturify <= 0) {
+    if (
+      !serieFacturify ||
+      !Number.isInteger(folioFacturify) ||
+      folioFacturify <= 0
+    ) {
       throw new ConflictException(
         `No se resolvió serie/folio controlado para ${String(h.IDFOL ?? '').trim() || 'N/A'}`,
       );
@@ -2817,8 +2837,8 @@ SET NUMERIC_ROUNDABORT OFF;`;
       : [];
     for (const item of rawErrors) {
       if (!item || typeof item !== 'object') continue;
-      const field = String((item as any).field ?? '').trim();
-      const message = String((item as any).message ?? '').trim();
+      const field = String(item.field ?? '').trim();
+      const message = String(item.message ?? '').trim();
       if (!message) continue;
       facturifyErrors.push(field ? `${field}: ${message}` : message);
     }
@@ -2826,8 +2846,8 @@ SET NUMERIC_ROUNDABORT OFF;`;
     const emitMessage = timbrado.ok
       ? `Factura emitida correctamente (${idFol})`
       : facturifyErrors.length > 0
-      ? `No se pudo emitir: ${facturifyErrors.join(' | ')}`
-      : rawFacturifyMessage || `No se pudo emitir factura para ${idFol}`;
+        ? `No se pudo emitir: ${facturifyErrors.join(' | ')}`
+        : rawFacturifyMessage || `No se pudo emitir factura para ${idFol}`;
 
     return {
       ok: timbrado.ok,
@@ -2891,15 +2911,27 @@ SET NUMERIC_ROUNDABORT OFF;`;
       const data = remote?.data?.data || {};
       const hasCfdi = Boolean(data?.cfdi_uuid || data?.uuid);
       const anyStatus = String(
-        data?.status || data?.estatus || data?.cfdi_status || data?.cancel_status || '',
+        data?.status ||
+          data?.estatus ||
+          data?.cfdi_status ||
+          data?.cancel_status ||
+          '',
       ).toUpperCase();
       const canceled =
         anyStatus.includes('CANCEL') ||
         anyStatus.includes('CANCELADO') ||
         anyStatus.includes('VIGENTE CANCELADO');
 
-      const nextEstatus = canceled ? 'PENDIENTE' : hasCfdi ? 'FACTURADO' : 'PENDIENTE';
-      const nextCfdiStatus = canceled ? 'CANCELADO' : hasCfdi ? 'TIMBRADO' : 'PENDIENTE';
+      const nextEstatus = canceled
+        ? 'PENDIENTE'
+        : hasCfdi
+          ? 'FACTURADO'
+          : 'PENDIENTE';
+      const nextCfdiStatus = canceled
+        ? 'CANCELADO'
+        : hasCfdi
+          ? 'TIMBRADO'
+          : 'PENDIENTE';
       const nextCancelStatus = canceled
         ? 'CANCELADO_CONFIRMADO'
         : rows[0].CFDI_CANCEL_STATUS || null;
@@ -2907,8 +2939,8 @@ SET NUMERIC_ROUNDABORT OFF;`;
       const controlStatus = canceled
         ? 'CANCELADO'
         : hasCfdi
-        ? 'TIMBRADO'
-        : 'RESERVADO';
+          ? 'TIMBRADO'
+          : 'RESERVADO';
       await this.dataSource.transaction(async (manager) => {
         await manager.query(
           `UPDATE FAC_SVR_SHAP
@@ -2951,7 +2983,10 @@ SET NUMERIC_ROUNDABORT OFF;`;
     email?: string,
     user?: JwtPayload | null,
   ) {
-    await this.assertFacturacionWriteAccess(user, 'reenviar XML/PDF por correo');
+    await this.assertFacturacionWriteAccess(
+      user,
+      'reenviar XML/PDF por correo',
+    );
     const rows = await this.dataSource.query(
       `SELECT TOP 1 CFDI_UUID, RfcReceptor FROM FAC_SVR_SHAP WHERE IDFOL=@0`,
       [idFol],
@@ -3061,4 +3096,3 @@ SET NUMERIC_ROUNDABORT OFF;`;
     };
   }
 }
-

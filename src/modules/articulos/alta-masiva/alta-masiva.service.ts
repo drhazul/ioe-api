@@ -353,10 +353,7 @@ export class AltaMasivaService {
         FACT_COMP: this.toNullableString(
           pickCell(values, 'FACT_COMP', 'FACTCOMP'),
         ),
-        UN_VTA: this.toNullableString(
-          pickCell(values, 'UN_VTA', 'UNVTA'),
-          255,
-        ),
+        UN_VTA: this.toNullableString(pickCell(values, 'UN_VTA', 'UNVTA'), 255),
         FACT_VTA: this.toNullableString(
           pickCell(values, 'FACT_VTA', 'FACTVTA'),
         ),

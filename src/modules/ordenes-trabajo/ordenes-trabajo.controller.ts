@@ -86,7 +86,12 @@ export class OrdenesTrabajoController {
     @CurrentUser() user: JwtPayload,
     @Req() req: any,
   ) {
-    return this.service.prepararCambioMerma(iord, dto, user, this.requestIp(req));
+    return this.service.prepararCambioMerma(
+      iord,
+      dto,
+      user,
+      this.requestIp(req),
+    );
   }
 
   @Post(':iord/cambio-merma/actualizar-articulo')
@@ -360,7 +365,12 @@ export class OrdenesTrabajoController {
     @CurrentUser() user: JwtPayload,
     @Req() req: any,
   ) {
-    return this.service.aplicarMermaCambio(iord, dto, user, this.requestIp(req));
+    return this.service.aplicarMermaCambio(
+      iord,
+      dto,
+      user,
+      this.requestIp(req),
+    );
   }
 
   @Post(':iord/cambio-material')

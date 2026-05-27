@@ -30,4 +30,3 @@ export class TemplateResponseDto {
   @IsString()
   suc?: string;
 }
-

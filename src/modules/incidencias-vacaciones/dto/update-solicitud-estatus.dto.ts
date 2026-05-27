@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Min,
+} from 'class-validator';
 
 export class UpdateSolicitudEstatusDto {
   @ApiProperty({ example: 'APROBADO' })
@@ -18,4 +25,3 @@ export class UpdateSolicitudEstatusDto {
   @Length(0, 500)
   motivo_resolucion?: string;
 }
-

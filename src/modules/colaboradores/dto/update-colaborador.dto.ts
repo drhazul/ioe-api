@@ -1,5 +1,12 @@
 import { PartialType } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Min,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 import { CreateColaboradorDto } from './create-colaborador.dto';
 
@@ -28,7 +35,9 @@ export class UpdateColaboradorDto extends PartialType(CreateColaboradorDto) {
   id_empleado?: string;
 
   @IsOptional()
-  @Transform(({ value, obj }) => value ?? obj?.status_activo ?? obj?.STATUS_ACTIVO)
+  @Transform(
+    ({ value, obj }) => value ?? obj?.status_activo ?? obj?.STATUS_ACTIVO,
+  )
   @IsBoolean()
   estado?: boolean;
 

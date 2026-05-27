@@ -13,7 +13,11 @@ import { LaborLawService } from './labor-law.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AttendanceRuleEntity, FestivoEntity, IncentivoEntity]),
+    TypeOrmModule.forFeature([
+      AttendanceRuleEntity,
+      FestivoEntity,
+      IncentivoEntity,
+    ]),
     IncidenciasVacacionesModule,
   ],
   controllers: [AsistenciaController],

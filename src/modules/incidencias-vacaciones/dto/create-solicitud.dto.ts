@@ -27,12 +27,18 @@ export class CreateSolicitudDto {
 
   @ApiProperty({ example: '2026-04-22' })
   @IsDefined({ message: 'La fecha de inicio es requerida' })
-  @IsDateString({}, { message: 'La fecha de inicio debe estar en formato ISO-8601' })
+  @IsDateString(
+    {},
+    { message: 'La fecha de inicio debe estar en formato ISO-8601' },
+  )
   fecha_inicio: string;
 
   @ApiProperty({ example: '2026-04-24' })
   @IsDefined({ message: 'La fecha de fin es requerida' })
-  @IsDateString({}, { message: 'La fecha de fin debe estar en formato ISO-8601' })
+  @IsDateString(
+    {},
+    { message: 'La fecha de fin debe estar en formato ISO-8601' },
+  )
   fecha_fin: string;
 
   @ApiPropertyOptional({ example: 'Consulta médica general' })

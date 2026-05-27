@@ -162,7 +162,9 @@ export class UsersService {
     }
 
     await this.dataSource.transaction(async (manager) => {
-      await manager.getRepository(UsuarioEntity).update({ IDUSUARIO: id }, payload);
+      await manager
+        .getRepository(UsuarioEntity)
+        .update({ IDUSUARIO: id }, payload);
     });
 
     const newSuc = payload.SUC !== undefined ? (payload.SUC ?? null) : oldSuc;
@@ -188,9 +190,10 @@ export class UsersService {
       await this.dataSource.transaction(async (manager) => {
         const username = row.USERNAME?.trim() ?? '';
         const userId = row.IDUSUARIO;
-        await manager.query(`DELETE FROM dbo.USUARIO_TOKEN WHERE IDUSUARIO = @0`, [
-          userId,
-        ]);
+        await manager.query(
+          `DELETE FROM dbo.USUARIO_TOKEN WHERE IDUSUARIO = @0`,
+          [userId],
+        );
         await manager.query(
           `DELETE FROM dbo.USR_GRUPMOD_FRONT WHERE IDUSUARIO = @0`,
           [userId],
@@ -204,11 +207,16 @@ export class UsersService {
             [username],
           );
         }
-        await manager.getRepository(UsuarioEntity).delete({ IDUSUARIO: userId });
+        await manager
+          .getRepository(UsuarioEntity)
+          .delete({ IDUSUARIO: userId });
       });
     } catch (error) {
       if (error instanceof QueryFailedError) {
-        const code = Number((error as QueryFailedError & { driverError?: { number?: number } }).driverError?.number ?? 0);
+        const code = Number(
+          (error as QueryFailedError & { driverError?: { number?: number } })
+            .driverError?.number ?? 0,
+        );
         if (code === 547) {
           throw new ConflictException(
             `No se puede eliminar USUARIO ${id} porque tiene registros relacionados en otros modulos.`,
@@ -249,8 +257,9 @@ export class UsersService {
         `,
       );
       const exists =
-        Number(existsRows?.[0]?.EXISTS_FLAG ?? existsRows?.[0]?.exists_flag ?? 0) ===
-        1;
+        Number(
+          existsRows?.[0]?.EXISTS_FLAG ?? existsRows?.[0]?.exists_flag ?? 0,
+        ) === 1;
       if (!exists) return;
 
       const deviceRows = await this.dataSource.query(

@@ -34,17 +34,20 @@ export class FacturacionController {
     @Query() query: ListFacturacionPendientesQueryDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.listarPendientes({
-      page: query.page,
-      pageSize: query.pageSize,
-      suc: query.suc,
-      estatus: query.estatus,
-      razonSocialReceptor: query.razonSocialReceptor,
-      rfcReceptor: query.rfcReceptor,
-      clien: query.clien,
-      idFol: query.idFol,
-      tipoFact: query.tipoFact,
-    }, user);
+    return this.service.listarPendientes(
+      {
+        page: query.page,
+        pageSize: query.pageSize,
+        suc: query.suc,
+        estatus: query.estatus,
+        razonSocialReceptor: query.razonSocialReceptor,
+        rfcReceptor: query.rfcReceptor,
+        clien: query.clien,
+        idFol: query.idFol,
+        tipoFact: query.tipoFact,
+      },
+      user,
+    );
   }
 
   @Post('pendientes/validar-idfols')
@@ -161,10 +164,7 @@ export class FacturacionController {
   }
 
   @Get(':idFol/artifacts')
-  artifacts(
-    @Param('idFol') idFol: string,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  artifacts(@Param('idFol') idFol: string, @CurrentUser() user: JwtPayload) {
     return this.service.obtenerArtefactos(idFol, user);
   }
 }

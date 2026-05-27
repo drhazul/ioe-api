@@ -27,4 +27,3 @@ export class ColaboradorSucursalEntity {
   @JoinColumn({ name: 'sucursal_id' })
   sucursal: SucursalEntity | undefined;
 }
-

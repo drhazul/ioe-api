@@ -44,7 +44,9 @@ export class ListTimelogsDto {
   @IsNumber() // <--- Y aquí también
   LON?: number;
 
-  @ApiPropertyOptional({ description: 'Usuario a consultar (solo admin/manager)' })
+  @ApiPropertyOptional({
+    description: 'Usuario a consultar (solo admin/manager)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

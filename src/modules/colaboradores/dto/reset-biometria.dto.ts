@@ -12,4 +12,3 @@ export class ResetBiometriaDto {
   @IsBoolean()
   reset_fingerprint?: boolean;
 }
-

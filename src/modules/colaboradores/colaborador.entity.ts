@@ -16,7 +16,13 @@ export class ColaboradorEntity {
   @Column({ type: 'varchar', length: 255, name: 'pin', unique: true })
   pin: string | undefined;
 
-  @Column({ type: 'varchar', length: 40, name: 'id_empleado', nullable: true, unique: true })
+  @Column({
+    type: 'varchar',
+    length: 40,
+    name: 'id_empleado',
+    nullable: true,
+    unique: true,
+  })
   idEmpleado: string | null;
 
   @Column({ type: 'varchar', length: 150, name: 'nombre' })
@@ -25,13 +31,28 @@ export class ColaboradorEntity {
   @Column({ type: 'varchar', length: 150, name: 'apellido' })
   apellido: string | undefined;
 
-  @Column({ type: 'varchar', length: 150, name: 'apellido_paterno', nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 150,
+    name: 'apellido_paterno',
+    nullable: true,
+  })
   apellidoPaterno: string | null;
 
-  @Column({ type: 'varchar', length: 150, name: 'apellido_materno', nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 150,
+    name: 'apellido_materno',
+    nullable: true,
+  })
   apellidoMaterno: string | null;
 
-  @Column({ type: 'varchar', length: 100, name: 'departamento', nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 100,
+    name: 'departamento',
+    nullable: true,
+  })
   departamento: string | null;
 
   @Column({ type: 'varchar', length: 150, name: 'cargo', nullable: true })
@@ -68,7 +89,12 @@ export class ColaboradorEntity {
   @Column({ type: 'varchar', length: 11, name: 'nss', nullable: true })
   nss: string | null;
 
-  @Column({ type: 'varchar', length: 10, name: 'jornada_tipo', default: () => "'DIURNA'" })
+  @Column({
+    type: 'varchar',
+    length: 10,
+    name: 'jornada_tipo',
+    default: () => "'DIURNA'",
+  })
   jornadaTipo: string | undefined;
 
   @Column({

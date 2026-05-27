@@ -1,5 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, Length, Max, Min, Matches } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Max,
+  Min,
+  Matches,
+} from 'class-validator';
 
 export class UpdateHorarioDto {
   @ApiPropertyOptional({ example: 'Turno Matutino' })

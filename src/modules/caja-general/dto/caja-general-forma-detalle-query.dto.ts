@@ -12,4 +12,3 @@ export class CajaGeneralFormaDetalleQueryDto extends CajaGeneralOpvQueryDto {
   @Length(1, 255)
   form!: string;
 }
-

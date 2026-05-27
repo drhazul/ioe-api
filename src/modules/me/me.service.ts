@@ -160,9 +160,7 @@ export class MeService {
       ? null
       : Array.from(
           new Set(
-            sourceAssigns
-              .map((a) => a.IDGRUPMOD_FRONT)
-              .filter((x) => x !== 0),
+            sourceAssigns.map((a) => a.IDGRUPMOD_FRONT).filter((x) => x !== 0),
           ),
         );
 

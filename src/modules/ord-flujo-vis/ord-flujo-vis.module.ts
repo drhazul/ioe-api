@@ -7,4 +7,3 @@ import { OrdFlujoVisService } from './ord-flujo-vis.service';
   providers: [OrdFlujoVisService],
 })
 export class OrdFlujoVisModule {}
-

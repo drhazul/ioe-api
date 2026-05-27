@@ -82,7 +82,8 @@ export class AttendanceRulesService {
     return {
       source: 'ATT_RULES',
       id: this.toInt(this.readValue(row, 'id')),
-      nombre: this.readString(this.readValue(row, 'nombre')) ?? 'Regla ATT_RULES',
+      nombre:
+        this.readString(this.readValue(row, 'nombre')) ?? 'Regla ATT_RULES',
       sucursalId: this.toInt(this.readValue(row, 'sucursal_id')),
       horarioId: this.toInt(this.readValue(row, 'horario_id')),
       toleranciaRetardoMinutos:
@@ -135,7 +136,8 @@ export class AttendanceRulesService {
       source: 'HORARIOS_DEFAULT',
       id: this.toInt(this.readValue(row, 'id')),
       nombre:
-        this.readString(this.readValue(row, 'nombre')) ?? 'Regla desde HORARIOS',
+        this.readString(this.readValue(row, 'nombre')) ??
+        'Regla desde HORARIOS',
       sucursalId: null,
       horarioId,
       toleranciaRetardoMinutos:
@@ -202,7 +204,14 @@ export class AttendanceRulesService {
   private toBool(value: unknown): boolean {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'number') return value !== 0;
-    const normalized = String(value ?? '').trim().toLowerCase();
-    return normalized === '1' || normalized === 'true' || normalized === 'si' || normalized === 'sí';
+    const normalized = String(value ?? '')
+      .trim()
+      .toLowerCase();
+    return (
+      normalized === '1' ||
+      normalized === 'true' ||
+      normalized === 'si' ||
+      normalized === 'sí'
+    );
   }
 }

@@ -7,4 +7,3 @@ export class FacturacionUnificacionCreateDto extends FacturacionUnificacionPrevi
   @MaxLength(500)
   comentario?: string;
 }
-

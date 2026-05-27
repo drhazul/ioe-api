@@ -36,7 +36,9 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
     const iord = 'DF01131930001';
 
     dataSource.query
-      .mockResolvedValueOnce([{ ART: baseDto.art, CTD: baseDto.ctd, ORD: null }])
+      .mockResolvedValueOnce([
+        { ART: baseDto.art, CTD: baseDto.ctd, ORD: null },
+      ])
       .mockResolvedValueOnce([{ IORD: iord }])
       .mockResolvedValueOnce([{ IORD: iord, IDFOL: baseDto.idfol }])
       .mockResolvedValueOnce([
@@ -86,7 +88,9 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
   });
 
   it('rechaza cuando ctd no es 1 o 0.5', async () => {
-    dataSource.query.mockResolvedValueOnce([{ ART: baseDto.art, CTD: 2, ORD: null }]);
+    dataSource.query.mockResolvedValueOnce([
+      { ART: baseDto.art, CTD: 2, ORD: null },
+    ]);
     await assertErrorCode(
       () =>
         service.createFromQuoteLine({
@@ -99,7 +103,9 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
   });
 
   it('rechaza cuando falta fecha de entrega', async () => {
-    dataSource.query.mockResolvedValueOnce([{ ART: baseDto.art, CTD: baseDto.ctd, ORD: null }]);
+    dataSource.query.mockResolvedValueOnce([
+      { ART: baseDto.art, CTD: baseDto.ctd, ORD: null },
+    ]);
     await assertErrorCode(
       () =>
         service.createFromQuoteLine({
@@ -112,7 +118,9 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
   });
 
   it('rechaza cuando COMAD esta vacio', async () => {
-    dataSource.query.mockResolvedValueOnce([{ ART: baseDto.art, CTD: baseDto.ctd, ORD: null }]);
+    dataSource.query.mockResolvedValueOnce([
+      { ART: baseDto.art, CTD: baseDto.ctd, ORD: null },
+    ]);
     await assertErrorCode(
       () =>
         service.createFromQuoteLine({
@@ -127,7 +135,9 @@ describe('PvCtrOrdsService.createFromQuoteLine', () => {
   it('actualiza ORD existente cuando ordExistente > 0', async () => {
     const existingIord = 'DF01131930009';
     dataSource.query
-      .mockResolvedValueOnce([{ ART: baseDto.art, CTD: baseDto.ctd, ORD: existingIord }])
+      .mockResolvedValueOnce([
+        { ART: baseDto.art, CTD: baseDto.ctd, ORD: existingIord },
+      ])
       .mockResolvedValueOnce([{ IORD: existingIord }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ IORD: existingIord, IDFOL: baseDto.idfol }])

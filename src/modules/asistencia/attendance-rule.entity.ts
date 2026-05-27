@@ -14,13 +14,21 @@ export class AttendanceRuleEntity {
   @Column({ type: 'int', name: 'horario_id', nullable: true })
   horarioId: number | null;
 
-  @Column({ type: 'int', name: 'tolerancia_retardo_minutos', default: () => '0' })
+  @Column({
+    type: 'int',
+    name: 'tolerancia_retardo_minutos',
+    default: () => '0',
+  })
   toleranciaRetardoMinutos: number | undefined;
 
   @Column({ type: 'int', name: 'horas_jornada_minutos', default: () => '480' })
   horasJornadaMinutos: number | undefined;
 
-  @Column({ type: 'int', name: 'horas_extra_minimo_minutos', default: () => '0' })
+  @Column({
+    type: 'int',
+    name: 'horas_extra_minimo_minutos',
+    default: () => '0',
+  })
   horasExtraMinimoMinutos: number | undefined;
 
   @Column({

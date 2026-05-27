@@ -634,9 +634,12 @@ export class CajaGeneralService {
         username,
       })
       .andWhere('ums.ACTIVO = :activo', { activo: true })
-      .andWhere("UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, '')))) IN (:...modulos)", {
-        modulos: [...CajaGeneralService.CAJA_GENERAL_MODULE_CODES],
-      })
+      .andWhere(
+        "UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, '')))) IN (:...modulos)",
+        {
+          modulos: [...CajaGeneralService.CAJA_GENERAL_MODULE_CODES],
+        },
+      )
       .orderBy("UPPER(LTRIM(RTRIM(ISNULL(ums.SUC, ''))))", 'ASC')
       .getRawMany<{ SUC?: string }>();
 
@@ -860,4 +863,3 @@ export class CajaGeneralService {
     return new BadRequestException(fallback);
   }
 }
-

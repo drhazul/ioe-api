@@ -69,7 +69,9 @@ export class PuestosService {
     });
 
     const saved = await this.rolesRepo.save(role);
-    const depto = await this.deptosService.findOne(saved.IDDEPTO ?? dto.IDDEPTO);
+    const depto = await this.deptosService.findOne(
+      saved.IDDEPTO ?? dto.IDDEPTO,
+    );
     return this.toLegacyPuesto(saved, depto.NOMBRE ?? null);
   }
 

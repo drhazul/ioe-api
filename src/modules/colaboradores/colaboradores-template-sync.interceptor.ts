@@ -18,7 +18,8 @@ export class ColaboradoresTemplateSyncInterceptor implements NestInterceptor {
     const method = String(req?.method ?? '').toUpperCase();
     const path = String(req?.originalUrl ?? req?.url ?? '').toLowerCase();
     const shouldSync =
-      method === 'POST' && path.includes('/colaboradores/adms/template-response');
+      method === 'POST' &&
+      path.includes('/colaboradores/adms/template-response');
 
     if (!shouldSync) return next.handle();
 
@@ -40,4 +41,3 @@ export class ColaboradoresTemplateSyncInterceptor implements NestInterceptor {
     );
   }
 }
-

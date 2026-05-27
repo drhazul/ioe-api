@@ -72,7 +72,9 @@ export function assertTrustedExcelUpload(
     );
   }
 
-  const mimeType = String(file.mimetype ?? '').trim().toLowerCase();
+  const mimeType = String(file.mimetype ?? '')
+    .trim()
+    .toLowerCase();
   if (!ALLOWED_MIME.has(mimeType)) {
     throw new BadRequestException('Tipo MIME de Excel no permitido');
   }

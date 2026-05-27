@@ -530,11 +530,11 @@ export class PvCotizacionesCierreService {
           ord: this.normalizeText(row.ORD) || null,
         } satisfies PrintTicketItem;
         const tipoPromo = this.normalizeUpper(row.TIPOPROMO);
-      if (tipoPromo === 'ART_GRATIS') {
-        itemsGratis.push(item);
-      } else {
-        items.push(item);
-      }
+        if (tipoPromo === 'ART_GRATIS') {
+          itemsGratis.push(item);
+        } else {
+          items.push(item);
+        }
       });
 
     return { items, itemsGratis };
@@ -1361,8 +1361,14 @@ export class PvCotizacionesCierreService {
   }
 
   private async updateOrdenesStatus(executor: SqlExecutor, idfol: string) {
-    const columns = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
-    const rqfacColumn = this.pickFirstExistingColumn(columns, ['REQF', 'RQFAC']);
+    const columns = await this.loadTableColumns(
+      executor,
+      'dbo.PV_CTR_FOL_ASVR',
+    );
+    const rqfacColumn = this.pickFirstExistingColumn(columns, [
+      'REQF',
+      'RQFAC',
+    ]);
     let rqfac = 0;
     if (rqfacColumn) {
       const folioRows = await executor.query(
@@ -1886,7 +1892,7 @@ export class PvCotizacionesCierreService {
         [input.idfol, input.user],
       );
     } catch (err) {
-      this.logger.error(`MB51 transmit error for ${input.idfol}`, err as any);
+      this.logger.error(`MB51 transmit error for ${input.idfol}`, err);
       throw err;
     }
 
@@ -1909,7 +1915,9 @@ export class PvCotizacionesCierreService {
       const msg = `MB51 transmit idempotent for ${input.idfol}: afterCount=${afterCount}, delta=${delta}.`;
       this.logger.warn(msg);
     } else {
-      this.logger.log(`MB51 transmit inserted ${delta} rows for ${input.idfol}`);
+      this.logger.log(
+        `MB51 transmit inserted ${delta} rows for ${input.idfol}`,
+      );
     }
 
     return { delta, afterCount };

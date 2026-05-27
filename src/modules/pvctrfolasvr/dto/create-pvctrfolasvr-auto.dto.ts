@@ -12,7 +12,9 @@ export class CreatePvCtrFolAsvrAutoDto {
   @Length(0, 255)
   TER?: string;
 
-  @ApiPropertyOptional({ description: 'Sucursal para alta de cotización (admin)' })
+  @ApiPropertyOptional({
+    description: 'Sucursal para alta de cotización (admin)',
+  })
   @Transform(({ value }) => toTrimmedString(value))
   @IsOptional()
   @IsString()

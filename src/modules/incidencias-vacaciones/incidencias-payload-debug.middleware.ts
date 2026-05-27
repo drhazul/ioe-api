@@ -5,7 +5,8 @@ import type { NextFunction, Request, Response } from 'express';
 export class IncidenciasPayloadDebugMiddleware implements NestMiddleware {
   use(req: Request, _res: Response, next: NextFunction) {
     const method = String(req.method ?? '').toUpperCase();
-    const shouldLogBody = method === 'POST' || method === 'PUT' || method === 'PATCH';
+    const shouldLogBody =
+      method === 'POST' || method === 'PUT' || method === 'PATCH';
     const markerKey = '__incidenciasPayloadLogged__';
     const reqAny = req as Request & { [markerKey]?: boolean };
 

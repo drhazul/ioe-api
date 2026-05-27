@@ -23,7 +23,8 @@ export class CreateOrdFromQuoteLineDto {
   idfol: string;
 
   @ApiProperty({
-    description: 'ID del renglón en PV_TICKET_LOG sobre el que se creará/actualizará la ORD',
+    description:
+      'ID del renglón en PV_TICKET_LOG sobre el que se creará/actualizará la ORD',
   })
   @Transform(({ value }) => toTrimmedString(value))
   @IsString()

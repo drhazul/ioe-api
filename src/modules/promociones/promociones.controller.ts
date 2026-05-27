@@ -139,16 +139,19 @@ export class PromocionesController {
     @Query('search') search?: string,
     @CurrentUser() user?: JwtPayload,
   ) {
-    return this.service.listArticulos({
-      suc,
-      depa,
-      subd,
-      clas,
-      scla,
-      scla2,
-      guia,
-      search,
-    }, user);
+    return this.service.listArticulos(
+      {
+        suc,
+        depa,
+        subd,
+        clas,
+        scla,
+        scla2,
+        guia,
+        search,
+      },
+      user,
+    );
   }
 
   @Get(':idProm')
@@ -204,7 +207,10 @@ export class PromocionesController {
   }
 
   @Get(':idProm/criterios')
-  listCriterios(@Param('idProm') idProm: string, @CurrentUser() user?: JwtPayload) {
+  listCriterios(
+    @Param('idProm') idProm: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
     return this.service.listCriterios(idProm, user);
   }
 
@@ -235,7 +241,10 @@ export class PromocionesController {
   }
 
   @Get(':idProm/beneficios')
-  listBeneficios(@Param('idProm') idProm: string, @CurrentUser() user?: JwtPayload) {
+  listBeneficios(
+    @Param('idProm') idProm: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
     return this.service.listBeneficios(idProm, user);
   }
 
