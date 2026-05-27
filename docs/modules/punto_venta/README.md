@@ -43,6 +43,12 @@ Enlaces relacionados:
 - regla de seguridad:
 - administración de promociones habilitada para `admin`, `JEFOPE/JEFOPER` y supervisor (`SUPERPV/SUPERVISOR/SUPERVP`).
 - alcance por sucursal: lectura/escritura validada con `USR_MOD_SUC` para módulo `PV_PROMO_GES` (fallback a `SUC` del JWT cuando no hay filas).
+- compatibilidad JWT (2026-05-26):
+- `GET/PUT /promociones/:idProm/configuracion` tolera tokens legacy (`idusuario/userid`), y cuando falta `sub/idUsuario` resuelve `IDUSUARIO` por `username`.
+- para acceso total, reconoce admin por `roleId/IDROL/idRol` con default `0,1`.
+- evita `403 Usuario inválido para resolver sucursales`.
+- catálogo clientes (2026-05-26):
+- `GET /promociones/catalogos/clientes` entrega lista completa por sucursal consultando `FACT_CLIENT_SHP` con filtro `SUC=@suc` y `ESTATUS=0`; usa `IDC` como `CLIENTE` y deduplica por `CLIENTE` para evitar duplicados en selección de cliente del módulo.
 - operación de aplicación actualiza `PV_TICKET_LOG.PVTAT` con importe neto tras descuento y deja trazabilidad por línea en `PROMO_TICKET_DESC_APLI`.
 
 ## Pago de Servicios PS (nuevo flujo 2026-03)

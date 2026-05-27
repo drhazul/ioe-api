@@ -30,6 +30,12 @@ Enlaces relacionados:
 - `sql/2026-05-09_promociones_descuentos_base.sql` (altera `PROMO_CAB`, crea tablas `PROMO_REGLA_*`, `PROMO_TICKET_DESC_APLI`, `PROMO_TICKET_GRATIS_*`, e instala SPs `sp_promo_evaluar_folio` + `sp_promo_desc_aplicadas_folio`).
 - regla operativa:
 - al aplicar descuentos, backend recalcula `PV_TICKET_LOG.PVTAT` con neto y registra cada descuento de renglón en `PROMO_TICKET_DESC_APLI`.
+- compatibilidad JWT (2026-05-26):
+- en `GET/PUT /promociones/:idProm/configuracion`, backend acepta payload legacy (`idusuario/userid`) y, si falta `sub/idUsuario`, recupera `IDUSUARIO` por `username` antes de resolver sucursales autorizadas.
+- admin se reconoce por `roleId/IDROL/idRol` (default `0,1`) para no bloquear usuarios de acceso total.
+- con esto se evita el `403 Usuario inválido para resolver sucursales` durante guardar configuración.
+- catálogo clientes (2026-05-26):
+- `GET /promociones/catalogos/clientes` consulta `FACT_CLIENT_SHP` con base `SUC=@suc AND ESTATUS=0`, usa `IDC` como `CLIENTE`, devuelve listado completo por sucursal (sin `TOP 200`) y deduplicado por `CLIENTE` para evitar valores repetidos en selección UI.
 
 ## Punto de venta: cierre transaccional de cotizacion (implementado)
 - Controller/Service:
