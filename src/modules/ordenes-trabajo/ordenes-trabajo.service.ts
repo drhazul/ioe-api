@@ -73,6 +73,7 @@ export class OrdenesTrabajoService {
     'DAT_JAO_BISEL',
     'PV_ORDS',
   ] as const;
+  private static readonly MODULE_CODES_INV_SCOPE = ['DAT_JAA_ALM'] as const;
   private flowVisibilityTableExists: boolean | null = null;
   private readonly flowVisibilityPanelConfigCache = new Map<string, boolean>();
 
@@ -96,6 +97,7 @@ export class OrdenesTrabajoService {
     allowedSucsParam: string,
     roleCodeParam: string,
     homeSucParam: string,
+    requestedSucParam = 'NULL',
   ) {
     return `
       (
@@ -115,6 +117,7 @@ export class OrdenesTrabajoService {
               'ENC_MAQUILA',
               'ENC_BISEL'
             )
+            OR ${requestedSucParam} IS NOT NULL
             OR ${homeSucParam} IS NULL
             OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${homeSucParam})
             OR UPPER(LTRIM(RTRIM(ISNULL(${labAlias}.SUC, '')))) = UPPER(${homeSucParam})
@@ -134,11 +137,15 @@ export class OrdenesTrabajoService {
   }
 
   async list(query: ListOrdenesTrabajoQueryDto, user: JwtPayload) {
-    const scope = await this.resolveSucScope(user, query.suc ?? null);
+    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
+    const scope = await this.resolveSucScope(
+      user,
+      query.suc ?? null,
+      roleCode,
+    );
     const page = this.normalizePage(query.page);
     const pageSize = this.normalizePageSize(query.pageSize);
     const panelMode = this.normalizePanelMode(query.panelMode);
-    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
     const allowedActions = this.resolveAllowedActions(
       user,
       roleCode,
@@ -990,7 +997,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE o.IORD = @0
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -1387,9 +1394,9 @@ export class OrdenesTrabajoService {
       fallbackError:
         'No se pudo regresar a tienda. Verifique estado y permisos.',
       singleMessage:
-        '1 ORD recibida en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2, o 10 sin incidencia)',
+        '1 ORD recibida en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2; ORDs derivadas o sin incidencia -> 10)',
       pluralMessagePrefix:
-        'ORDs recibidas en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2, o 10 sin incidencia)',
+        'ORDs recibidas en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2; ORDs derivadas o sin incidencia -> 10)',
       notFoundMessage:
         'No fue posible procesar las ORDs para regresar a tienda',
     });
@@ -1839,7 +1846,7 @@ export class OrdenesTrabajoService {
           UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
           OR UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) = UPPER(@0)
         )
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       ORDER BY
         CASE
@@ -2167,6 +2174,7 @@ export class OrdenesTrabajoService {
   private async resolveSucScope(
     user: JwtPayload,
     requestedSucRaw: string | null,
+    roleCodeHint?: string | null,
   ): Promise<SucScope> {
     const isAdmin = this.isAdmin(user);
     const requestedSuc = this.normalizeText(requestedSucRaw);
@@ -2188,15 +2196,20 @@ export class OrdenesTrabajoService {
       );
     }
 
+    const roleCode =
+      this.normalizeUpper(roleCodeHint) ||
+      this.normalizeUpper(await this.resolveRoleCode(user));
+    const moduleCodes = this.resolveScopeModuleCodes(roleCode);
+
     const rows = await this.dataSource.query(
       `
       SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) AS SUC
       FROM dbo.USR_MOD_SUC
       WHERE UPPER(LTRIM(RTRIM(ISNULL(USUARIO, '')))) = UPPER(@0)
         AND ACTIVO = 1
-        AND UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) IN (${OrdenesTrabajoService.MODULE_CODES.map((_, idx) => `@${idx + 1}`).join(',')})
+        AND UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) IN (${moduleCodes.map((_, idx) => `@${idx + 1}`).join(',')})
       `,
-      [username, ...OrdenesTrabajoService.MODULE_CODES],
+      [username, ...moduleCodes],
     );
 
     const ownSuc = this.normalizeUpper(user?.suc);
@@ -2309,6 +2322,17 @@ export class OrdenesTrabajoService {
     );
 
     return this.normalizeUpper(this.firstRow(rows)?.CODIGO);
+  }
+
+  private resolveScopeModuleCodes(roleCodeRaw: string) {
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    if (roleCode === 'INVJEF' || roleCode === 'ANALISTA_INV') {
+      return [
+        ...OrdenesTrabajoService.MODULE_CODES,
+        ...OrdenesTrabajoService.MODULE_CODES_INV_SCOPE,
+      ];
+    }
+    return [...OrdenesTrabajoService.MODULE_CODES];
   }
 
   private resolveAsignadoDeptos(user: JwtPayload, roleCodeRaw: string) {
@@ -2956,7 +2980,7 @@ export class OrdenesTrabajoService {
         ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, o.ESTSEGU)
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -3042,7 +3066,7 @@ export class OrdenesTrabajoService {
         ON UPPER(LTRIM(RTRIM(ISNULL(ds.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.SUC, ''))))
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -4448,7 +4472,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -4489,7 +4513,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) IN (${placeholders})
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`)}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`, `@${iords.length + 4}`)}
         AND ${this.buildOrdRequestedSucSql('o', `@${iords.length + 4}`)}
       `,
       [
@@ -4695,7 +4719,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -4743,7 +4767,7 @@ export class OrdenesTrabajoService {
           UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
           OR UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) = UPPER(@0)
         )
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       ORDER BY
         CASE
@@ -4810,7 +4834,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) IN (${placeholders})
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`)}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`, `@${iords.length + 4}`)}
         AND ${this.buildOrdRequestedSucSql('o', `@${iords.length + 4}`)}
       `,
       [
@@ -5121,7 +5145,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) IN (${placeholders})
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`)}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`, `@${iords.length + 4}`)}
         AND ${this.buildOrdRequestedSucSql('o', `@${iords.length + 4}`)}
       `,
       [

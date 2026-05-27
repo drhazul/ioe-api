@@ -294,9 +294,9 @@ BEGIN
         THROW 51015, 'Para cierre tipo CA solo se permite una forma de pago', 1;
     END
 
-    IF EXISTS (SELECT 1 FROM @FORMAS WHERE FORM = 'CREDITO')
+    IF EXISTS (SELECT 1 FROM @FORMAS WHERE FORM IN ('CREDITO', 'DEUDOR'))
       AND (SELECT COUNT(1) FROM @FORMAS) > 1
-      THROW 51034, 'La forma CREDITO no se puede combinar con otras formas de pago', 1;
+      THROW 51034, 'Las formas CREDITO y DEUDOR no se pueden combinar con otras formas de pago', 1;
 
     IF EXISTS (
       SELECT 1
@@ -374,6 +374,38 @@ BEGIN
 
     SELECT @sumPagos = ROUND(SUM(ISNULL(IMPP, 0)), 2)
     FROM @FORMAS;
+
+    DECLARE @acumuladoFormas MONEY = 0;
+    DECLARE @pendienteForma MONEY = 0;
+    DECLARE @formaValidacion NVARCHAR(40);
+    DECLARE @imppValidacion MONEY;
+
+    DECLARE forma_validacion_cursor CURSOR LOCAL FAST_FORWARD FOR
+      SELECT FORM, IMPP
+      FROM @FORMAS
+      ORDER BY ROW_ID;
+
+    OPEN forma_validacion_cursor;
+    FETCH NEXT FROM forma_validacion_cursor INTO @formaValidacion, @imppValidacion;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+      SET @pendienteForma = CASE
+        WHEN @totalFinal - @acumuladoFormas > 0
+          THEN ROUND(@totalFinal - @acumuladoFormas, 2)
+        ELSE 0
+      END;
+
+      IF @formaValidacion <> 'EFECTIVO'
+        AND ISNULL(@imppValidacion, 0) > @pendienteForma + @epsilon
+        THROW 51035, 'Las formas no efectivo no pueden exceder el pendiente por liquidar', 1;
+
+      SET @acumuladoFormas = ROUND(@acumuladoFormas + ISNULL(@imppValidacion, 0), 2);
+      FETCH NEXT FROM forma_validacion_cursor INTO @formaValidacion, @imppValidacion;
+    END
+
+    CLOSE forma_validacion_cursor;
+    DEALLOCATE forma_validacion_cursor;
 
     IF @sumPagos + @epsilon < @totalFinal
       THROW 51023, 'El total pagado es menor al total de la cotizacion', 1;
