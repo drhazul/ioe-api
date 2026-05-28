@@ -1,0 +1,39 @@
+/*
+  2026-05-21
+  Asegura campo de obligatoriedad de evidencia por motivo de merma
+  y marca motivos base.
+*/
+SET NOCOUNT ON;
+
+IF COL_LENGTH('dbo.MOT_MERMA', 'REQUIERE_EVIDENCIA') IS NULL
+BEGIN
+  ALTER TABLE dbo.MOT_MERMA
+  ADD REQUIERE_EVIDENCIA BIT NOT NULL
+      CONSTRAINT DF_MOT_MERMA_REQUIERE_EVIDENCIA DEFAULT(0)
+      WITH VALUES;
+END;
+
+/* Motivos con evidencia obligatoria */
+UPDATE dbo.MOT_MERMA
+SET REQUIERE_EVIDENCIA = 1
+WHERE UPPER(LTRIM(RTRIM(ISNULL([DESC], '')))) IN (
+  'ROTO',
+  'RAYADA',
+  'DANIO DE TALLER'
+);
+
+/* Motivos sin evidencia obligatoria */
+UPDATE dbo.MOT_MERMA
+SET REQUIERE_EVIDENCIA = 0
+WHERE UPPER(LTRIM(RTRIM(ISNULL([DESC], '')))) IN (
+  'DESPERFECTO OPERATIVO',
+  'CADUCADO'
+);
+
+/* Consulta de verificacion */
+SELECT
+  ID,
+  [DESC],
+  ISNULL(REQUIERE_EVIDENCIA, 0) AS REQUIERE_EVIDENCIA
+FROM dbo.MOT_MERMA
+ORDER BY [DESC] ASC;
