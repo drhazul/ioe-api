@@ -554,6 +554,7 @@ export class PromocionesService {
     }
 
     const search = this.normalizeText(query.search);
+    const topLimit = search ? 3000 : 300;
     if (search) {
       where.push(
         `(UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) LIKE @${params.length} OR UPPER(LTRIM(RTRIM(ISNULL(a.UPC, '')))) LIKE @${params.length} OR UPPER(LTRIM(RTRIM(ISNULL(a.DES, '')))) LIKE @${params.length})`,
@@ -591,7 +592,7 @@ export class PromocionesService {
         ) j
         WHERE ${where.join(' AND ')}
       )
-      SELECT TOP 300
+      SELECT TOP ${topLimit}
         ART, UPC, DESCRIPCION, DEPA, SUBD, CLAS, SCLA, SCLA2, GUIA
       FROM base
       WHERE RN = 1
