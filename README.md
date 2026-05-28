@@ -72,7 +72,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 
 ## Ejecucion
 - `npm run start:dev`
-- `npm run start:dev:safe` (libera `3001/8081` si los ocupa otra instancia de `ioe-api` y luego levanta `nest --watch`)
+- `npm run start:dev:safe` (libera `3000/8081` si los ocupa otra instancia de `ioe-api` y luego levanta `nest --watch`)
 - `npm test`
 
 ## Pruebas obligatorias

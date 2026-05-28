@@ -80,7 +80,7 @@
 ## Pruebas
 - Ejecutar `npm test` antes de entregar.
 - Cuando el cambio involucre al frontend `ioe_app`, coordinar y correr también `flutter analyze` y `flutter test`.
-- Arranque dev recomendado en Windows: `npm run start:dev:safe` para liberar `3001/8081` cuando otra instancia previa de `ioe-api` quedó activa y evitar `EADDRINUSE`.
+- Arranque dev recomendado en Windows: `npm run start:dev:safe` para liberar `3000/8081` cuando otra instancia previa de `ioe-api` quedó activa y evitar `EADDRINUSE`.
 
 ## Refactors
 - Incrementales y de bajo riesgo.

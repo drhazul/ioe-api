@@ -74,7 +74,7 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
 
   // Puertos de red
-  const port = process.env.PORT ? Number(process.env.PORT) : 3001;
+  const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   const admsPort = process.env.ADMS_PORT ? Number(process.env.ADMS_PORT) : 8081;
 
   // Escuchar en todas las interfaces para permitir acceso desde tablets y red local

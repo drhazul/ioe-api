@@ -28,7 +28,7 @@ Requeridas:
 - `DB_NAME`
 - `JWT_SECRET`
 Opcionales:
-- `PORT` (default `3001`)
+- `PORT` (default `3000`)
 - `DB_PORT` (default `1433`)
 - `DB_SCHEMA` (default `dbo`)
 - `JWT_EXPIRES_IN` (default `15m`)
