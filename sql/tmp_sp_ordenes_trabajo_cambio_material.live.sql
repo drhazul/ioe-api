@@ -160,7 +160,7 @@ BEGIN
       @NEW_ART = @ART_NUEVO,
       @NEW_CTD = @ctdOrig,
       @TIPOM = 0,
-      @MOTR = @motrInt,
+      @MOTR = NULL,
       @REEORD = @IORD,
       @DOCDIF = @doc,
       @ESTSEGU = 3,
@@ -221,6 +221,18 @@ BEGIN
     SET
       ASIGN = NULL,
       CTD_C_M = @ctdAfectada,
+      MOTR = NULL,
+      TIPOM = 0,
+      DESCART = COALESCE(
+        (
+          SELECT TOP 1 LTRIM(RTRIM(ISNULL(a.DES, '')))
+          FROM dbo.DAT_ART a
+          WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@sucOrd, ''))))
+            AND UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@ART_NUEVO, ''))))
+          ORDER BY TRY_CONVERT(INT, ISNULL(a.BLOQ, 0)) ASC
+        ),
+        DESCART
+      ),
       selCtrlOrd = NULL,
       FCNMOD = GETDATE()
     WHERE IORD = @newIord;

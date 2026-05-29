@@ -3209,6 +3209,14 @@ export class OrdenesTrabajoService {
 
     const originalArtInfo = await this.resolveArticuloDatArt(suc, artOriginal);
     const nuevoArtInfo = await this.resolveArticuloDatArt(suc, artNuevo);
+    const sameArticulo =
+      this.normalizeUpper(artNuevo) === this.normalizeUpper(artOriginal);
+    const draftDesc = sameArticulo
+      ? (nuevoArtInfo?.des ??
+        this.normalizeText(originalRow.DESCART) ??
+        this.normalizeText(originalRow.DESCRT) ??
+        '')
+      : (nuevoArtInfo?.des ?? '');
 
     const precioOriginal = await this.resolveTicketLogUnitPrice(
       iord,
@@ -3353,10 +3361,7 @@ export class OrdenesTrabajoService {
         ART: artNuevo,
         UPC: nuevoArtInfo?.upc ?? '',
         DES:
-          nuevoArtInfo?.des ??
-          this.normalizeText(originalRow.DESCART) ??
-          this.normalizeText(originalRow.DESCRT) ??
-          '',
+          draftDesc,
         CTD: ctdCalculoOrd,
         PVTA: precioNuevo,
         PVTAR: precioNuevo,
@@ -3577,6 +3582,7 @@ export class OrdenesTrabajoService {
     const finalDiff =
       this.toFloat(result.data.DIFERENCIA_ECONOMICA) ?? sealedDiff ?? 0;
 
+    await this.normalizeCambioMermaNewOrdRecord(finalNewIord, artNuevo);
     await this.forceEstatus2FromActionData(result.data);
     await this.finalizeCambioMermaOriginalAfterAuthorize(
       iord,
@@ -4110,6 +4116,36 @@ export class OrdenesTrabajoService {
         AND TRY_CONVERT(INT, TIPOM) = @1
       `,
       [iord, tipo],
+    );
+  }
+
+  private async normalizeCambioMermaNewOrdRecord(
+    iordRaw: string,
+    artNuevoRaw: string | null,
+  ) {
+    const iord = this.normalizeText(iordRaw);
+    if (!iord) return;
+    const artNuevo = this.normalizeText(artNuevoRaw);
+    await this.dataSource.query(
+      `
+      UPDATE o
+      SET
+        ART = COALESCE(NULLIF(@1, ''), o.ART),
+        MAT = COALESCE(NULLIF(@1, ''), o.MAT),
+        TIPOM = 0,
+        MOTR = NULL,
+        DESCART = COALESCE(
+          NULLIF(LTRIM(RTRIM(ISNULL(a.DES, ''))), ''),
+          o.DESCART
+        ),
+        FCNMOD = GETDATE()
+      FROM dbo.PV_CTR_ORDS o
+      LEFT JOIN dbo.DAT_ART a
+        ON UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.SUC, ''))))
+       AND UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(COALESCE(NULLIF(@1, ''), o.ART), ''))))
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
+      `,
+      [iord, artNuevo ?? ''],
     );
   }
 
