@@ -43,6 +43,7 @@
 - Ordenes de trabajo / Panel ORDs (2026-05-06): `listarColaboradoresAsignar` permite a `ANALISTA_INV` e `INVJEF` consultar catálogo de asignados; se agrega script `sql/2026-05-06_ord_flujo_vis_analista_inv_invjef_expand.sql` para ampliar visibilidad operativa configurada en `DAT_JAO_ORD_FLUJO_VIS`.
 - Ordenes de trabajo / Panel ORDs (2026-05-06): se corrige `dbo.sp_ordenes_trabajo_panel` con script `sql/2026-05-06_ordenes_trabajo_panel_analista_inv_selctrl14_fix.sql` para reponer visibilidad de `ANALISTA_INV/INVJEF` y aplicar criterio `selCtrlOrd=14` en la cola de revisión de cambio/merma.
 - Ordenes de trabajo / Panel ORDs acceso multi-sucursal analista (2026-05-22): `sp_ordenes_trabajo_panel` omite el recorte por `@HOME_SUC` cuando la consulta trae `@SUC` explícita y permitida en `USR_MOD_SUC`; evita ocultar ORDs recientes de sucursales como `DF14` para usuarios `ANALISTA_ORD` con acceso multi-sucursal (script `sql/2026-05-22_ordenes_trabajo_panel_home_suc_scope_fix_df14.sql`).
+- Ordenes de trabajo / Validación y edición multi-sucursal por IORD (2026-05-29): las validaciones/edición por código (`saveDetail`, `*/validar`, `scan`) ya no recortan por `HOME_SUC` cuando la ORD pertenece a otra sucursal autorizada en `USR_MOD_SUC` (caso `UDF04ANALISTATALLER` con `DF04` y `DF14`); se agrega soporte opcional de `suc` en payload para enviar contexto explícito desde frontend.
 - Ordenes de trabajo / ORDs derivadas cambio-merma (2026-05-22): las ORDs nuevas derivadas ya no deben comportarse como incidencia al `Recibir en tienda`; en `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` se fuerza clonación con `TIPOM=0`, y `sp_ordenes_trabajo_regresar_tienda_lote` prioriza `ESTSEGU=10` para ORDs con relación `REEORD` (script `sql/2026-05-22_ordenes_trabajo_derivadas_flujo_9_fix.sql`).
 - Datos Maestros / Compatibilidad puestos con ROL (2026-05-05): `/puestos` deja de depender de la tabla `PUESTO` y usa `ROL` como fuente compatible (`IDROL -> IDPUESTO`) para operación legacy en bases donde `PUESTO` ya no existe; `/users` mantiene contrato actual sin `IDPUESTO`.
 - AppModule / registro de módulos PV (2026-05-05): se restituye el registro en `imports` para `PvDevoluciones`, `PagosServicios`, `Retiros`, `FormasPagoCambios`, `CajonEstado`, `CajaGeneral`, `Facturacion` y `CtrlCtas` para evitar `404` por módulos no montados.
@@ -72,6 +73,7 @@
 - Acceso a datos: repos/QueryBuilder para CRUD/catalogos; SQL directo (`dataSource.query`) para reportes/legacy; transacciones con `QueryRunner` en procesos críticos; SPs para flujos de negocio.
 
 ## Reglas estrictas
+- Regla principal de nuevos módulos: todo módulo nuevo debe implementar compatibilidad legacy de acceso con `admin` en acceso total; resto de usuarios con acceso únicamente por sucursal autorizada, usando `USUARIO.SUC` y/o tabla `USR_MOD_SUC` según corresponda. Todas las rutas y endpoints del módulo deben diseñarse y crearse bajo esta regla.
 - No modificar lógica de negocio sin confirmación.
 - No cambiar versiones de dependencias ni agregar nuevas sin permiso.
 - No eliminar endpoints, entidades ni DTOs sin confirmación explícita.

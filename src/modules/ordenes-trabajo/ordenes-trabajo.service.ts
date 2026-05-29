@@ -92,11 +92,11 @@ export class OrdenesTrabajoService {
 
   private buildOrdAllowedSucSql(
     ordAlias: string,
-    labAlias: string,
+    _labAlias: string,
     isAdminParam: string,
     allowedSucsParam: string,
-    roleCodeParam: string,
-    homeSucParam: string,
+    _roleCodeParam: string,
+    _homeSucParam: string,
     requestedSucParam = 'NULL',
   ) {
     return `
@@ -112,15 +112,8 @@ export class OrdenesTrabajoService {
             )
           )
           AND (
-            UPPER(LTRIM(RTRIM(ISNULL(${roleCodeParam}, '')))) NOT IN (
-              'ANALISTA_ORD',
-              'ENC_MAQUILA',
-              'ENC_BISEL'
-            )
-            OR ${requestedSucParam} IS NOT NULL
-            OR ${homeSucParam} IS NULL
-            OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${homeSucParam})
-            OR UPPER(LTRIM(RTRIM(ISNULL(${labAlias}.SUC, '')))) = UPPER(${homeSucParam})
+            ${requestedSucParam} IS NULL
+            OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${requestedSucParam})
           )
         )
       )
@@ -953,7 +946,7 @@ export class OrdenesTrabajoService {
     ip: string | null,
   ) {
     const iord = this.requireIord(iordRaw);
-    const scope = await this.resolveSucScope(user, null);
+    const scope = await this.resolveSucScope(user, dto.suc ?? null);
     const roleCode = await this.resolveRoleCode(user);
     if (!this.canEditOrdDetail(user, roleCode)) {
       throw new ForbiddenException(
@@ -1149,12 +1142,17 @@ export class OrdenesTrabajoService {
 
   async validarEnviarOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('ENVIAR', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 3,
-      requiredFlowLabel: 'NUEVA AUTORIZADA',
-      okMessage: 'ORD válida para envío',
-      requireLaboratorio: true,
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 3,
+        requiredFlowLabel: 'NUEVA AUTORIZADA',
+        okMessage: 'ORD válida para envío',
+        requireLaboratorio: true,
+      },
+      dto.suc ?? null,
+    );
   }
 
   async enviarLote(dto: SendOrdBatchDto, user: JwtPayload, ip: string | null) {
@@ -1266,11 +1264,16 @@ export class OrdenesTrabajoService {
 
   async validarAsignarOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('ASIGNAR', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 7,
-      requiredFlowLabel: 'RECIBIDA A TALLER',
-      okMessage: 'ORD válida para asignación',
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 7,
+        requiredFlowLabel: 'RECIBIDA A TALLER',
+        okMessage: 'ORD válida para asignación',
+      },
+      dto.suc ?? null,
+    );
   }
 
   async asignarLote(
@@ -1302,11 +1305,16 @@ export class OrdenesTrabajoService {
     user: JwtPayload,
   ) {
     await this.assertActionPermission('TRABAJO_TERMINADO', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 8,
-      requiredFlowLabel: 'ASIGNADA',
-      okMessage: 'ORD válida para trabajo terminado',
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 8,
+        requiredFlowLabel: 'ASIGNADA',
+        okMessage: 'ORD válida para trabajo terminado',
+      },
+      dto.suc ?? null,
+    );
   }
 
   async trabajoTerminadoLote(
@@ -1332,12 +1340,17 @@ export class OrdenesTrabajoService {
     user: JwtPayload,
   ) {
     await this.assertActionPermission('REGRESAR_INCIDENCIA', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 8,
-      requiredFlowLabel: 'ASIGNADA',
-      okMessage: 'ORD válida para regresar por incidencia',
-      requireAsignado: true,
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 8,
+        requiredFlowLabel: 'ASIGNADA',
+        okMessage: 'ORD válida para regresar por incidencia',
+        requireAsignado: true,
+      },
+      dto.suc ?? null,
+    );
   }
 
   async regresarIncidenciaLote(
@@ -1375,11 +1388,16 @@ export class OrdenesTrabajoService {
 
   async validarRegresarTiendaOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('REGRESAR_TIENDA', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 9,
-      requiredFlowLabel: 'TRABAJO TERMINADO',
-      okMessage: 'ORD válida para regresar a tienda',
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 9,
+        requiredFlowLabel: 'TRABAJO TERMINADO',
+        okMessage: 'ORD válida para regresar a tienda',
+      },
+      dto.suc ?? null,
+    );
   }
 
   async regresarTiendaLote(
@@ -1443,14 +1461,19 @@ export class OrdenesTrabajoService {
     await this.assertActionPermission('SCAN_RECIBIR', user);
     const roleCode = await this.resolveRoleCode(user);
     const isAnalista = this.isAnalistaRoleForRecepcionExterna(roleCode);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: isAnalista ? 9 : 5,
-      requiredFlowLabel: isAnalista
-        ? 'PENDIENTE RECIBIR EN ANALISTA'
-        : 'ENTREGADA A MAQ O BISEL',
-      okMessage: 'ORD válida para recepción',
-      requireExternalLaboratorioForAnalyst: isAnalista,
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: isAnalista ? 9 : 5,
+        requiredFlowLabel: isAnalista
+          ? 'PENDIENTE RECIBIR EN ANALISTA'
+          : 'ENTREGADA A MAQ O BISEL',
+        okMessage: 'ORD válida para recepción',
+        requireExternalLaboratorioForAnalyst: isAnalista,
+      },
+      dto.suc ?? null,
+    );
   }
 
   async recibirLote(dto: SendOrdBatchDto, user: JwtPayload, ip: string | null) {
@@ -1477,11 +1500,16 @@ export class OrdenesTrabajoService {
 
   async validarEntregarOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('SCAN_ENTREGAR', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 10,
-      requiredFlowLabel: 'REGRESADO A TIENDA',
-      okMessage: 'ORD válida para entrega a cliente',
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 10,
+        requiredFlowLabel: 'REGRESADO A TIENDA',
+        okMessage: 'ORD válida para entrega a cliente',
+      },
+      dto.suc ?? null,
+    );
   }
 
   async entregarLote(
@@ -1693,7 +1721,7 @@ export class OrdenesTrabajoService {
 
   async scanRecibir(dto: ScanOrdDto, user: JwtPayload, ip: string | null) {
     await this.assertActionPermission('SCAN_RECIBIR', user);
-    const scope = await this.resolveSucScope(user, null);
+    const scope = await this.resolveSucScope(user, dto.suc ?? null);
     const actor = this.auditActor(user);
     const code = this.normalizeText(dto.code);
     if (!code) throw new BadRequestException('code es requerido');
@@ -1747,7 +1775,7 @@ export class OrdenesTrabajoService {
 
   async scanEntregar(dto: ScanOrdDto, user: JwtPayload, ip: string | null) {
     await this.assertActionPermission('SCAN_ENTREGAR', user);
-    const scope = await this.resolveSucScope(user, null);
+    const scope = await this.resolveSucScope(user, dto.suc ?? null);
     const actor = this.auditActor(user);
     const code = this.normalizeText(dto.code);
     if (!code) throw new BadRequestException('code es requerido');
@@ -1810,13 +1838,14 @@ export class OrdenesTrabajoService {
       requireAsignado?: boolean;
       requireExternalLaboratorioForAnalyst?: boolean;
     },
+    requestedSucRaw?: string | null,
   ) {
     const code = this.normalizeText(codeRaw);
     if (!code) {
       throw new BadRequestException('code es requerido');
     }
 
-    const scope = await this.resolveSucScope(user, null);
+    const scope = await this.resolveSucScope(user, requestedSucRaw ?? null);
     const roleCode = await this.resolveRoleCode(user);
     const rows = await this.dataSource.query(
       `
