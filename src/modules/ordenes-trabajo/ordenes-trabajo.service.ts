@@ -129,6 +129,20 @@ export class OrdenesTrabajoService {
     `;
   }
 
+  private extractSucFromOrdCode(codeRaw: string) {
+    const code = this.normalizeUpper(codeRaw).replace(/\s+/g, '');
+    if (code.length < 4) return null;
+    const prefix = code.slice(0, 4);
+    return /^[A-Z]{2}\d{2}$/.test(prefix) ? prefix : null;
+  }
+
+  private resolveRequestedSucForCodeLookup(scope: SucScope, codeRaw: string) {
+    const ordSuc = this.extractSucFromOrdCode(codeRaw);
+    if (!ordSuc) return scope.requestedSuc;
+    if (scope.isAdmin) return ordSuc;
+    return scope.allowedSucs.includes(ordSuc) ? ordSuc : scope.requestedSuc;
+  }
+
   async list(query: ListOrdenesTrabajoQueryDto, user: JwtPayload) {
     const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
     const scope = await this.resolveSucScope(
@@ -1846,6 +1860,10 @@ export class OrdenesTrabajoService {
     }
 
     const scope = await this.resolveSucScope(user, requestedSucRaw ?? null);
+    const lookupRequestedSuc = this.resolveRequestedSucForCodeLookup(
+      scope,
+      code,
+    );
     const roleCode = await this.resolveRoleCode(user);
     const rows = await this.dataSource.query(
       `
@@ -1891,7 +1909,7 @@ export class OrdenesTrabajoService {
         scope.allowedSucsCsv,
         this.normalizeUpper(roleCode),
         scope.homeSuc,
-        scope.requestedSuc,
+        lookupRequestedSuc,
       ],
     );
 
@@ -4818,6 +4836,10 @@ export class OrdenesTrabajoService {
   ) {
     if (scope.isAdmin) return;
     const roleCode = await this.resolveRoleCode(user);
+    const lookupRequestedSuc = this.resolveRequestedSucForCodeLookup(
+      scope,
+      code,
+    );
     const requiredTipo = this.resolveOrdTipoScope(roleCode);
     if (!requiredTipo) return;
 
@@ -4848,7 +4870,7 @@ export class OrdenesTrabajoService {
         scope.allowedSucsCsv,
         this.normalizeUpper(roleCode),
         scope.homeSuc,
-        scope.requestedSuc,
+        lookupRequestedSuc,
       ],
     );
 
