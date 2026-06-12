@@ -71,6 +71,7 @@ import { IncidenciasVacacionesModule } from './modules/incidencias-vacaciones/in
 import { MasterdataConfigModule } from './modules/masterdata-config/masterdata-config.module';
 import { PromocionesModule } from './modules/promociones/promociones.module';
 import { MermasModule } from './modules/mermas/mermas.module';
+import { TransferenciasModule } from './modules/transferencias/transferencias.module';
 
 @Module({
   imports: [
@@ -143,6 +144,7 @@ import { MermasModule } from './modules/mermas/mermas.module';
     MasterdataConfigModule,
     PromocionesModule,
     MermasModule,
+    TransferenciasModule,
   ],
   providers: [
     {

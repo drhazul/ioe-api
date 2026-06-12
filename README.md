@@ -44,6 +44,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Inventarios / Merma (2026-05-20): `DOC_CTRL_MERMA.AREAM` se ajusta a texto corto (`NVARCHAR(120)`) para captura libre; `create/update` y lectura de detalle usan `AREAM` como cadena (sin catálogo numérico).
 - Inventarios / Merma (2026-05-26): en `sp_merma_contabilizar`, los asientos en `DAT_MB51` ahora registran `ALMACEN='001'` (ya no `'MERMA'`) al contabilizar documentos de merma.
 - Inventarios / Merma (2026-05-26): gestión de cabeceras y validación de acceso por documento usan sucursales autorizadas en `USR_MOD_SUC` (módulos merma), con fallback legacy a la sucursal del token cuando no hay asignaciones explícitas.
+- Inventarios / Transferencias entre sucursales (2026-06-09): nuevo modulo `transferencias` con endpoints `/transferencias/*`, flujo `BORRADOR -> PENDIENTE -> LIBERADA -> PREPARACION -> TRANSITO -> REVISANDO/INCIDENCIA -> CONTABILIZADO`, soporte SQL `sql/2026-06-09_transferencias_modulo_base.sql` y movimientos `DAT_CMOV` 121/122/123/124 sobre `DAT_ART`.
 - Notas de documentación viva: este README se modifica solo por cambios de arquitectura, módulos o rutas principales; los ajustes funcionales se registran en los README/AGENTS del módulo correspondiente.
 
 ## Arquitectura
@@ -63,6 +64,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Punto de venta: `docs/modules/punto_venta/README.md` (instrucciones: `docs/modules/punto_venta/AGENTS.md`)
 - Ordenes de trabajo: `docs/modules/ordenes_trabajo/README.md` (instrucciones: `docs/modules/ordenes_trabajo/AGENTS.md`)
 - Reloj checador: `docs/modules/reloj_checador/README.md` (instrucciones: `docs/modules/reloj_checador/AGENTS.md`)
+- Inventarios: `docs/modules/inventarios/README.md` (instrucciones: `docs/modules/inventarios/AGENTS.md`)
 
 ## Tecnologias
 - NestJS, TypeORM (MSSQL), RxJS.

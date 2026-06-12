@@ -55,12 +55,17 @@
 - Inventarios / Merma (2026-05-26): contabilización actualiza `DAT_MB51.ALMACEN` a `'001'` para renglones de merma (`sp_merma_contabilizar`), homologando salida de inventario con almacén base.
 - Inventarios / Merma (2026-05-26): gestión y acceso por `DOCMER` validan sucursales por `USR_MOD_SUC` (módulos de merma); sin asignaciones explícitas, se conserva compatibilidad usando `SUC` del token.
 
+- Inventarios / Merma (2026-06-12): `src/main.ts` configura body parser JSON/urlencoded a `1mb` para permitir evidencia `EVI_M` validada (hasta 700000 caracteres) sin disparar `request entity too large`.
+
+- Inventarios / Transferencias entre sucursales (2026-06-09): se agrega `TransferenciasModule` con ruta `/transferencias`, tablas oficiales `TRAN_CTR_DOCPRE`/`TRAN_DET_ART`, catalogos `MOV_TRAN`/`PRIO_TRAN`/`ESTATUS_TRAN` y SPs `sp_trans_*`; la contabilizacion usa `DAT_CMOV` 121/122/123/124 y `DAT_ART`.
+
 ## Documentación por módulos
 - Base de módulos: `docs/modules/base_modulos/AGENTS.md` (README: `docs/modules/base_modulos/README.md`)
 - Core y seguridad: `docs/modules/core_seguridad/AGENTS.md` (README: `docs/modules/core_seguridad/README.md`)
 - Punto de venta: `docs/modules/punto_venta/AGENTS.md` (README: `docs/modules/punto_venta/README.md`)
 - Ordenes de trabajo: `docs/modules/ordenes_trabajo/AGENTS.md` (README: `docs/modules/ordenes_trabajo/README.md`)
 - Reloj checador: `docs/modules/reloj_checador/AGENTS.md` (README: `docs/modules/reloj_checador/README.md`)
+- Inventarios: `docs/modules/inventarios/AGENTS.md` (README: `docs/modules/inventarios/README.md`)
 
 ## Conexiones y consultas (resumen)
 - DB MSSQL, `autoLoadEntities=true`, `synchronize=false`, `logging=false`, `trustServerCertificate=true`, `encrypt=false`.
