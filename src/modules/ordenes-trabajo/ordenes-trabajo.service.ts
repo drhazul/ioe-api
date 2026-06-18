@@ -3236,7 +3236,7 @@ export class OrdenesTrabajoService {
         '')
       : (nuevoArtInfo?.des ?? '');
 
-    const precioOriginal = await this.resolveTicketLogUnitPrice(
+    const precioOriginal = await this.resolveTicketLogBaseUnitPrice(
       iord,
       idfol,
       artOriginal,
@@ -3258,16 +3258,12 @@ export class OrdenesTrabajoService {
     );
     const rqfac = this.resolveCambioMermaRqfac(originalRow);
     const ivaIntegrado = this.toInt(originalRow.IVA_INTEGRADO);
-    const ctdCalculoOrd = ctdOriginal > 0 ? ctdOriginal : ctdCM;
-    const ctdCalculoContable = ctdCM > 0 ? ctdCM : ctdCalculoOrd;
-    const originalBase = this.roundMoney(precioOriginal * ctdCalculoOrd);
-    const nuevoBase = this.roundMoney(precioNuevo * ctdCalculoOrd);
-    const originalBaseContable = this.roundMoney(
-      precioOriginal * ctdCalculoContable,
-    );
-    const nuevoBaseContable = this.roundMoney(
-      precioNuevo * ctdCalculoContable,
-    );
+    const originalBase = this.roundMoney(precioOriginal);
+    const nuevoBase = this.roundMoney(precioNuevo * ctdCM);
+    const originalBaseContable = ctdOriginal > 0
+      ? this.roundMoney(originalBase * (ctdCM / ctdOriginal))
+      : 0;
+    const nuevoBaseContable = this.roundMoney(precioNuevo * ctdCM);
 
     const montosOriginal = this.calculateFinanceByIva(originalBase, {
       tipoTran,
@@ -3292,12 +3288,8 @@ export class OrdenesTrabajoService {
       ivaIntegrado,
       rqfac,
     });
-    const diferenciaEconomicaCalculada = this.roundMoney(
-      montosNuevoContable.total - montosOriginalContable.total,
-    );
     const diferenciaEconomica = this.roundMoney(
-      this.toFloat(stagingRow?.DIFERENCIA_ECONOMICA) ??
-        diferenciaEconomicaCalculada,
+      montosNuevoContable.total - montosOriginalContable.total,
     );
     const generaAfectacionContable = Math.abs(diferenciaEconomica) >= 0.009;
 
@@ -3380,7 +3372,7 @@ export class OrdenesTrabajoService {
         UPC: nuevoArtInfo?.upc ?? '',
         DES:
           draftDesc,
-        CTD: ctdCalculoOrd,
+        CTD: ctdCM,
         PVTA: precioNuevo,
         PVTAR: precioNuevo,
         TIPO: this.normalizeText(originalRow.TIPO) ?? '',
@@ -3684,7 +3676,7 @@ export class OrdenesTrabajoService {
     };
   }
 
-  private async resolveTicketLogUnitPrice(
+  private async resolveTicketLogBaseUnitPrice(
     iordRaw: string,
     idfolRaw: string,
     artRaw: string,
@@ -3699,8 +3691,7 @@ export class OrdenesTrabajoService {
     const rows = await this.dataSource.query(
       `
       SELECT TOP 1
-        TRY_CONVERT(FLOAT, t.PVTAT) AS PVTAT,
-        TRY_CONVERT(FLOAT, t.PVTA) AS PVTA
+        TRY_CONVERT(FLOAT, t.PVTAT) AS PVTAT_BASE
       FROM dbo.PV_TICKET_LOG t
       WHERE (
           UPPER(LTRIM(RTRIM(ISNULL(t.ORD, '')))) = UPPER(@0)
@@ -3724,7 +3715,7 @@ export class OrdenesTrabajoService {
       [iord, idfol, art],
     );
     const row = this.firstRow(rows);
-    const value = this.toFloat(row?.PVTAT) ?? this.toFloat(row?.PVTA) ?? fallback;
+    const value = this.toFloat(row?.PVTAT_BASE) ?? fallback;
     return this.roundMoney(value);
   }
 
@@ -3736,7 +3727,7 @@ export class OrdenesTrabajoService {
     const idfol = this.normalizeText(originalRow.IDFOL) ?? '';
     const artOriginal = this.normalizeText(originalRow.ART) ?? '';
     const originalArtInfo = await this.resolveArticuloDatArt(suc, artOriginal);
-    return this.resolveTicketLogUnitPrice(
+    return this.resolveTicketLogBaseUnitPrice(
       iord,
       idfol,
       artOriginal,
@@ -3901,17 +3892,32 @@ export class OrdenesTrabajoService {
     secondary: unknown,
     ctdOriginal: number,
   ) {
+    const allowed = this.resolveAllowedCtdCM(ctdOriginal);
     const fromPrimary = this.toFloat(primary);
     if (fromPrimary != null) {
-      if (Math.abs(fromPrimary - 1) <= 0.0001) return 1;
-      if (Math.abs(fromPrimary - 0.5) <= 0.0001) return 0.5;
+      for (const value of allowed) {
+        if (Math.abs(fromPrimary - value) <= 0.0001) return value;
+      }
     }
     const fromSecondary = this.toFloat(secondary);
     if (fromSecondary != null) {
-      if (Math.abs(fromSecondary - 1) <= 0.0001) return 1;
-      if (Math.abs(fromSecondary - 0.5) <= 0.0001) return 0.5;
+      for (const value of allowed) {
+        if (Math.abs(fromSecondary - value) <= 0.0001) return value;
+      }
     }
-    return ctdOriginal >= 1 ? 1 : 0.5;
+    return allowed[0];
+  }
+
+  private resolveAllowedCtdCM(ctdOriginal: number) {
+    if (Math.abs(ctdOriginal - 1) <= 0.0001) {
+      return [1, 0.5];
+    }
+    if (Math.abs(ctdOriginal - 0.5) <= 0.0001) {
+      return [0.5];
+    }
+    throw new BadRequestException(
+      'La ORD origen debe tener cantidad 1 o 0.5 para procesar cambio/merma.',
+    );
   }
 
   private normalizeStrictCtdCM(value: unknown, fallback?: number) {
@@ -3929,6 +3935,14 @@ export class OrdenesTrabajoService {
   }
 
   private assertCtdCMCompatible(ctdCM: number, ctdOriginal: number) {
+    const allowed = this.resolveAllowedCtdCM(ctdOriginal);
+    if (!allowed.some((value) => Math.abs(ctdCM - value) <= 0.0001)) {
+      throw new BadRequestException(
+        allowed.length === 1
+          ? 'CTD_C_M solo permite 0.5 cuando la ORD origen fue creada con 0.5.'
+          : 'CTD_C_M solo permite 1 o 0.5 cuando la ORD origen fue creada con 1.',
+      );
+    }
     if (ctdOriginal <= 0) {
       throw new BadRequestException(
         'La ORD no tiene cantidad válida para procesar cambio/merma.',

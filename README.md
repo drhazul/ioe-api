@@ -38,6 +38,8 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Ordenes de trabajo / Panel ORDs acceso multi-sucursal analista (2026-05-22): `sp_ordenes_trabajo_panel` ya no restringe por `@HOME_SUC` cuando el usuario consulta una `@SUC` explícita permitida; se corrige caso `ANALISTA_ORD` con acceso `DF04/DF14` que solo veía históricos (script `sql/2026-05-22_ordenes_trabajo_panel_home_suc_scope_fix_df14.sql`).
 - Ordenes de trabajo / Validación y edición multi-sucursal por IORD (2026-05-29): las operaciones de validación/edición por IORD o código (`detalle/guardar`, `*/validar`, `scan`) respetan `USR_MOD_SUC` completo y dejan de depender de `HOME_SUC` para usuarios con acceso cruzado (`DF04` + `DF14`); la API acepta `suc` opcional para contexto explícito.
 - Ordenes de trabajo / Cambio-merma integridad artículo-descripción (2026-05-29): en autorización final, la nueva ORD no hereda `MOTR` y debe persistir `DESCART` consistente con el `ART` seleccionado en UI (`DAT_ART.DES`); se agrega script `sql/2026-05-29_ordenes_trabajo_cambio_merma_descart_motr_fix.sql` con rollback puntual de `DF01132910085`.
+- Ordenes de trabajo / Cambio material y Merma (2026-06-17): `Subtotal/IVA/Total` de la ORD original se calculan con `PVTAT` base del ticket log como importe ya totalizado; backend y SPs no usan `PVTA` como respaldo ni vuelven a multiplicar por `CTD`.
+- Ordenes de trabajo / Cambio material y Merma (2026-06-17): `CTD_C_M` se valida contra `CTD` original (`1` -> `1|0.5`, `0.5` -> `0.5`) y la diferencia económica usa el total original prorrateado por la fracción afectada frente al total de la nueva ORD.
 - Ordenes de trabajo / Validación por código multi-sucursal (2026-05-30): cuando el código de ORD incluye prefijo de sucursal (`DFxx`) autorizada al usuario, backend prioriza esa sucursal en el lookup para evitar bloqueos falsos por `suc` de contexto enviada desde UI.
 - Ordenes de trabajo / ORDs derivadas cambio-merma (2026-05-22): las ORDs nuevas derivadas de cambio/merma ya no deben caer en remapeo de incidencia al recibir en tienda; `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` clonan con `TIPOM=0`, y `sp_ordenes_trabajo_regresar_tienda_lote` envía a flujo `10` cuando detecta relación `REEORD` (script `sql/2026-05-22_ordenes_trabajo_derivadas_flujo_9_fix.sql`).
 - Datos Maestros / Compatibilidad puestos con ROL (2026-05-05): endpoint legacy `/puestos` opera sobre `ROL` (`IDROL` como `IDPUESTO`) para mantener compatibilidad cuando la tabla `PUESTO` fue retirada; `USUARIO` continúa sin columna `IDPUESTO`.
@@ -83,6 +85,8 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 ## Pruebas obligatorias
 - Ejecutar `npm test` antes de entregar cualquier cambio backend.
 - Cuando se coordinen cambios con el frontend (`ioe_app`), correr también `flutter analyze` y `flutter test` en ese proyecto.
+
+- Punto de venta / Cambio forma de pago REQF (2026-06-18): `PUT /formas-pago/cambios/:idf` re-sincroniza `FAC_SVR_SHAP/FACT_TICKET_SHP` con `sp_fact_sync_folio_vf` cuando el folio tiene `REQF=1` y `AUT=VF`; la respuesta incluye `facturacionSync`.
 
 ## Documentacion viva
 - Mantén este índice y los README/AGENTS de módulo actualizados con cada cambio de contrato o proceso.

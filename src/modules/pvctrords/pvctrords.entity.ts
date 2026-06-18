@@ -109,4 +109,7 @@ export class PvCtrOrdsEntity {
 
   @Column({ name: 'HR_ENT', type: 'datetime', nullable: true })
   HR_ENT: Date | null;
+
+  @Column({ name: 'TICKET_REL', type: 'nvarchar', length: 255, nullable: true })
+  TICKET_REL: string | null;
 }

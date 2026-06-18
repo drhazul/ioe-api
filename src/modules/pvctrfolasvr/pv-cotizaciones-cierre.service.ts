@@ -140,6 +140,7 @@ export class PvCotizacionesCierreService {
   private static readonly FORMAS_PERMITIDAS = new Set([
     'EFECTIVO',
     'TARJETA',
+    'TARJETA CREDITO',
     'CHEQUE',
     'TRANSFERENCIA',
     'DEPOSITO 3RO',
@@ -149,6 +150,7 @@ export class PvCotizacionesCierreService {
 
   private static readonly FORMAS_AUT_REQUERIDA = new Set([
     'TARJETA',
+    'TARJETA CREDITO',
     'CHEQUE',
     'TRANSFERENCIA',
     'DEPOSITO 3RO',
@@ -156,6 +158,7 @@ export class PvCotizacionesCierreService {
 
   private static readonly FORMAS_NO_EFECTIVO = new Set([
     'TARJETA',
+    'TARJETA CREDITO',
     'CHEQUE',
     'TRANSFERENCIA',
     'DEPOSITO 3RO',
@@ -547,11 +550,11 @@ export class PvCotizacionesCierreService {
           ord: this.normalizeText(row.ORD) || null,
         } satisfies PrintTicketItem;
         const tipoPromo = this.normalizeUpper(row.TIPOPROMO);
-      if (tipoPromo === 'ART_GRATIS') {
-        itemsGratis.push(item);
-      } else {
-        items.push(item);
-      }
+        if (tipoPromo === 'ART_GRATIS') {
+          itemsGratis.push(item);
+        } else {
+          items.push(item);
+        }
       });
 
     return { items, itemsGratis };
@@ -964,6 +967,8 @@ export class PvCotizacionesCierreService {
       CASH: 'EFECTIVO',
       TARJETA: 'TARJETA',
       CARD: 'TARJETA',
+      TARJETACREDITO: 'TARJETA CREDITO',
+      TARJETADECREDITO: 'TARJETA CREDITO',
       CHEQUE: 'CHEQUE',
       TRANSFERENCIA: 'TRANSFERENCIA',
       TRANSFER: 'TRANSFERENCIA',
@@ -1403,8 +1408,14 @@ export class PvCotizacionesCierreService {
   }
 
   private async updateOrdenesStatus(executor: SqlExecutor, idfol: string) {
-    const columns = await this.loadTableColumns(executor, 'dbo.PV_CTR_FOL_ASVR');
-    const rqfacColumn = this.pickFirstExistingColumn(columns, ['REQF', 'RQFAC']);
+    const columns = await this.loadTableColumns(
+      executor,
+      'dbo.PV_CTR_FOL_ASVR',
+    );
+    const rqfacColumn = this.pickFirstExistingColumn(columns, [
+      'REQF',
+      'RQFAC',
+    ]);
     let rqfac = 0;
     if (rqfacColumn) {
       const folioRows = await executor.query(
@@ -1914,7 +1925,7 @@ export class PvCotizacionesCierreService {
     }
 
     const before = await executor.query(
-      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202)`,
+      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202,206,207)`,
       [input.idfol],
     );
 
@@ -1933,7 +1944,7 @@ export class PvCotizacionesCierreService {
     }
 
     const after = await executor.query(
-      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202)`,
+      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202,206,207)`,
       [input.idfol],
     );
 
@@ -1951,7 +1962,9 @@ export class PvCotizacionesCierreService {
       const msg = `MB51 transmit idempotent for ${input.idfol}: afterCount=${afterCount}, delta=${delta}.`;
       this.logger.warn(msg);
     } else {
-      this.logger.log(`MB51 transmit inserted ${delta} rows for ${input.idfol}`);
+      this.logger.log(
+        `MB51 transmit inserted ${delta} rows for ${input.idfol}`,
+      );
     }
 
     return { delta, afterCount };

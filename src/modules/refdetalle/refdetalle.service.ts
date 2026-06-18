@@ -20,6 +20,7 @@ import { UpdateRefDetalleDto } from './dto/update-refdetalle.dto';
 export class RefDetalleService {
   private static readonly TIPOS_REFERENCIA = new Set([
     'TARJETA',
+    'TARJETA CREDITO',
     'CHEQUE',
     'TRANSFERENCIA',
     'DEPOSITO 3RO',
@@ -437,6 +438,8 @@ export class RefDetalleService {
     const aliases: Record<string, string> = {
       TARJETA: 'TARJETA',
       CARD: 'TARJETA',
+      TARJETACREDITO: 'TARJETA CREDITO',
+      TARJETADECREDITO: 'TARJETA CREDITO',
       CHEQUE: 'CHEQUE',
       TRANSFERENCIA: 'TRANSFERENCIA',
       TRANSFER: 'TRANSFERENCIA',
@@ -448,7 +451,7 @@ export class RefDetalleService {
     const tipo = aliases[raw] ?? this.normalizeUpper(value);
     if (!RefDetalleService.TIPOS_REFERENCIA.has(tipo)) {
       throw new BadRequestException(
-        'tipo invalido. Valores permitidos: TARJETA, CHEQUE, TRANSFERENCIA, DEPOSITO 3RO',
+        'tipo invalido. Valores permitidos: TARJETA, TARJETA CREDITO, CHEQUE, TRANSFERENCIA, DEPOSITO 3RO',
       );
     }
     return tipo;

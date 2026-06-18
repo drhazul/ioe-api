@@ -1,5 +1,5 @@
 
-CREATE   PROCEDURE dbo.sp_ordenes_trabajo_merma
+CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_merma
   @IORD NVARCHAR(255),
   @CANTIDAD_MERMA FLOAT,
   @MOTIVO NVARCHAR(255),
@@ -118,6 +118,10 @@ BEGIN
 
   IF ISNULL(@ctdOrig, 0) <= 0
     THROW 58033, 'La ORD no tiene cantidad valida para procesar merma', 1;
+
+  IF ABS(ISNULL(@ctdOrig, 0) - 1) > 0.0001
+     AND ABS(ISNULL(@ctdOrig, 0) - 0.5) > 0.0001
+    THROW 58038, 'La ORD origen debe haber sido creada con cantidad 1 o 0.5 para merma', 1;
 
   IF @ctdAfectada - @ctdOrig > 0.0001
     THROW 58034, 'cantidadMerma no puede ser mayor a la cantidad original', 1;
@@ -284,7 +288,6 @@ BEGIN
         SELECT TOP 1
           @precioOrig = COALESCE(
             TRY_CONVERT(FLOAT, t.PVTAT),
-            TRY_CONVERT(FLOAT, t.PVTA),
             0
           )
         FROM dbo.PV_TICKET_LOG t
@@ -328,7 +331,10 @@ BEGIN
         ORDER BY TRY_CONVERT(INT, ISNULL(a.BLOQ, 0)) ASC;
       END;
     SET @precioNuevo = COALESCE(@PVTA_NUEVO, @precioNuevo, @precioOrig, 0);
-    SET @importeOrig = ROUND(ISNULL(@precioOrig, 0) * @ctdAfectada, 2);
+    SET @importeOrig = ROUND(
+      ISNULL(@precioOrig, 0) * (ISNULL(@ctdAfectada, 0) / NULLIF(@ctdOrig, 0)),
+      2
+    );
     SET @importeNuevo = ROUND(ISNULL(@precioNuevo, 0) * @ctdAfectada, 2);
 
     DECLARE @ivaIntegrado INT = 0;

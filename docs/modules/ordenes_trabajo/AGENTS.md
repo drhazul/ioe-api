@@ -64,7 +64,7 @@ Enlaces relacionados:
 - matriz persistente de visibilidad (2026-05-03): tabla `dbo.DAT_JAO_ORD_FLUJO_VIS` define estatus visibles por `ROLE_CODE` y `PANEL_MODE` para módulo `DAT_JAO_ORD`; `SOLO_EXTERNO=1` restringe flujo al laboratorio externo (`DAT_LAB.UBILAB='EXTERNO'`).
 - `POST /ordenes-trabajo/:iord/detalle/guardar` acepta `hrEnt='HH:MM'` y actualiza `PV_CTR_ORDS.HR_ENT` conservando la fecha existente de entrega cuando aplica.
 - `ANULAR` queda restringido a `admin` y `JEF_TALLER`; la mutación sigue auditando en `AUDIT_LOG` con acción `ORD_ANULAR_LOTE`.
-- `cambio-material` valida `ESTSEGU=9.1` y `TIPOM=1`; `merma` valida `ESTSEGU=9.2` y `TIPOM=2`; ambos validan `CTD_C_M` (`1|0.5`) en DTO/service/SP.
+- `cambio-material` valida `ESTSEGU=9.1` y `TIPOM=1`; `merma` valida `ESTSEGU=9.2` y `TIPOM=2`; ambos validan `CTD_C_M` contra `CTD` original (`1` -> `1|0.5`, `0.5` -> `0.5`) en DTO/service/SP y calculan diferencia sobre la fracción afectada.
 - `cambio-merma/context|preparar|solicitar-autorizacion|retrabajo|autorizar` implementa semáforo interno `selCtrlOrd` (`NULL/0/13/14/15`), con `14` en revisión, `15` retrabajo y `Autorizar` como cierre final.
 - `cambio-merma/solicitar-autorizacion` fija siempre `selCtrlOrd=14`; `cambio-merma/retrabajo` devuelve el caso a `15`; `cambio-merma/autorizar` crea la nueva ORD, ejecuta SP final, registra MB51/diferencia y anula la original.
 - solo `admin`, `ANALISTA_INV` e `INVJEF` pueden ejecutar `cambio-merma/autorizar`.
@@ -85,6 +85,7 @@ Enlaces relacionados:
 - staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` es obligatorio para la captura temporal previa a la creación definitiva.
 - los SPs de cambio/merma calculan diferencia económica usando precio real de origen (`PV_TICKET_LOG`) y aplican afectación contable solo si la diferencia sobre `CTD_C_M` es distinta de cero.
 - cálculo de `Subtotal/IVA/Total` en contexto cambio/merma se alinea con cotizaciones/pago usando `DAT_SUC.IVA_INTEGRADO` + `PV_CTR_FOL_ASVR.REQF/RQFAC` y tipo `AUT/ORIGEN_AUT`; no inferir `tipotran` por patrón textual de `IDFOL`.
+- cambio material / Merma (2026-06-17): `Subtotal/IVA/Total` de la ORD original usan `PVTAT` base del ticket log como importe ya totalizado; el fallback a `PVTA` queda fuera y no se vuelve a multiplicar por `CTD`.
 - cálculo fiscal folio (2026-04-19): para `REQF` se debe usar fallback `RQFAC` desde `PV_CTR_FOL_ASVR` tanto en contexto/API como en SPs de creación, evitando dependencia de `PV_CTR_ORDS.RQFAC` cuando venga `NULL`.
 - staging UX/API (2026-04-19): `GET .../cambio-merma/context` expone `hasStagingRecord` para que frontend bloquee captura/autorización hasta insertar staging en `PV_ORD_CAMBIO_MERMA_TMP`.
 - costo nueva ORD (2026-04-19): contexto y SPs de creación igualan costo de nueva ORD al costo base de la ORD original para evitar diferencias de precio.

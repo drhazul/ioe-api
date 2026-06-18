@@ -44,7 +44,7 @@ Enlaces relacionados:
 - `datcatuso`: `DAT_CAT_USO` (`USOCFDI`, `DESCRIPCION`).
 - `dat-almacen`: `DAT_ALMACEN` (`ALMACEN`, `DESCRIPCION`, `ACTIVO`, `FCNR`).
 - `dat-cmov`: fuente `DAT_CMOV` (descubrimiento dinamico de columnas).
-- `dat-form`: fuente `DAT_FORM` para catalogo de formas de pago (`IDFORM`, `ASPEL`, `FORM`, `NOM`, `ESTADO`).
+- `dat-form`: fuente `DAT_FORM` para catalogo de formas de pago (`IDFORM`, `ASPEL`, `FORM`, `NOM`, `ESTADO`); `ASPEL` alimenta `FormaPagoSAT` y `TARJETA CREDITO` debe resolverse como `04`.
 - `ord-flujo-vis`: fuente `DAT_JAO_ORD_FLUJO_VIS` para visibilidad de flujos ORD por rol/panel (`ID`, `MODULO`, `PANEL_MODE`, `ROLE_CODE`, `ESTA`, `SOLO_EXTERNO`, `ACTIVO`, `ORDEN`), con catálogo auxiliar `ROL` + `DAT_EST_ORD`; `ORDEN` automático por `ESTA`.
 - `roles`: `ROL` con `IDDEPTO` opcional relacionado a `DEPARTAMENTO.IDDEPTO`; `DAT_JAO_ORD_FLUJO_VIS.ROLE_CODE` ahora tiene FK a `ROL.CODIGO`.
 

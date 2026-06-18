@@ -1,4 +1,4 @@
-CREATE   PROCEDURE dbo.sp_ordenes_trabajo_cambio_material
+CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_cambio_material
   @IORD NVARCHAR(255),
   @ART_NUEVO NVARCHAR(255),
   @MOTIVO NVARCHAR(255),
@@ -123,6 +123,10 @@ BEGIN
 
   IF ISNULL(@ctdOrig, 0) <= 0
     THROW 58026, 'La ORD no tiene cantidad valida para cambio de material', 1;
+
+  IF ABS(ISNULL(@ctdOrig, 0) - 1) > 0.0001
+     AND ABS(ISNULL(@ctdOrig, 0) - 0.5) > 0.0001
+    THROW 58029, 'La ORD origen debe haber sido creada con cantidad 1 o 0.5 para cambio de material', 1;
 
   IF @CTD_C_M - @ctdOrig > 0.0001
     THROW 58027, 'CTD_C_M no puede ser mayor a la cantidad de la ORD origen', 1;
@@ -260,7 +264,6 @@ BEGIN
       SELECT TOP 1
         @precioOrig = COALESCE(
           TRY_CONVERT(FLOAT, t.PVTAT),
-          TRY_CONVERT(FLOAT, t.PVTA),
           0
         )
       FROM dbo.PV_TICKET_LOG t
@@ -304,7 +307,10 @@ BEGIN
       ORDER BY TRY_CONVERT(INT, ISNULL(a.BLOQ, 0)) ASC;
     END;
     SET @precioNuevo = COALESCE(@PVTA_NUEVO, @precioNuevo, @precioOrig, 0);
-    SET @importeOrig = ROUND(ISNULL(@precioOrig, 0) * @ctdAfectada, 2);
+    SET @importeOrig = ROUND(
+      ISNULL(@precioOrig, 0) * (ISNULL(@ctdAfectada, 0) / NULLIF(@ctdOrig, 0)),
+      2
+    );
     SET @importeNuevo = ROUND(ISNULL(@precioNuevo, 0) * @ctdAfectada, 2);
 
     DECLARE @ivaIntegrado INT = 0;

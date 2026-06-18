@@ -23,7 +23,8 @@ export class CreateOrdFromQuoteLineDto {
   idfol: string;
 
   @ApiProperty({
-    description: 'ID del renglón en PV_TICKET_LOG sobre el que se creará/actualizará la ORD',
+    description:
+      'ID del renglón en PV_TICKET_LOG sobre el que se creará/actualizará la ORD',
   })
   @Transform(({ value }) => toTrimmedString(value))
   @IsString()
@@ -97,4 +98,23 @@ export class CreateOrdFromQuoteLineDto {
   @IsString()
   @Length(1, 255)
   ordExistente?: string;
+
+  @ApiPropertyOptional({
+    description: 'Folio relacionado de venta anterior',
+  })
+  @Transform(({ value }) => toOptionalTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  ticketRel?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Token temporal de autorización supervisor para ticket relacionado',
+  })
+  @Transform(({ value }) => toOptionalTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  relationAuthorizationToken?: string;
 }

@@ -61,6 +61,7 @@ export class PvTicketLogService {
       IDDEV: dto.IDDEV ?? null,
       CTDD: dto.CTDD ?? null,
       CTDDF: dto.CTDDF ?? null,
+      TICKET_REL: dto.TICKET_REL ?? null,
       UPDATED_AT: dto.UPDATED_AT ? new Date(dto.UPDATED_AT) : null,
     });
 
@@ -72,6 +73,13 @@ export class PvTicketLogService {
   async update(id: string, dto: UpdatePvTicketLogDto, user: JwtPayload) {
     const row = await this.findOne(id);
     const ordAssigned = this.normalizeOrd(row.ORD);
+    const relatedCounterMovement = this.isRelatedCounterMovementRow(row);
+
+    if (relatedCounterMovement && dto.CTD !== undefined) {
+      throw new ForbiddenException(
+        'El contramovimiento relacionado solo se elimina al eliminar la ORD del artículo relacionado.',
+      );
+    }
 
     if (ordAssigned && dto.CTD !== undefined) {
       const currentQty = Number(row.CTD);
@@ -88,6 +96,11 @@ export class PvTicketLogService {
     }
 
     if (dto.PVTA !== undefined) {
+      if (relatedCounterMovement) {
+        throw new ForbiddenException(
+          'El contramovimiento relacionado solo se elimina al eliminar la ORD del artículo relacionado.',
+        );
+      }
       if (ordAssigned) {
         throw new ForbiddenException(
           'No se permite modificar PVTA cuando el artículo ya tiene ORD asignada.',
@@ -110,6 +123,8 @@ export class PvTicketLogService {
     if (dto.IDDEV !== undefined) partial.IDDEV = dto.IDDEV ?? null;
     if (dto.CTDD !== undefined) partial.CTDD = dto.CTDD ?? null;
     if (dto.CTDDF !== undefined) partial.CTDDF = dto.CTDDF ?? null;
+    if (dto.TICKET_REL !== undefined)
+      partial.TICKET_REL = dto.TICKET_REL ?? null;
     if (dto.UPDATED_AT !== undefined) {
       partial.UPDATED_AT = dto.UPDATED_AT ? new Date(dto.UPDATED_AT) : null;
     }
@@ -130,6 +145,11 @@ export class PvTicketLogService {
   ) {
     const row = await this.findOne(id);
     const ordAssigned = this.normalizeOrd(row.ORD);
+    if (this.isRelatedCounterMovementRow(row)) {
+      throw new ForbiddenException(
+        'El contramovimiento relacionado solo se elimina al eliminar la ORD del artículo relacionado.',
+      );
+    }
     if (ordAssigned) {
       throw new ForbiddenException(
         'No se permite modificar PVTA cuando el artículo ya tiene ORD asignada.',
@@ -258,7 +278,9 @@ export class PvTicketLogService {
         `
         SELECT TOP 1
           ID,
-          LTRIM(RTRIM(ISNULL(ORD, ''))) AS ORD
+          LTRIM(RTRIM(ISNULL(ORD, ''))) AS ORD,
+          TRY_CONVERT(FLOAT, CTD) AS CTD,
+          LTRIM(RTRIM(ISNULL(TICKET_REL, ''))) AS TICKET_REL
         FROM dbo.PV_TICKET_LOG
         WHERE ID = @0
         `,
@@ -271,29 +293,14 @@ export class PvTicketLogService {
 
       const ordAssigned = this.normalizeOrd(row.ORD);
       if (ordAssigned) {
-        await queryRunner.query(
-          `
-          UPDATE dbo.PV_TICKET_LOG
-          SET ORD = NULL
-          WHERE LTRIM(RTRIM(ISNULL(ORD, ''))) = @0
-          `,
-          [ordAssigned],
+        throw new ForbiddenException(
+          'No se puede eliminar artículo cuando tiene ORD asignada. Elimina primero la ORD del artículo relacionado.',
         );
+      }
 
-        await queryRunner.query(
-          `
-          DELETE FROM dbo.PV_CTR_ORDS_DET
-          WHERE IORD = @0
-          `,
-          [ordAssigned],
-        );
-
-        await queryRunner.query(
-          `
-          DELETE FROM dbo.PV_CTR_ORDS
-          WHERE IORD = @0
-          `,
-          [ordAssigned],
+      if (this.isRelatedCounterMovementRow(row)) {
+        throw new ForbiddenException(
+          'El contramovimiento relacionado solo se elimina al eliminar la ORD del artículo relacionado.',
         );
       }
 
@@ -337,6 +344,21 @@ export class PvTicketLogService {
 
   private normalizeOrd(value: unknown) {
     return String(value ?? '').trim();
+  }
+
+  private isRelatedCounterMovementRow(
+    row:
+      | PvTicketLogEntity
+      | Record<string, unknown>
+      | null
+      | undefined,
+  ) {
+    const raw = (row ?? null) as Record<string, unknown> | null;
+    const ctd = Number(raw?.CTD ?? raw?.ctd ?? null);
+    const ticketRel = this.normalizeText(
+      raw?.TICKET_REL ?? raw?.ticketRel ?? null,
+    );
+    return Number.isFinite(ctd) && ctd < 0 && ticketRel.length > 0;
   }
 
   private normalizeUpper(value: unknown) {

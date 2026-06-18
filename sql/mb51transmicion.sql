@@ -175,6 +175,7 @@ BEGIN
           ),
           t.ART,
           t.CTD,
+          TICKET_REL = LTRIM(RTRIM(ISNULL(t.TICKET_REL, ''))),
           h.FCNM,
           h.SUC,
           CTOP = ISNULL(a.CTOP, 0)
@@ -198,6 +199,7 @@ BEGIN
           ),
           b.ART,
           b.CTD,
+          b.TICKET_REL,
           b.FCNM,
           b.SUC,
           b.CTOP
@@ -224,7 +226,13 @@ BEGIN
             ELSE CAST(0 AS BIT)
           END,
           [USER] = COALESCE(@actor, 'SYSTEM'),
-          CLSM = @clsm,
+          CLSM = CASE
+            WHEN NULLIF(LTRIM(RTRIM(ISNULL(r.TICKET_REL, ''))), '') IS NOT NULL
+              AND ISNULL(r.CTD, 0) < 0 THEN 207
+            WHEN NULLIF(LTRIM(RTRIM(ISNULL(r.TICKET_REL, ''))), '') IS NOT NULL
+              THEN 206
+            ELSE @clsm
+          END,
           DOCP = @idfolNorm,
           ART = r.ART,
           CTDA = ISNULL(r.CTD, 0) * @sign,

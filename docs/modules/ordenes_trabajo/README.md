@@ -71,7 +71,8 @@ Enlaces relacionados:
   - `entregar/lote` exige `ESTSEGU=10 (REGRESADO A TIENDA)` y aplica transición masiva a `ESTSEGU=11 (ENTREGADA A CLIENTE)`.
   - `regresar-incidencia/lote` valida `ESTSEGU=8` con colaborador asignado, exige un motivo válido de `DAT_ORD_TMOV.IDT` y persiste `PV_CTR_ORDS.TIPOM` al mover la ORD a flujo `9`.
   - `regresar-tienda/lote` aplica mapeo fijo por `TIPOM`: `TIPOM=1 (CAMBIO DE ARTICULO) -> ESTSEGU=9.1`, `TIPOM=2 (MERMA DE ART Y CAMBIO) -> ESTSEGU=9.2`, sin `TIPOM` válido -> `ESTSEGU=10`.
-  - `:iord/cambio-material` y `:iord/merma` permanecen retrocompatibles para ejecución directa, validan flujo/tipo del origen (`9.1/TIPOM=1` para cambio, `9.2/TIPOM=2` para merma) y validan `CTD_C_M` (`1|0.5`).
+- `:iord/cambio-material` y `:iord/merma` permanecen retrocompatibles para ejecución directa, validan flujo/tipo del origen (`9.1/TIPOM=1` para cambio, `9.2/TIPOM=2` para merma) y validan `CTD_C_M` (`1|0.5`).
+- `:iord/cambio-material` y `:iord/merma` validan `CTD_C_M` contra `CTD` original (`1` -> `1|0.5`, `0.5` -> `0.5`) y calculan diferencia económica sobre el total original prorrateado por la fracción afectada.
 - `:iord/cambio-merma/context|preparar|solicitar-autorizacion|retrabajo|autorizar` controla el flujo interno con `selCtrlOrd` (`NULL/0/13/14/15`) sin romper `ESTSEGU=9.1/9.2` hasta la autorización final.
 - garantía (2026-04-29): `POST /ordenes-trabajo/:iord/garantia` cambia de `ESTSEGU=11` a `ESTSEGU=9.3`; el panel `entregadas` conserva solo lectura de lista y `VER_DETALLE` para `admin` y `JEF_TALLER`.
 - aplicar merma/cambio (2026-04-29): `POST /ordenes-trabajo/:iord/aplicar-merma-cambio` valida `ESTSEGU=9.3`, exige `TIPOM (1|2)` + `MOTR` y redirige el flujo a `9.1/9.2` para continuar con el proceso ya existente de cambio/merma.
@@ -100,6 +101,7 @@ Enlaces relacionados:
 - ajuste fiscal folio (2026-04-19): contexto/API y SPs priorizan `REQF` del folio con fallback explícito a `RQFAC` (`PV_CTR_FOL_ASVR`) para homologar el cálculo al momento de crear nueva ORD.
 - staging UX (2026-04-19): `context` devuelve `hasStagingRecord` para habilitar UI de captura solo cuando ya existe registro temporal.
 - costo alineado (2026-04-19): `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` usan costo de ORD original al calcular importes de la nueva ORD, evitando diferencias de precio.
+- costo base ORD original (2026-06-17): `Subtotal/IVA/Total` de la ORD original toman `PVTAT` base del ticket log como importe ya totalizado; no se usa `PVTA` como respaldo ni se multiplica otra vez por `CTD`.
 - el panel resuelve `ASIGNADO` como etiqueta legible de `PV_OPV` (`NOMB + APELM + APELP`) y mantiene `ASIGN_ID` como valor crudo para filtros/acciones.
 - el panel también resuelve `OPV` con `USUARIO.NOMBRE`, exponiendo `OPV_ID` como valor crudo cuando existe relación.
 - `panelMode='estado'` devuelve catálogo completo de `DAT_EST_ORD`, solo habilita `VER_DETALLE` y reemplaza operativamente a los módulos front legacy de `anuladas`/`entregadas`.

@@ -24,6 +24,7 @@ type CambioDetalleRow = {
   IDFOL: string | null;
   AUT_ASVR: string | null;
   AUT_FORM: string | null;
+  REQF: number | null;
   TRA: string | null;
   OPVM: string | null;
   IDF: string | null;
@@ -31,6 +32,15 @@ type CambioDetalleRow = {
   IMPD: number | null;
   SUC: string | null;
   CLIEN: string | null;
+};
+
+type FacturacionSyncResult = {
+  idfol: string;
+  syncApplied: boolean;
+  estatus: string | null;
+  impt: number | null;
+  detailRows: number;
+  evento: string | null;
 };
 
 @Injectable()
@@ -91,6 +101,23 @@ export class FormasPagoCambiosService {
         'dbo.PV_CTR_FOL_ASVR',
         'CLIEN',
       );
+      const hasReqf = await this.hasColumn(
+        this.dataSource,
+        'dbo.PV_CTR_FOL_ASVR',
+        'REQF',
+      );
+      const hasRqfac = !hasReqf
+        ? await this.hasColumn(
+            this.dataSource,
+            'dbo.PV_CTR_FOL_ASVR',
+            'RQFAC',
+          )
+        : false;
+      const reqfSelect = hasReqf
+        ? 'TRY_CONVERT(INT, A.REQF)'
+        : hasRqfac
+        ? 'TRY_CONVERT(INT, A.RQFAC)'
+        : 'CAST(NULL AS INT)';
       const formAutSelect = hasFormAut
         ? 'CAST(F.AUT AS nvarchar(255))'
         : 'CAST(NULL AS nvarchar(255))';
@@ -131,6 +158,7 @@ export class FormasPagoCambiosService {
           CAST(A.IDFOL AS nvarchar(255)) AS IDFOL,
           CAST(A.TRA AS nvarchar(255)) AS TRA,
           CAST(A.OPVM AS nvarchar(255)) AS OPVM,
+          ${reqfSelect} AS REQF,
           ${sucSelect} AS SUC,
           ${clienSelect} AS CLIEN,
           CAST(F.IDF AS nvarchar(255)) AS IDF,
@@ -201,6 +229,16 @@ export class FormasPagoCambiosService {
       }
       await this.ensureFormAllowed(qr, newForm);
 
+      const hasReqf = await this.hasColumn(qr, 'dbo.PV_CTR_FOL_ASVR', 'REQF');
+      const hasRqfac = !hasReqf
+        ? await this.hasColumn(qr, 'dbo.PV_CTR_FOL_ASVR', 'RQFAC')
+        : false;
+      const reqfSelect = hasReqf
+        ? 'TRY_CONVERT(INT, A.REQF)'
+        : hasRqfac
+        ? 'TRY_CONVERT(INT, A.RQFAC)'
+        : 'CAST(NULL AS INT)';
+
       const targetRows = await qr.query(
         `
         SELECT TOP 1
@@ -209,6 +247,7 @@ export class FormasPagoCambiosService {
           CAST(A.IDFOL AS nvarchar(255)) AS IDFOL,
           CAST(A.TRA AS nvarchar(255)) AS TRA,
           CAST(A.OPVM AS nvarchar(255)) AS OPVM,
+          ${reqfSelect} AS REQF,
           CAST(F.IDF AS nvarchar(255)) AS IDF,
           CAST(F.FORM AS nvarchar(255)) AS FORM,
           CAST(ISNULL(F.IMPD, 0) AS decimal(18,2)) AS IMPD,
@@ -310,6 +349,18 @@ export class FormasPagoCambiosService {
         throw new NotFoundException(`No existe detalle actualizado IDF ${idf}`);
       }
 
+      const facturacionSync = await this.syncFacturacionIfRequired(
+        qr,
+        this.normalize(target.IDFOL) || idf,
+        this.normalizeUpper(target.AUT_ASVR),
+        this.toInt(target.REQF) ?? 0,
+      );
+      if (facturacionSync && !facturacionSync.syncApplied) {
+        throw new BadRequestException(
+          'No se pudo sincronizar la facturación del folio REQF',
+        );
+      }
+
       await qr.commitTransaction();
 
       await this.audit.log({
@@ -346,6 +397,7 @@ export class FormasPagoCambiosService {
         AFTER_FORM: this.normalizeUpper(afterRaw.FORM),
         BEFORE_AUT: beforeAut,
         AFTER_AUT: this.normalize(afterRaw.AUT),
+        facturacionSync,
       };
     } catch (error) {
       if (qr?.isTransactionActive) {
@@ -448,6 +500,56 @@ export class FormasPagoCambiosService {
     return null;
   }
 
+  private async syncFacturacionIfRequired(
+    qr: QueryRunner,
+    idFol: string,
+    aut: string,
+    reqf: number,
+  ): Promise<FacturacionSyncResult | null> {
+    if (this.normalizeUpper(aut) !== 'VF' || reqf !== 1) {
+      return null;
+    }
+
+    const procRows = await qr.query(`
+      SELECT CASE WHEN OBJECT_ID('dbo.sp_fact_sync_folio_vf', 'P') IS NULL THEN 0 ELSE 1 END AS HAS_PROC
+    `);
+    if (this.toInt((procRows?.[0] ?? {}).HAS_PROC) !== 1) {
+      throw new NotFoundException(
+        'No existe dbo.sp_fact_sync_folio_vf. Ejecute sql/sp_fact_sync_folio_vf_create.sql',
+      );
+    }
+
+    const rows = await qr.query(
+      `
+      EXEC dbo.sp_fact_sync_folio_vf
+        @IDFOL = @0,
+        @EVENTO = @1,
+        @FORCE = @2
+      `,
+      [idFol, 'CAMBIO_FORMA_PAGO', 0],
+    );
+    const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+    if (!row) {
+      return {
+        idfol: idFol,
+        syncApplied: false,
+        estatus: null,
+        impt: null,
+        detailRows: 0,
+        evento: 'CAMBIO_FORMA_PAGO',
+      };
+    }
+
+    return {
+      idfol: this.normalize(row.IDFOL) || idFol,
+      syncApplied: (this.toInt(row.SYNC_APPLIED) ?? 0) === 1,
+      estatus: this.normalize(row.ESTATUS) || null,
+      impt: this.toNumber(row.IMPT),
+      detailRows: Math.max(this.toInt(row.DETAIL_ROWS) ?? 0, 0),
+      evento: this.normalize(row.EVENTO) || null,
+    };
+  }
+
   private mapCambioDetalleRow(row: Record<string, unknown>): CambioDetalleRow {
     const autAsvr = this.normalizeUpper(row.AUT_ASVR ?? row.AUT);
     return {
@@ -455,6 +557,7 @@ export class FormasPagoCambiosService {
       IDFOL: this.normalize(row.IDFOL) || null,
       AUT_ASVR: autAsvr || null,
       AUT_FORM: this.normalize(row.AUT_FORM) || null,
+      REQF: this.toInt(row.REQF),
       TRA: this.normalize(row.TRA) || null,
       OPVM: this.normalizeUpper(row.OPVM) || null,
       IDF: this.normalize(row.IDF) || null,

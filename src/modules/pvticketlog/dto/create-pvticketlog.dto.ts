@@ -78,4 +78,10 @@ export class CreatePvTicketLogDto {
   @IsOptional()
   @IsDateString()
   UPDATED_AT?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  TICKET_REL?: string;
 }

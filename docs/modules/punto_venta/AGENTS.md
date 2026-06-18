@@ -59,13 +59,14 @@ Enlaces relacionados:
 - `PATCH /dat-form/:idform`
 - `PATCH /dat-form/:idform/estado`
 - `DELETE /dat-form/:idform`
+- `TARJETA CREDITO` usa `DAT_FORM.ASPEL=4`; en VF con factura se considera forma no efectivo, requiere referencia y termina en `FormaPagoSAT='04'`.
 - `GET /pv/refdetalle?idfol=:idfol&tipo=:tipo`
 - `POST /pv/refdetalle/crear`
 - `POST /pv/refdetalle/asignar`
 - `DELETE /pv/refdetalle/:idref`
 - Reglas e integracion UI:
 - app mueve UI a `lib/features/modulos/punto_venta/cotizaciones/pago/*` y oculta tarjeta de contexto.
-- `CA` lista `EFECTIVO`/`CREDITO`; `aut`+`Generar/Asignar referencia` solo para `TARJETA/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO`.
+- `CA` lista `EFECTIVO`/`CREDITO`; `aut`+`Generar/Asignar referencia` solo para `TARJETA/TARJETA CREDITO/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO`.
 - referencias se crean/asignan en `REF_DETALLE` y regresan `IDREF` al pago.
 - app bloquea cambio de `tipotran` cuando ya hay formas; `RQFAC` en AppBar; totales en card único; oculta `IVA integrado sucursal`; recalcula preview al reingresar.
 - app persiste `RQFAC` con `PATCH /pvctrfolasvr/:idfol`; habilita `Imprimir ticket` consumiendo `GET /pv/cotizaciones/:idfol/cierre/print-preview`.

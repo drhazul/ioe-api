@@ -265,6 +265,7 @@ Enlaces relacionados:
 - en `CP -> CA/VF`, `sp_pv_cotizacion_cerrar` genera nuevo `IDFOL` visible, conserva `IDFOLINICIAL` y religa `PV_TICKET_LOG`, `PV_CTR_ORDS` y `REF_DETALLE` al folio final dentro de la misma transacción.
 - en `CP -> CA/VF`, el cierre también sincroniza `PV_CTR_ORDS.RQFAC` con el `REQF/RQFAC` efectivo del folio final al mover la ORD a `ESTATUS=2`.
 - `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`): insercion transaccional de formas definitivas (`IDF`, `IDFOL`, `FORM`, `IMPP`, `AUT`, ...). En `CREDITO/DEUDOR` guarda `AUT=IDFOL`. `IMPD` se persiste por forma aplicada (`IMPP-IMPC`; en no-efectivo coincide con `IMPP`).
+- `TARJETA CREDITO` se guarda en `DAT_FORM` con `ASPEL=4`; en cierre VF con factura queda como forma no efectivo, requiere referencia y sincroniza `FormaPagoSAT='04'`.
 - sincronización facturación VF (2026-03): en cierre `tipotran='VF'`, `sp_pv_cotizacion_cerrar` exige e invoca `dbo.sp_fact_sync_folio_vf` dentro de la misma transacción para upsert de cabecera `FAC_SVR_SHAP` y rebuild de detalle `FACT_TICKET_SHP` del folio final.
 - regla de elegibilidad facturación VF (2026-03): solo se sincronizan folios con `AUT='VF'` y `REQF=1`; si un folio no cumple, se limpia su cabecera/detalle en `FAC_SVR_SHAP`/`FACT_TICKET_SHP`.
 - regla `Tipofact` en sincronización VF (2026-03): si el folio tiene alguna forma `CREDITO` en `PV_CTR_FOL_FORM(_SVR)`, se persiste `FAC_SVR_SHAP.Tipofact='CREDITO'`; en caso contrario queda `INDIVIDUAL`.
