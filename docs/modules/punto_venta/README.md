@@ -234,6 +234,7 @@ Enlaces relacionados:
 - trazabilidad UI: app oculto `IVA integrado sucursal` en el resumen y recalcula preview al reingresar a pago; no cambia endpoints ni payload.
 - trazabilidad UI: app guarda `RQFAC` en `PV_CTR_FOL_ASVR.REQF` al cambiar switch mediante `PATCH /pvctrfolasvr/:idfol`; no agrega endpoint nuevo.
 - trazabilidad API/UI: al finalizar cierre, app permanece en pantalla de pago y habilita boton `Imprimir ticket`; al presionarlo consulta `GET /pv/cotizaciones/:idfol/cierre/print-preview` para abrir vista previa PDF.
+- trazabilidad API/UI: cuando el folio vuelve desde panel en estado `PAGADO/MB51PROCES`, la UI reusa `GET /pv/cotizaciones/:idfol/cierre/print-preview` para rehidratar formas persistidas y mostrar `Pagos/Faltante/Cambio` correctos.
 - trazabilidad UI (app, 2026-03): en ticket de cotización, si hay formas no `EFECTIVO`, la impresión agrega voucher `SOPORTE RECEPCION PAGO` por cada forma no efectivo.
 - trazabilidad UI (app, 2026-03): el voucher de cotización incluye espacio en blanco para firma y renglón `Firma cliente` después de `FCN`.
 - trazabilidad UI (app, 2026-03): en cotizaciones, la app imprime vouchers en un segundo PDF; al cerrar la vista previa del ticket principal solicita confirmación y luego abre la vista previa del voucher (sin cambios de endpoints/payload).

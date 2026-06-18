@@ -70,6 +70,7 @@ Enlaces relacionados:
 - referencias se crean/asignan en `REF_DETALLE` y regresan `IDREF` al pago.
 - app bloquea cambio de `tipotran` cuando ya hay formas; `RQFAC` en AppBar; totales en card único; oculta `IVA integrado sucursal`; recalcula preview al reingresar.
 - app persiste `RQFAC` con `PATCH /pvctrfolasvr/:idfol`; habilita `Imprimir ticket` consumiendo `GET /pv/cotizaciones/:idfol/cierre/print-preview`.
+- si el folio vuelve desde panel en `PAGADO/MB51PROCES`, la UI reusa `GET /pv/cotizaciones/:idfol/cierre/print-preview` para rehidratar formas persistidas y mostrar `Pagos/Faltante/Cambio` correctos.
 - vouchers para formas no `EFECTIVO` en PDF (segundo PDF, línea de recorte, `GRACIAS POR SU CONFIANZA`).
 - prevalidacion de referencias sin usar en frontend con `GET /pv/refdetalle`; backend mantiene validacion.
 - cierre `CA` fuerza `rqfac=false` y `REQF=0` antes de preview.
