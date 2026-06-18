@@ -31,6 +31,7 @@ Enlaces relacionados:
 - `POST /ordenes-trabajo/enviar/validar` (valida ORD por `IORD/IDFOL` para flujo de envío, exige `ESTSEGU=3` y laboratorio asignado)
 - `POST /ordenes-trabajo/enviar/lote` (cambio masivo a `ESTSEGU=5` para ORDs relacionadas/seleccionadas)
 - `GET /ordenes-trabajo/asignar/colaboradores` (catálogo `PV_OPV` por `SUC`, `NIVEL=41`)
+- `GET /ordenes-trabajo/asignar/colaboradores` amplía catálogo con sucursales origen activas desde `DAT_SUC_COLAB_ACCESO` cuando la sucursal destino tiene relación configurada; sin relación, conserva catálogo propio.
 - `POST /ordenes-trabajo/asignar/validar` (valida ORD en `ESTSEGU=7`)
 - `POST /ordenes-trabajo/asignar/lote` (cambio masivo `7 -> 8`, actualiza `ASIGN` y `FCNAS` cuando existe)
 - `POST /ordenes-trabajo/trabajo-terminado/validar` (valida ORD en `ESTSEGU=8`)
@@ -53,10 +54,11 @@ Enlaces relacionados:
 - selección de renglones y escaneo se resuelven en frontend/appstate y en endpoints dedicados, sin depender de flags legacy persistidos.
 - `enviar/lote` valida acceso por sucursal (`USR_MOD_SUC`), exige `ESTSEGU=3` y laboratorio asignado en todas las ORDs del lote, y aplica transición a `ESTSEGU=5`.
 - `recibir/lote` valida acceso por sucursal, exige `ESTSEGU=5` y aplica transición a `ESTSEGU=7`.
-- `entregar/lote` valida acceso por sucursal, exige `ESTSEGU=10` y aplica transición a `ESTSEGU=11`.
+- `entregar/lote` valida acceso por sucursal, exige `ESTSEGU=10`, crea un folio de entrega en `PV_CTR_ORDS_ENTREGA` con una sola firma capturada y aplica transición a `ESTSEGU=11` relacionando cada ORD mediante `PV_CTR_ORDS.ID_ENTREGA`.
 - `regresar-incidencia/lote` valida `ESTSEGU=8` con colaborador asignado, exige motivo `DAT_ORD_TMOV.IDT` y actualiza `TIPOM`; el panel entrega `ASIGNADO` como label de `PV_OPV` (`NOMB + APELM + APELP`).
 - `GET /ordenes-trabajo` soporta `panelMode='estado'` para consulta solo lectura; `flowStatusOptions` toma estados desde `DAT_EST_ORD`, `OPV` se resuelve con `USUARIO.NOMBRE` y el home debe usar módulo `DAT_JAO_ORD_ESTADO`.
 - garantía 9.3 (2026-04-29): `POST /ordenes-trabajo/:iord/garantia` ahora mueve `ESTSEGU` de `11` a `9.3`; el panel `entregadas` queda restringido a `admin`/`JEF_TALLER` y solo expone `VER_DETALLE`.
+- `PV_CTR_ORDS.ID_ENTREGA` enlaza la ORD con `PV_CTR_ORDS_ENTREGA`; el detalle de `ESTSEGU=11` imprime evidencia con cabecera, detalle, folio de entrega y firma base64 guardada una vez por folio.
 - aplicar merma/cambio (2026-04-29): nuevo `POST /ordenes-trabajo/:iord/aplicar-merma-cambio` exige `ESTSEGU=9.3`, valida `TIPOM (1|2)` y `MOTR` (`DAT_ORD_MOTM`) y enruta a `9.1/9.2` para continuar el mismo flujo de cambio/merma.
 - recepción laboratorio externo (2026-05-01): `POST /ordenes-trabajo/recibir/validar|lote` habilita `SCAN_RECIBIR` para `ANALISTA_ORD/ANALISTA` solo sobre ORDs de laboratorio externo; recepción cambia `ESTSEGU=5 -> 10` para externo y mantiene `5 -> 7` para laboratorio interno.
 - envío laboratorio externo (2026-05-03): `POST /ordenes-trabajo/enviar/lote` envía ORDs con `DAT_LAB.UBILAB='EXTERNO'` a flujo `ESTSEGU=9` (pendiente recibir en analista); laboratorio interno conserva `3 -> 5`.
@@ -98,7 +100,7 @@ Enlaces relacionados:
 - compat ORD panel/detalle (2026-03-30): `sp_ordenes_trabajo_panel` ahora filtra `@CLIENT` contra `CLIEN` y `NCLIENTE`; `sp_ordenes_trabajo_detalle` devuelve `PV_CTR_ORDS_DET` en secuencia `OD`, `OI`, `ADD`, y el service refuerza ese orden en la respuesta JSON.
 - trazabilidad UI/Home (app, 2026-03-24): `ioe_app` agrega accesos rápidos en Home para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar`; visibilidad se resuelve consumiendo `allowedActions` del panel ORDs.
 - trazabilidad UI/Home (app, 2026-03-24): los accesos Home abren páginas standalone (no el panel) replicando la mecánica de validación/captura de los popups del panel; backend reutiliza los mismos endpoints.
-- trazabilidad UI/Home (app, 2026-03-24): `Entregar` directa captura firma digital y usa `POST /ordenes-trabajo/:iord/entregar` por cada ORD; sin cambios backend/SQL.
+- trazabilidad UI/Home (app, 2026-03-24): `Entregar` directa captura firma digital, agrupa ORDs relacionadas en un folio de entrega y confirma el lote con backend; la evidencia se imprime desde `GET /ordenes-trabajo/:iord/detalle`.
 - regla obligatoria panel/home (2026-04-07): si se ajusta una regla de flujo o validacion de negocio en botoneras del panel, se debe actualizar en el mismo cambio la validacion/ejecucion equivalente para accesos de Home (endpoints `*/validar` y `*/lote`) para evitar diferencias funcionales entre ambos flujos.
 - trazabilidad API/UI ORDs (2026-03-30): `OrdenesTrabajoService.getDetail` reordena `details` en memoria como defensa extra aunque SQL ya venga ordenado.
 - trazabilidad API/UI ORDs (2026-04-21): para `GET /ordenes-trabajo/asignar/colaboradores`, el contrato se mantiene (`suc` por query); la UI debe enviarla conforme a `DAT_LAB.SUC` del laboratorio asignado a la ORD. El payload `laboratorios` agrega `labSuc` para diferenciar la sucursal real del laboratorio frente a la sucursal de acceso.

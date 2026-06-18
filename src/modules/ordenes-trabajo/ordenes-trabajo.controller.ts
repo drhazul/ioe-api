@@ -21,6 +21,7 @@ import {
   CambioMaterialDto,
   CambioMermaContextDto,
   CrearCambioMermaDto,
+  EntregarOrdBatchDto,
   EntregarOrdDto,
   GarantiaOrdDto,
   MermaOrdDto,
@@ -316,7 +317,7 @@ export class OrdenesTrabajoController {
 
   @Post('entregar/lote')
   entregarLote(
-    @Body() dto: SendOrdBatchDto,
+    @Body() dto: EntregarOrdBatchDto,
     @CurrentUser() user: JwtPayload,
     @Req() req: any,
   ) {

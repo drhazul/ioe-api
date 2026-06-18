@@ -41,6 +41,7 @@ import { FactClientShpModule } from './modules/factclientshp/factclientshp.modul
 import { DatCatRegModule } from './modules/datcatreg/datcatreg.module';
 import { DatCatUsoModule } from './modules/datcatuso/datcatuso.module';
 import { DatEstOrdModule } from './modules/datestord/datestord.module';
+import { SucColabAccesoModule } from './modules/suc-colab-acceso/suc-colab-acceso.module';
 import { ConteosModule } from './modules/conteos/conteos.module';
 import { AccessModule } from './modules/access/access.module';
 import { JrqClasModule } from './modules/jrqclas/jrqclas.module';
@@ -114,6 +115,7 @@ import { MermasModule } from './modules/mermas/mermas.module';
     DatCatRegModule,
     DatCatUsoModule,
     DatEstOrdModule,
+    SucColabAccesoModule,
     ConteosModule,
     AccessModule,
     JrqClasModule,

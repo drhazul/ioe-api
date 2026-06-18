@@ -38,6 +38,7 @@ Enlaces relacionados:
   - `POST /ordenes-trabajo/enviar/validar`
 - `POST /ordenes-trabajo/enviar/lote`
 - `GET /ordenes-trabajo/asignar/colaboradores`
+  - usa `DAT_SUC_COLAB_ACCESO` para ampliar catálogo cuando la sucursal destino tenga relación activa con sucursales origen; si no existe relación, cae al catálogo propio de `PV_OPV`.
 - `POST /ordenes-trabajo/asignar/validar`
 - `POST /ordenes-trabajo/asignar/lote`
 - `POST /ordenes-trabajo/trabajo-terminado/validar`
@@ -68,7 +69,7 @@ Enlaces relacionados:
   - selección/escaneo se resuelven en API y no dependen de flags legacy (`SEL`, `selCtrlOrd`, `selCtrOrdT`, `selEnt`).
   - `enviar/lote` exige que cada ORD del lote esté en `ESTSEGU=3 (NUEVA AUTORIZADA)` y con `LABOR` asignado; al confirmar, aplica transición masiva a `ESTSEGU=5 (ENTREGADA A MAQ O BISEL)` respetando alcance por sucursal.
   - `recibir/lote` exige `ESTSEGU=5 (ENTREGADA A MAQ O BISEL)` y aplica transición masiva a `ESTSEGU=7 (RECIBIDA A TALLER)`.
-  - `entregar/lote` exige `ESTSEGU=10 (REGRESADO A TIENDA)` y aplica transición masiva a `ESTSEGU=11 (ENTREGADA A CLIENTE)`.
+- `entregar/lote` exige `ESTSEGU=10 (REGRESADO A TIENDA)` y aplica transición masiva a `ESTSEGU=11 (ENTREGADA A CLIENTE)` creando un folio de entrega único con firma capturada una sola vez y relación en `PV_CTR_ORDS.ID_ENTREGA`.
   - `regresar-incidencia/lote` valida `ESTSEGU=8` con colaborador asignado, exige un motivo válido de `DAT_ORD_TMOV.IDT` y persiste `PV_CTR_ORDS.TIPOM` al mover la ORD a flujo `9`.
   - `regresar-tienda/lote` aplica mapeo fijo por `TIPOM`: `TIPOM=1 (CAMBIO DE ARTICULO) -> ESTSEGU=9.1`, `TIPOM=2 (MERMA DE ART Y CAMBIO) -> ESTSEGU=9.2`, sin `TIPOM` válido -> `ESTSEGU=10`.
 - `:iord/cambio-material` y `:iord/merma` permanecen retrocompatibles para ejecución directa, validan flujo/tipo del origen (`9.1/TIPOM=1` para cambio, `9.2/TIPOM=2` para merma) y validan `CTD_C_M` (`1|0.5`).
@@ -106,6 +107,7 @@ Enlaces relacionados:
 - el panel también resuelve `OPV` con `USUARIO.NOMBRE`, exponiendo `OPV_ID` como valor crudo cuando existe relación.
 - `panelMode='estado'` devuelve catálogo completo de `DAT_EST_ORD`, solo habilita `VER_DETALLE` y reemplaza operativamente a los módulos front legacy de `anuladas`/`entregadas`.
 - `saveDetail` acepta `hrEnt` (`HH:MM`) y lo guarda en `PV_CTR_ORDS.HR_ENT`.
+- `PV_CTR_ORDS.ID_ENTREGA` relaciona la ORD con `PV_CTR_ORDS_ENTREGA`; el encabezado de entrega guarda firma base64 y detalle de lote, y en `ESTSEGU=11` la app puede imprimir evidencia con cabecera, detalle, folio de entrega y firma.
 - `ANULAR` queda limitado a `admin`/`JEF_TALLER`; las anulaciones exitosas continúan registrándose en `AUDIT_LOG`.
   - recepción unificada: se elimina destino (`TALLER/ANALISTA`) y backend fija recepción operativa a `ESTSEGU=7`.
   - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) solo para `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER` (admin conserva acceso total).

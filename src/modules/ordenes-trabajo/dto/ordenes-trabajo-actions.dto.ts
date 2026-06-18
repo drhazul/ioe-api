@@ -273,6 +273,19 @@ export class SendOrdBatchDto {
   iords!: string[];
 }
 
+export class EntregarOrdBatchDto extends SendOrdBatchDto {
+  @ApiPropertyOptional({ example: 'Entregado conforme en mostrador' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  observaciones?: string;
+
+  @ApiPropertyOptional({ example: 'FIRMA_DIGITAL_BASE64' })
+  @IsOptional()
+  @IsString()
+  firmaCliente?: string;
+}
+
 export class AssignOrdBatchDto extends SendOrdBatchDto {
   @ApiProperty({ example: 'OPV0001' })
   @IsString()
