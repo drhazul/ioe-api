@@ -161,6 +161,9 @@ Enlaces relacionados:
 - Panel PS: folios `PAGADO` abren directo pago.
 - Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen y aplica regla parcial solo-efectivo, pago valida forma(s) origen, sincroniza facturación con `sp_fact_sync_folio_vf`, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.
 
+## Caja General: entrega OPV (2026-06-18)
+- `sp_cg_sync_entrega_opv_abierta`, `sp_cg_cerrar_entrega_opv` y `sp_cg_reactivar_entrega_opv` usan `sp_getapplock` por sucursal/fecha/OPV y borrado por `IDE` + contexto antes de reinsertar en `DAT_FORM_ENTR_OPV_SVR`, para evitar duplicados de la PK `PK_DATFORMENTROPVSVR`.
+
 ## Punto de venta: alta de cotizacion desde panel (trazabilidad app)
 - Flujo frontend: confirmacion de alta -> modal de cliente filtrado por SUC.
 - `GET /factclientshp?suc=<SUC>` lista clientes por la sucursal activa del panel; para admin multi-sucursal no debe limitar por `user.suc` (usa reglas `isAdmin` `ADMIN_ROLE_IDS/ADMIN_NIVELES`).

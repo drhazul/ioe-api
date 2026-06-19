@@ -148,6 +148,7 @@ BEGIN
   IF @value IN ('DEP', 'DEPOSITO 3RO', 'DEPOSITO', 'DEPOSITO 3RO.') SET @value = 'DEPOSITO 3RO';
   IF @value IN ('DEU', 'DEUDOR') SET @value = 'DEUDOR';
   IF @value IN ('EFE', 'EFECTIVO') SET @value = 'EFECTIVO';
+  IF @value IN ('TARJETA CREDITO', 'TARJETA DE CREDITO') SET @value = 'TARJETA CREDITO';
   IF @value IN ('TAR', 'TARJETA') SET @value = 'TARJETA';
   IF @value IN ('TRA', 'TRANSFERENCIA') SET @value = 'TRANSFERENCIA';
 
@@ -263,34 +264,6 @@ BEGIN
 
   DECLARE @serial INT = DATEDIFF(DAY, '1899-12-30', @fcnDate);
   DECLARE @ide NVARCHAR(255) = CONCAT(@serial, @opvNorm);
-  DECLARE @estaActual NVARCHAR(20) = NULL;
-  DECLARE @terNorm NVARCHAR(255) = NULL;
-
-  SELECT TOP (1)
-    @estaActual = UPPER(LTRIM(RTRIM(ISNULL(fin.ESTA, ''))))
-  FROM dbo.DAT_FORM_FIN fin
-  WHERE fin.IDE = @ide;
-
-  IF @estaActual = 'CERRADO'
-  BEGIN
-    SELECT
-      @ide AS IDE,
-      @opvNorm AS OPV,
-      @dtIni AS FCN,
-      CAST(NULL AS FLOAT) AS ART,
-      CAST(NULL AS FLOAT) AS TRN,
-      CAST(NULL AS MONEY) AS DIF,
-      'CERRADO' AS ESTA,
-      @sucNorm AS SUC;
-    RETURN;
-  END;
-
-  SELECT TOP (1)
-    @terNorm = NULLIF(LTRIM(RTRIM(ISNULL(e.TER, ''))), '')
-  FROM dbo.DAT_FORM_ENTR_OPV_SVR e
-  WHERE UPPER(LTRIM(RTRIM(ISNULL(e.SUC, '')))) = @sucNorm
-    AND UPPER(LTRIM(RTRIM(ISNULL(e.OPV, '')))) = @opvNorm
-    AND CONVERT(DATE, e.FCN) = @fcnDate;
 
   BEGIN TRY
     IF @@TRANCOUNT = 0
@@ -298,6 +271,52 @@ BEGIN
       SET @startedTran = 1;
       BEGIN TRANSACTION;
     END;
+
+    DECLARE @lockResource NVARCHAR(255) = CONCAT(
+      'CG_ENTREGA_OPV_',
+      CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', CONCAT(@sucNorm, '|', CONVERT(CHAR(8), @fcnDate, 112), '|', @opvNorm)), 2)
+    );
+    DECLARE @lockResult INT;
+
+    EXEC @lockResult = sp_getapplock
+      @Resource = @lockResource,
+      @LockMode = 'Exclusive',
+      @LockOwner = 'Transaction',
+      @LockTimeout = 10000;
+
+    IF @lockResult < 0
+      THROW 58017, 'No se pudo obtener lock para sincronizar entrega OPV', 1;
+
+    DECLARE @estaActual NVARCHAR(20) = NULL;
+    DECLARE @terNorm NVARCHAR(255) = NULL;
+
+    SELECT TOP (1)
+      @estaActual = UPPER(LTRIM(RTRIM(ISNULL(fin.ESTA, ''))))
+    FROM dbo.DAT_FORM_FIN fin
+    WHERE fin.IDE = @ide;
+
+    IF @estaActual = 'CERRADO'
+    BEGIN
+      SELECT
+        @ide AS IDE,
+        @opvNorm AS OPV,
+        @dtIni AS FCN,
+        CAST(NULL AS FLOAT) AS ART,
+        CAST(NULL AS FLOAT) AS TRN,
+        CAST(NULL AS MONEY) AS DIF,
+        'CERRADO' AS ESTA,
+        @sucNorm AS SUC;
+      IF @startedTran = 1 AND @@TRANCOUNT > 0
+        COMMIT TRANSACTION;
+      RETURN;
+    END;
+
+    SELECT TOP (1)
+      @terNorm = NULLIF(LTRIM(RTRIM(ISNULL(e.TER, ''))), '')
+    FROM dbo.DAT_FORM_ENTR_OPV_SVR e
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(e.SUC, '')))) = @sucNorm
+      AND UPPER(LTRIM(RTRIM(ISNULL(e.OPV, '')))) = @opvNorm
+      AND CONVERT(DATE, e.FCN) = @fcnDate;
 
     DECLARE @formas TABLE (
       FORM NVARCHAR(255) PRIMARY KEY,
@@ -445,9 +464,12 @@ BEGIN
     END;
 
     DELETE FROM dbo.DAT_FORM_ENTR_OPV_SVR
-    WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @sucNorm
-      AND UPPER(LTRIM(RTRIM(ISNULL(OPV, '')))) = @opvNorm
-      AND CONVERT(DATE, FCN) = @fcnDate;
+    WHERE IDE = @ide
+      OR (
+        UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @sucNorm
+        AND UPPER(LTRIM(RTRIM(ISNULL(OPV, '')))) = @opvNorm
+        AND CONVERT(DATE, FCN) = @fcnDate
+      );
 
     INSERT INTO dbo.DAT_FORM_ENTR_OPV_SVR (
       IDE,
@@ -470,6 +492,7 @@ BEGIN
           WHEN FORM = 'DEPOSITO 3RO' THEN 'DEP'
           WHEN FORM = 'DEUDOR' THEN 'DEU'
           WHEN FORM = 'EFECTIVO' THEN 'EFE'
+          WHEN FORM = 'TARJETA CREDITO' THEN 'TCR'
           WHEN FORM = 'TARJETA' THEN 'TAR'
           WHEN FORM = 'TRANSFERENCIA' THEN 'TRA'
           ELSE LEFT(REPLACE(FORM, ' ', '') + 'XXX', 3)
@@ -1177,6 +1200,21 @@ BEGIN
       BEGIN TRANSACTION;
     END;
 
+    DECLARE @lockResource NVARCHAR(255) = CONCAT(
+      'CG_ENTREGA_OPV_',
+      CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', CONCAT(@sucNorm, '|', CONVERT(CHAR(8), @fcnDate, 112), '|', @opvNorm)), 2)
+    );
+    DECLARE @syncLockResult INT;
+
+    EXEC @syncLockResult = sp_getapplock
+      @Resource = @lockResource,
+      @LockMode = 'Exclusive',
+      @LockOwner = 'Transaction',
+      @LockTimeout = 10000;
+
+    IF @syncLockResult < 0
+      THROW 58103, 'No se pudo obtener lock para sincronizar cierre de entrega OPV', 1;
+
     DECLARE @valid TABLE (
       ok BIT,
       [status] VARCHAR(20),
@@ -1396,9 +1434,12 @@ BEGIN
     END;
 
     DELETE FROM dbo.DAT_FORM_ENTR_OPV_SVR
-    WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @sucNorm
-      AND UPPER(LTRIM(RTRIM(ISNULL(OPV, '')))) = @opvNorm
-      AND CONVERT(DATE, FCN) = @fcnDate;
+    WHERE IDE = @ide
+      OR (
+        UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @sucNorm
+        AND UPPER(LTRIM(RTRIM(ISNULL(OPV, '')))) = @opvNorm
+        AND CONVERT(DATE, FCN) = @fcnDate
+      );
 
     INSERT INTO dbo.DAT_FORM_ENTR_OPV_SVR (
       IDE,
@@ -1421,6 +1462,7 @@ BEGIN
           WHEN FORM = 'DEPOSITO 3RO' THEN 'DEP'
           WHEN FORM = 'DEUDOR' THEN 'DEU'
           WHEN FORM = 'EFECTIVO' THEN 'EFE'
+          WHEN FORM = 'TARJETA CREDITO' THEN 'TCR'
           WHEN FORM = 'TARJETA' THEN 'TAR'
           WHEN FORM = 'TRANSFERENCIA' THEN 'TRA'
           ELSE LEFT(REPLACE(FORM, ' ', '') + 'XXX', 3)
@@ -1566,6 +1608,21 @@ BEGIN
       BEGIN TRANSACTION;
     END;
 
+    DECLARE @lockResource NVARCHAR(255) = CONCAT(
+      'CG_ENTREGA_OPV_',
+      CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', CONCAT(@sucNorm, '|', CONVERT(CHAR(8), @fcnDate, 112), '|', @opvNorm)), 2)
+    );
+    DECLARE @syncLockResult INT;
+
+    EXEC @syncLockResult = sp_getapplock
+      @Resource = @lockResource,
+      @LockMode = 'Exclusive',
+      @LockOwner = 'Transaction',
+      @LockTimeout = 10000;
+
+    IF @syncLockResult < 0
+      THROW 58126, 'No se pudo obtener lock para reactivar entrega OPV', 1;
+
     IF NOT EXISTS (SELECT 1 FROM dbo.DAT_FORM_FIN WITH (UPDLOCK, HOLDLOCK) WHERE IDE = @ide)
       THROW 58123, 'No existe entrega OPV para reactivar', 1;
 
@@ -1587,9 +1644,12 @@ BEGIN
     WHERE IDE = @ide;
 
     DELETE FROM dbo.DAT_FORM_ENTR_OPV_SVR
-    WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @sucNorm
-      AND UPPER(LTRIM(RTRIM(ISNULL(OPV, '')))) = @opvNorm
-      AND CONVERT(DATE, FCN) = @fcnDate;
+    WHERE IDE = @ide
+      OR (
+        UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @sucNorm
+        AND UPPER(LTRIM(RTRIM(ISNULL(OPV, '')))) = @opvNorm
+        AND CONVERT(DATE, FCN) = @fcnDate
+      );
 
     DECLARE @saldoMov MONEY = 0;
 
