@@ -495,6 +495,11 @@ export class OrdenesTrabajoService {
       iord,
       original.row,
     );
+    const pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      this.normalizeText(original.row.SUC) ?? '',
+      this.normalizeText(original.row.ART) ?? '',
+      pvtaOriginal,
+    );
     const nvaIord = await this.resolveCambioMermaReservedIord(
       this.normalizeText(original.row.SUC) ?? '',
       stagingBefore,
@@ -516,7 +521,7 @@ export class OrdenesTrabajoService {
         docDif: this.normalizeText(original.row.DOCDIF),
         ctdCM,
         crearNuevaOrd: true,
-        pvtaNuevo: pvtaOriginal,
+        pvtaNuevo,
         diferenciaEconomica: null,
         nvaIord,
       },
@@ -608,16 +613,11 @@ export class OrdenesTrabajoService {
 
     const suc = this.normalizeText(original.row.SUC) ?? '';
     let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
-    if (pvtaNuevo == null) {
-      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
-      pvtaNuevo = this.toFloat(artInfo?.pvta);
-    }
-    if (pvtaNuevo == null) {
-      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(
-        iord,
-        original.row,
-      );
-    }
+    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      pvtaNuevo,
+    );
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -751,16 +751,11 @@ export class OrdenesTrabajoService {
     const crearNuevaOrd = true;
     const suc = this.normalizeText(original.row.SUC) ?? '';
     let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
-    if (pvtaNuevo == null && tipo === 1 && artNuevo) {
-      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
-      pvtaNuevo = this.toFloat(artInfo?.pvta);
-    }
-    if (pvtaNuevo == null) {
-      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(
-        iord,
-        original.row,
-      );
-    }
+    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      pvtaNuevo,
+    );
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -3250,9 +3245,10 @@ export class OrdenesTrabajoService {
       artOriginal,
       originalArtInfo?.pvta ?? 0,
     );
-    const precioNuevoDefault = nuevoArtInfo?.pvta ?? precioOriginal;
-    const precioNuevo = this.roundMoney(
-      this.toFloat(stagingRow?.PVTA_NUEVO) ?? precioNuevoDefault,
+    const precioNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      this.toFloat(stagingRow?.PVTA_NUEVO) ?? precioOriginal,
     );
 
     const tipoTran = this.resolveCambioMermaTipoTran(
@@ -3495,16 +3491,11 @@ export class OrdenesTrabajoService {
     }
 
     let pvtaNuevo = this.toFloat(staging.PVTA_NUEVO);
-    if (pvtaNuevo == null && tipo === 1 && artNuevo) {
-      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
-      pvtaNuevo = this.toFloat(artInfo?.pvta);
-    }
-    if (pvtaNuevo == null) {
-      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(
-        iord,
-        original.row,
-      );
-    }
+    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      pvtaNuevo,
+    );
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -3732,6 +3723,29 @@ export class OrdenesTrabajoService {
     const row = this.firstRow(rows);
     const value = this.toFloat(row?.PVTAT_BASE) ?? fallback;
     return this.roundMoney(value);
+  }
+
+  private async resolveCambioMermaNewUnitPrice(
+    sucRaw: string,
+    artRaw: string,
+    fallback: number | null,
+  ) {
+    const suc = this.normalizeText(sucRaw) ?? '';
+    const art = this.normalizeText(artRaw) ?? '';
+    const artInfo = await this.resolveArticuloDatArt(suc, art);
+    const value = this.toFloat(artInfo?.pvta);
+    if (value != null && Number.isFinite(value) && value >= 0) {
+      return this.roundMoney(value);
+    }
+    const fallbackValue = this.toFloat(fallback);
+    if (
+      fallbackValue != null &&
+      Number.isFinite(fallbackValue) &&
+      fallbackValue >= 0
+    ) {
+      return this.roundMoney(fallbackValue);
+    }
+    return 0;
   }
 
   private async resolveCambioMermaOriginalUnitPrice(

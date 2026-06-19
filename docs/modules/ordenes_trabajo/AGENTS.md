@@ -90,7 +90,7 @@ Enlaces relacionados:
 - cambio material / Merma (2026-06-17): `Subtotal/IVA/Total` de la ORD original usan `PVTAT` base del ticket log como importe ya totalizado; el fallback a `PVTA` queda fuera y no se vuelve a multiplicar por `CTD`.
 - cálculo fiscal folio (2026-04-19): para `REQF` se debe usar fallback `RQFAC` desde `PV_CTR_FOL_ASVR` tanto en contexto/API como en SPs de creación, evitando dependencia de `PV_CTR_ORDS.RQFAC` cuando venga `NULL`.
 - staging UX/API (2026-04-19): `GET .../cambio-merma/context` expone `hasStagingRecord` para que frontend bloquee captura/autorización hasta insertar staging en `PV_ORD_CAMBIO_MERMA_TMP`.
-- costo nueva ORD (2026-04-19): contexto y SPs de creación igualan costo de nueva ORD al costo base de la ORD original para evitar diferencias de precio.
+- costo nueva ORD (2026-04-19): contexto y SPs de creación toman precio unitario de la nueva ORD desde `DAT_ART` por sucursal y artículo; la ORD original sigue usando `PVTAT base` del ticket log.
 - recepción unificada sin destino (`TALLER/ANALISTA`): backend fija recepción operativa a `ESTSEGU=7`.
 - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) restringidos a `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER`; admin conserva acceso total.
 - trazabilidad UI (app): en modal de envío se retira botón `Agregar ORD`; la captura manual agrega por `Enter` en el campo `ORD` (sin cambios de contrato API).
