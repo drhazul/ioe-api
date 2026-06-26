@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
-  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsOptional,
@@ -55,10 +54,10 @@ export class PvCotizacionCierreDto {
 
   @ApiProperty({
     type: [PvCotizacionCierreFormaDto],
-    description: 'Formas de pago definitivas',
+    description:
+      'Formas de pago definitivas; puede ser vacio cuando el total del cierre es 0',
   })
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PvCotizacionCierreFormaDto)
   formas: PvCotizacionCierreFormaDto[];

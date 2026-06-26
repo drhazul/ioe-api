@@ -187,25 +187,15 @@ BEGIN
       THROW 51007, 'La cotizacion ya no permite cierre en su estado actual', 1;
 
     SELECT
-      @itemsCount = SUM(CASE
-        WHEN ISNULL(TRY_CONVERT(FLOAT, CTD), 0) < 0
-          AND NULLIF(LTRIM(RTRIM(ISNULL(TICKET_REL, ''))), '') IS NOT NULL
-          THEN 0
-        ELSE 1
-      END),
-      @totalBase = ROUND(SUM(CASE
-        WHEN ISNULL(TRY_CONVERT(FLOAT, CTD), 0) < 0
-          AND NULLIF(LTRIM(RTRIM(ISNULL(TICKET_REL, ''))), '') IS NOT NULL
-          THEN 0
-        ELSE ISNULL(CTD, 0) * ISNULL(PVTA, 0)
-      END), 2)
+      @itemsCount = COUNT(1),
+      @totalBase = ROUND(SUM(ISNULL(CTD, 0) * ISNULL(PVTA, 0)), 2)
     FROM dbo.PV_TICKET_LOG
     WHERE IDFOL = @idfolActual;
 
     IF ISNULL(@itemsCount, 0) <= 0
       THROW 51008, 'La cotizacion no tiene articulos para cierre', 1;
 
-    IF ISNULL(@totalBase, 0) <= 0
+    IF ISNULL(@totalBase, 0) < 0
       THROW 51009, 'La cotizacion tiene total base invalido', 1;
 
     SELECT TOP 1
@@ -260,7 +250,7 @@ BEGIN
       [aut] NVARCHAR(255) '$.aut'
     ) J;
 
-    IF NOT EXISTS (SELECT 1 FROM @FORMAS)
+    IF NOT EXISTS (SELECT 1 FROM @FORMAS) AND ISNULL(@totalFinal, 0) > @epsilon
       THROW 51011, 'Debe registrar al menos una forma de pago', 1;
 
     UPDATE F
@@ -376,7 +366,7 @@ BEGIN
     )
       THROW 51022, 'Existen referencias ligadas al folio sin utilizar; elimine las referencias no usadas antes de finalizar', 1;
 
-    SELECT @sumPagos = ROUND(SUM(ISNULL(IMPP, 0)), 2)
+    SELECT @sumPagos = ISNULL(ROUND(SUM(ISNULL(IMPP, 0)), 2), 0)
     FROM @FORMAS;
 
     DECLARE @acumuladoFormas MONEY = 0;

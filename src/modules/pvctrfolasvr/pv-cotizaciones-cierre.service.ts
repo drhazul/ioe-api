@@ -321,12 +321,6 @@ export class PvCotizacionesCierreService {
       this.normalizeText(user?.username) ||
       null;
     const formas = this.normalizeFormas(dto.formas ?? []);
-    if (!formas.length) {
-      throw new BadRequestException(
-        'Debe registrar al menos una forma de pago',
-      );
-    }
-    this.assertCreditoDeudorNoCombinado(formas);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -346,6 +340,12 @@ export class PvCotizacionesCierreService {
         tipotran,
         rqfac,
       });
+      if (totals.total > 0 && !formas.length) {
+        throw new BadRequestException(
+          'Debe registrar al menos una forma de pago',
+        );
+      }
+      this.assertCreditoDeudorNoCombinado(formas);
       this.validateSecuenciaFormasContraPendiente({
         formas,
         total: totals.total,
@@ -525,7 +525,6 @@ export class PvCotizacionesCierreService {
         ${tipoPromoSelect}
       FROM dbo.PV_TICKET_LOG
       WHERE IDFOL = @0
-        ${this.counterMovementFilter(colsSet)}
       ORDER BY ID ASC
       `,
       [idfol],
@@ -855,20 +854,11 @@ export class PvCotizacionesCierreService {
       );
     }
 
-    const ticketColsSet = await this.loadTableColumns(
-      executor,
-      'dbo.PV_TICKET_LOG',
-    );
-    const counterMovementCondition =
-      this.counterMovementCondition(ticketColsSet);
     const ticketRows = await executor.query(
       `
       SELECT
-        SUM(CASE WHEN ${counterMovementCondition} THEN 0 ELSE 1 END) AS ITEMS_COUNT,
-        SUM(CASE
-          WHEN ${counterMovementCondition} THEN 0
-          ELSE ISNULL(CTD, 0) * ISNULL(PVTA, 0)
-        END) AS TOTAL_BASE
+        COUNT(1) AS ITEMS_COUNT,
+        ROUND(SUM(ISNULL(CTD, 0) * ISNULL(PVTA, 0)), 2) AS TOTAL_BASE
       FROM dbo.PV_TICKET_LOG
       WHERE IDFOL = @0
       `,
@@ -883,7 +873,7 @@ export class PvCotizacionesCierreService {
     }
 
     const totalBase = this.round2(this.toNumber(ticketStats.TOTAL_BASE) ?? 0);
-    if (totalBase <= 0) {
+    if (totalBase < 0) {
       throw new BadRequestException(
         `La cotizacion ${currentIdfol} tiene total base invalido`,
       );
@@ -1080,10 +1070,16 @@ export class PvCotizacionesCierreService {
     existingForms: string[];
   }) {
     const formas = input.formas;
-    if (!formas.length) {
+    const total = this.round2(input.total);
+    const epsilon = 0.0001;
+
+    if (!formas.length && total > epsilon) {
       throw new BadRequestException(
         'Debe registrar al menos una forma de pago',
       );
+    }
+    if (!formas.length) {
+      return { sumPagos: 0, cambio: 0 };
     }
 
     const normalizedExisting = input.existingForms
@@ -1167,8 +1163,6 @@ export class PvCotizacionesCierreService {
     const sumPagos = this.round2(
       formas.reduce((acc, item) => acc + (this.toNumber(item.impp) ?? 0), 0),
     );
-    const total = this.round2(input.total);
-    const epsilon = 0.0001;
 
     if (sumPagos + epsilon < total) {
       throw new BadRequestException(
@@ -1737,16 +1731,6 @@ export class PvCotizacionesCierreService {
       if (columns.has(normalized)) return normalized;
     }
     return null;
-  }
-
-  private counterMovementCondition(columns: Set<string>, alias = '') {
-    if (!columns.has('TICKET_REL')) return '1 = 0';
-    const prefix = alias ? `${alias}.` : '';
-    return `ISNULL(TRY_CONVERT(FLOAT, ${prefix}CTD), 0) < 0 AND NULLIF(LTRIM(RTRIM(ISNULL(${prefix}TICKET_REL, ''))), '') IS NOT NULL`;
-  }
-
-  private counterMovementFilter(columns: Set<string>, alias = '') {
-    return `AND NOT (${this.counterMovementCondition(columns, alias)})`;
   }
 
   private async validateCreditoDisponible(
