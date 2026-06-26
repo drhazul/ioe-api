@@ -38,6 +38,10 @@ Opcionales:
 - `PV_DEV_ORD_BLOCK_THRESHOLD` (default `5`)
 - `CFDI_STORAGE_BASE_PATH`, `CFDI_STORAGE_BASE_PATH_ALT`, `CFDI_STORAGE_BASE_PATH_DEV`, `CFDI_STORAGE_BASE_PATH_PROD`, `CFDI_STORAGE_BASE_PATHS`
 
+## Autenticacion y auditoria
+- Usuarios con `ESTATUS <> 'ACTIVO'` no pueden iniciar sesion, refrescar token ni usar JWT previamente emitido.
+- Intentos de login/refresh/JWT de usuarios inactivos se registran en `AUDIT_LOG` con `ACTION` `LOGIN_DENIED_INACTIVO`, `REFRESH_DENIED_INACTIVO` o `JWT_DENIED_INACTIVO`, modulo `auth`, entidad `USUARIO`, IP y metadata sin password.
+
 ## Reglas de autorizacion por sucursal (criticas)
 - Inventarios (`DAT_JAA_ALM`): validar `USR_MOD_SUC` para usuarios no-admin.
 - Control de cuentas/catalogo cuentas: validar `USR_MOD_SUC` para `DAT_CONS_CTAS`, `DAT_CTRL_CTAS`, `DAT_CTRL_CUENTAS`.

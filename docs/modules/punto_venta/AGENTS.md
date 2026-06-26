@@ -94,6 +94,7 @@ Enlaces relacionados:
 - sincronización VF: `sp_fact_sync_folio_vf` en transacción cuando `tipotran='VF'` y `REQF=1`; si no cumple, limpia cabecera/detalle en `FAC_SVR_SHAP/FACT_TICKET_SHP`.
 - `Tipofact='CREDITO'` si alguna forma `CREDITO`; de lo contrario `INDIVIDUAL`.
 - fecha de proceso actual para `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, cargos `DAT_CTRL_CTAS`.
+- Cotizaciones con ORD relacionada (2026-06-25): `resolveContext`, `print-preview` y `sp_pv_cotizacion_cerrar` excluyen contramovimientos tecnicos de `PV_TICKET_LOG` (`CTD < 0` con `TICKET_REL`) al calcular `itemsCount`/`totalBase`; evita falso "total base invalido" en cierres `CA/VF` con ORDs ligadas a una venta anterior.
 - Reimpresión: payload `print-preview` incluye cabecera (`DAT_SUC`), ticket (`PV_TICKET_LOG`), formas (`PV_CTR_FOL_FORM`), pie (`PV_CTR_FOL_ASVR` + `PV_OPV` + `FACT_CLIENT_SHP`) y ORDs (`PV_CTR_ORDS` + `PV_CTR_ORDS_DET`).
 
 ## Punto de venta: devoluciones de cotizacion/venta/apartado (implementado 2026-02)

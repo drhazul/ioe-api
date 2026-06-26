@@ -108,6 +108,7 @@ Enlaces relacionados:
 - `panelMode='estado'` devuelve catálogo completo de `DAT_EST_ORD`, solo habilita `VER_DETALLE` y reemplaza operativamente a los módulos front legacy de `anuladas`/`entregadas`.
 - `saveDetail` acepta `hrEnt` (`HH:MM`) y lo guarda en `PV_CTR_ORDS.HR_ENT`.
 - `PV_CTR_ORDS.ID_ENTREGA` relaciona la ORD con `PV_CTR_ORDS_ENTREGA`; el encabezado de entrega guarda firma base64 y detalle de lote, y en `ESTSEGU=11` la app puede imprimir evidencia con cabecera, detalle, folio de entrega y firma.
+- `PV_CTR_ORDS_ENTREGA_DET` usa clave surrogate e índice único por `ID_ENTREGA + IORD` para conservar historial cuando una misma ORD vuelve a entregarse en otro folio.
 - `ANULAR` queda limitado a `admin`/`JEF_TALLER`; las anulaciones exitosas continúan registrándose en `AUDIT_LOG`.
   - recepción unificada: se elimina destino (`TALLER/ANALISTA`) y backend fija recepción operativa a `ESTSEGU=7`.
   - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) solo para `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER` (admin conserva acceso total).

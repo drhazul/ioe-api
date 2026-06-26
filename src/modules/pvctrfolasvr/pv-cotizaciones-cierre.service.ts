@@ -525,6 +525,7 @@ export class PvCotizacionesCierreService {
         ${tipoPromoSelect}
       FROM dbo.PV_TICKET_LOG
       WHERE IDFOL = @0
+        ${this.counterMovementFilter(colsSet)}
       ORDER BY ID ASC
       `,
       [idfol],
@@ -854,11 +855,20 @@ export class PvCotizacionesCierreService {
       );
     }
 
+    const ticketColsSet = await this.loadTableColumns(
+      executor,
+      'dbo.PV_TICKET_LOG',
+    );
+    const counterMovementCondition =
+      this.counterMovementCondition(ticketColsSet);
     const ticketRows = await executor.query(
       `
       SELECT
-        COUNT(1) AS ITEMS_COUNT,
-        SUM(ISNULL(CTD, 0) * ISNULL(PVTA, 0)) AS TOTAL_BASE
+        SUM(CASE WHEN ${counterMovementCondition} THEN 0 ELSE 1 END) AS ITEMS_COUNT,
+        SUM(CASE
+          WHEN ${counterMovementCondition} THEN 0
+          ELSE ISNULL(CTD, 0) * ISNULL(PVTA, 0)
+        END) AS TOTAL_BASE
       FROM dbo.PV_TICKET_LOG
       WHERE IDFOL = @0
       `,
@@ -1727,6 +1737,16 @@ export class PvCotizacionesCierreService {
       if (columns.has(normalized)) return normalized;
     }
     return null;
+  }
+
+  private counterMovementCondition(columns: Set<string>, alias = '') {
+    if (!columns.has('TICKET_REL')) return '1 = 0';
+    const prefix = alias ? `${alias}.` : '';
+    return `ISNULL(TRY_CONVERT(FLOAT, ${prefix}CTD), 0) < 0 AND NULLIF(LTRIM(RTRIM(ISNULL(${prefix}TICKET_REL, ''))), '') IS NOT NULL`;
+  }
+
+  private counterMovementFilter(columns: Set<string>, alias = '') {
+    return `AND NOT (${this.counterMovementCondition(columns, alias)})`;
   }
 
   private async validateCreditoDisponible(

@@ -187,8 +187,18 @@ BEGIN
       THROW 51007, 'La cotizacion ya no permite cierre en su estado actual', 1;
 
     SELECT
-      @itemsCount = COUNT(1),
-      @totalBase = ROUND(SUM(ISNULL(CTD, 0) * ISNULL(PVTA, 0)), 2)
+      @itemsCount = SUM(CASE
+        WHEN ISNULL(TRY_CONVERT(FLOAT, CTD), 0) < 0
+          AND NULLIF(LTRIM(RTRIM(ISNULL(TICKET_REL, ''))), '') IS NOT NULL
+          THEN 0
+        ELSE 1
+      END),
+      @totalBase = ROUND(SUM(CASE
+        WHEN ISNULL(TRY_CONVERT(FLOAT, CTD), 0) < 0
+          AND NULLIF(LTRIM(RTRIM(ISNULL(TICKET_REL, ''))), '') IS NOT NULL
+          THEN 0
+        ELSE ISNULL(CTD, 0) * ISNULL(PVTA, 0)
+      END), 2)
     FROM dbo.PV_TICKET_LOG
     WHERE IDFOL = @idfolActual;
 

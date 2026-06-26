@@ -27,6 +27,11 @@ export class UsersController {
     return this.service.findAll();
   }
 
+  @Get('sugerencias/caja-username')
+  nextCajaUsername() {
+    return this.service.nextCajaUsername();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.service.findOne(Number(id));

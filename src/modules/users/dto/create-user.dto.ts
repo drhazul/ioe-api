@@ -38,6 +38,16 @@ export class CreateUserDto {
   @IsEmail()
   MAIL: string;
 
+  @ApiPropertyOptional({
+    example: 1,
+    description:
+      'Empresa usada para componer MAIL como USERNAME + EMPRESA.correo',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  IDEMPRESA?: number;
+
   @ApiProperty({ example: 'ACTIVO' })
   @IsString()
   ESTATUS: 'ACTIVO' | 'INACTIVO';
@@ -50,7 +60,7 @@ export class CreateUserDto {
 
   @ApiProperty({ example: 1 })
   @IsInt()
-  @Min(1)
+  @Min(0)
   IDROL: number;
 
   @ApiPropertyOptional({ example: 1 })

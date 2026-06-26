@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UsersModule } from '../users/users.module';
+import { AuditModule } from '../audit/audit.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { UsuarioTokenEntity } from './usuario-token.entity';
@@ -11,6 +12,7 @@ import { JwtStrategy } from './jwt.strategy';
 @Module({
   imports: [
     UsersModule,
+    AuditModule,
     TypeOrmModule.forFeature([UsuarioTokenEntity]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

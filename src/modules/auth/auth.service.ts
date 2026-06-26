@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 import { type StringValue } from 'ms';
 import { Repository, IsNull } from 'typeorm';
 import { UsersService } from '../users/users.service';
+import { AuditService } from '../audit/audit.service';
 import { UsuarioTokenEntity } from './usuario-token.entity';
 
 type JwtPayload = {
@@ -24,12 +25,15 @@ type JwtPayload = {
   mustChangePassword: boolean;
 };
 
+type AuthRequestMeta = { ip?: string; userAgent?: string };
+
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly audit: AuditService,
     @InjectRepository(UsuarioTokenEntity)
     private readonly tokenRepo: Repository<UsuarioTokenEntity>,
   ) {}
@@ -67,7 +71,7 @@ export class AuthService {
 
   private async issueRefreshToken(
     userId: number,
-    meta?: { ip?: string; userAgent?: string },
+    meta?: AuthRequestMeta,
   ) {
     const refreshToken = randomUUID() + '.' + randomUUID();
     const refreshHash = await bcrypt.hash(refreshToken, 10);
@@ -93,15 +97,43 @@ export class AuthService {
     return refreshToken;
   }
 
+  private async logInactiveAccess(
+    action: string,
+    user: {
+      IDUSUARIO: number;
+      USERNAME: string;
+      ESTATUS: string;
+      SUC?: string | null;
+    },
+    meta?: AuthRequestMeta,
+  ) {
+    await this.audit.log({
+      IDUSUARIO: user.IDUSUARIO,
+      ACTION: action,
+      MODULO: 'auth',
+      ENTIDAD: 'USUARIO',
+      ENTIDAD_ID: String(user.IDUSUARIO),
+      SUC: user.SUC ?? null,
+      IP: meta?.ip ?? null,
+      METADATA_JSON: JSON.stringify({
+        username: user.USERNAME,
+        estatus: user.ESTATUS,
+        reason: 'USUARIO_INACTIVO',
+        userAgent: meta?.userAgent ?? null,
+      }),
+    });
+  }
+
   async login(
     username: string,
     password: string,
-    meta?: { ip?: string; userAgent?: string },
+    meta?: AuthRequestMeta,
   ) {
     const user = await this.usersService.findByUsername(username);
     if (!user) throw new UnauthorizedException('Credenciales inválidas');
 
     if (user.ESTATUS !== 'ACTIVO') {
+      await this.logInactiveAccess('LOGIN_DENIED_INACTIVO', user, meta);
       throw new ForbiddenException('Usuario inactivo');
     }
 
@@ -138,7 +170,7 @@ export class AuthService {
     };
   }
 
-  async refresh(refreshToken: string) {
+  async refresh(refreshToken: string, meta?: AuthRequestMeta) {
     const now = new Date();
 
     // Solo tokens activos
@@ -157,6 +189,11 @@ export class AuthService {
       if (!match) continue;
 
       if (t.USUARIO.ESTATUS !== 'ACTIVO') {
+        await this.logInactiveAccess(
+          'REFRESH_DENIED_INACTIVO',
+          t.USUARIO,
+          meta,
+        );
         throw new ForbiddenException('Usuario inactivo');
       }
 

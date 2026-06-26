@@ -285,6 +285,7 @@ Enlaces relacionados:
 - En validación secuencial por orden de captura, cada forma no `EFECTIVO` no puede exceder el pendiente acumulado; solo `EFECTIVO` puede exceder para generar cambio.
 - El cierre rechaza pagos que excedan el total (`sum(formas.impp) > total`) cuando no existe `EFECTIVO`; con `EFECTIVO` se permite excedente para cambio.
 - La operacion es transaccional con rollback completo; no permite cierres parciales.
+- Cotizaciones con ORD relacionada (2026-06-25): el cierre calcula `totalBase` excluyendo contramovimientos tecnicos de `PV_TICKET_LOG` (`CTD < 0` con `TICKET_REL`), por lo que una cotización con ORDs relacionadas ya no queda en cero ni falla con "total base invalido".
 - Preview de impresion (`GET /pv/cotizaciones/:idfol/cierre/print-preview`):
 - arma un payload de 5 bloques para PDF: cabecera (`DAT_SUC`), detalle ticket (`PV_TICKET_LOG`), totales/formas/cambio (`PV_CTR_FOL_FORM_SVR` fallback `PV_CTR_FOL_FORM`), pie transaccional (`PV_CTR_FOL_ASVR` + `PV_OPV` + `FACT_CLIENT_SHP`) y ORDs con detalle (`PV_CTR_ORDS` + `PV_CTR_ORDS_DET`) por `IDFOL`.
 - trazabilidad UI de impresion: la app renderiza tickets 58/80 sin encabezado repetitivo (`COTIZACION FINALIZADA`) ni `IDFOL` superior.
