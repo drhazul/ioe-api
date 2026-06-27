@@ -337,8 +337,16 @@ BEGIN
     IF @estatus <> 'PENDIENTE' THROW 59121, 'Solo se puede liberar desde PENDIENTE.', 1;
 
     UPDATE d
-    SET d.CTD_LIB = CASE WHEN d.CTD_LIB IS NULL THEN ISNULL(TRY_CONVERT(FLOAT, d.CTD), 0) ELSE d.CTD_LIB END,
-        d.CTOLIB = CASE WHEN d.CTD_LIB IS NULL THEN ISNULL(TRY_CONVERT(FLOAT, d.CTD), 0) ELSE d.CTD_LIB END * ISNULL(a.CTOP, 0),
+    SET d.CTD_LIB = CASE
+          WHEN ISNULL(TRY_CONVERT(FLOAT, d.CTD_LIB), 0) <= 0
+            THEN ISNULL(TRY_CONVERT(FLOAT, d.CTD), 0)
+          ELSE TRY_CONVERT(FLOAT, d.CTD_LIB)
+        END,
+        d.CTOLIB = CASE
+          WHEN ISNULL(TRY_CONVERT(FLOAT, d.CTD_LIB), 0) <= 0
+            THEN ISNULL(TRY_CONVERT(FLOAT, d.CTD), 0)
+          ELSE TRY_CONVERT(FLOAT, d.CTD_LIB)
+        END * ISNULL(a.CTOP, 0),
         d.CTOTAL = ISNULL(TRY_CONVERT(FLOAT, d.CTD), 0) * ISNULL(a.CTOP, 0),
         d.USR_L = @USER
     FROM dbo.TRAN_DET_ART d
@@ -358,18 +366,6 @@ BEGIN
         AND ISNULL(d.CTD_LIB, 0) < 0
     )
       THROW 59122, 'La cantidad liberada no puede ser negativa.', 1;
-
-    IF EXISTS (
-      SELECT 1
-      FROM dbo.TRAN_DET_ART d
-      JOIN dbo.DAT_ART a
-        ON LTRIM(RTRIM(ISNULL(a.SUC, ''))) = @sucSal
-       AND LTRIM(RTRIM(ISNULL(a.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
-      WHERE d.DOC = @DOC
-        AND ISNULL(d.BLOQ, 0) <> -1
-        AND ISNULL(a.STOCK, 0) - ISNULL(d.CTD_LIB, 0) < ISNULL(a.STOCK_MIN, 0)
-    )
-      THROW 59123, 'La liberacion compromete stock minimo en sucursal origen.', 1;
 
     UPDATE h
     SET h.CTD = calc.CTD,

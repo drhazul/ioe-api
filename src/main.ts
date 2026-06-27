@@ -24,8 +24,8 @@ async function bootstrap() {
     // Fuerza cierre de conexiones keep-alive al hacer shutdown.
     forceCloseConnections: true,
   });
-  app.useBodyParser('json', { limit: '1mb' });
-  app.useBodyParser('urlencoded', { limit: '1mb', extended: true });
+  app.useBodyParser('json', { limit: '20mb' });
+  app.useBodyParser('urlencoded', { limit: '20mb', extended: true });
   app.enableShutdownHooks();
 
   app.useStaticAssets(uploadsRoot, {

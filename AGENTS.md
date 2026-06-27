@@ -58,6 +58,7 @@
 - Inventarios / Merma (2026-06-12): `src/main.ts` configura body parser JSON/urlencoded a `1mb` para permitir evidencia `EVI_M` validada (hasta 700000 caracteres) sin disparar `request entity too large`.
 
 - Inventarios / Transferencias entre sucursales (2026-06-09): se agrega `TransferenciasModule` con ruta `/transferencias`, tablas oficiales `TRAN_CTR_DOCPRE`/`TRAN_DET_ART`, catalogos `MOV_TRAN`/`PRIO_TRAN`/`ESTATUS_TRAN` y SPs `sp_trans_*`; la contabilizacion usa `DAT_CMOV` 121/122/123/124 y `DAT_ART`.
+- Inventarios / Reportes traspaso entre sucursales (2026-06-17): `TransferenciasModule` expone `/transferencias/reportes` y `/transferencias/reportes/:doc` para `DAT_REP_TRAN`, solo jefe de inventarios/admin, con indicador `hasIncidencia`.
 
 ## Documentación por módulos
 - Base de módulos: `docs/modules/base_modulos/AGENTS.md` (README: `docs/modules/base_modulos/README.md`)

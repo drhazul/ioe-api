@@ -2,6 +2,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsIn,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -26,4 +27,9 @@ export class UpdateTransferenciaDetailDto {
   @IsString()
   @MaxLength(255)
   txt?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['CONTABILIZADO', 'INCIDENCIA'])
+  estatusR?: string;
 }

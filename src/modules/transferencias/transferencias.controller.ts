@@ -13,7 +13,9 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { AddTransferenciaEvidenceDto } from './dto/add-transferencia-evidence.dto';
 import { AddTransferenciaDetailDto } from './dto/add-transferencia-detail.dto';
+import { BulkAddTransferenciaDetailDto } from './dto/bulk-add-transferencia-detail.dto';
 import { CreateTransferenciaDto } from './dto/create-transferencia.dto';
 import { TransferenciaActionDto } from './dto/transferencia-action.dto';
 import { TransferenciaArticulosQueryDto } from './dto/transferencia-articulos-query.dto';
@@ -35,6 +37,19 @@ export class TransferenciasController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.findAll(query, user);
+  }
+
+  @Get('reportes')
+  reportes(
+    @Query() query: TransferenciaQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.reportes(query, user);
+  }
+
+  @Get('reportes/:doc')
+  reporteDetalle(@Param('doc') doc: string, @CurrentUser() user: JwtPayload) {
+    return this.service.reporteDetalle(doc, user);
   }
 
   @Get('catalogos/sucursales')
@@ -94,6 +109,15 @@ export class TransferenciasController {
     return this.service.envio(doc, user);
   }
 
+  @Post(':doc/detalle/bulk')
+  addDetalleBulk(
+    @Param('doc') doc: string,
+    @Body() dto: BulkAddTransferenciaDetailDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.addDetalleBulk(doc, dto, user);
+  }
+
   @Post(':doc/detalle')
   addDetalle(
     @Param('doc') doc: string,
@@ -120,6 +144,25 @@ export class TransferenciasController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.removeDetalle(doc, idpd, user);
+  }
+
+  @Post(':doc/detalle/:idpd/evidencia')
+  addEvidencia(
+    @Param('doc') doc: string,
+    @Param('idpd') idpd: string,
+    @Body() dto: AddTransferenciaEvidenceDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.addEvidencia(doc, idpd, dto, user);
+  }
+
+  @Post(':doc/evidencia')
+  addDocumentoEvidencia(
+    @Param('doc') doc: string,
+    @Body() dto: AddTransferenciaEvidenceDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.addDocumentoEvidencia(doc, dto, user);
   }
 
   @Post(':doc/enviar')

@@ -1,0 +1,205 @@
+IF COL_LENGTH('dbo.TRAN_DET_ART', 'FCN_CONT') IS NULL
+BEGIN
+  ALTER TABLE dbo.TRAN_DET_ART ADD FCN_CONT DATETIME NULL;
+END;
+
+IF COL_LENGTH('dbo.TRAN_DET_ART', 'USR_CONT') IS NULL
+BEGIN
+  ALTER TABLE dbo.TRAN_DET_ART ADD USR_CONT NVARCHAR(100) NULL;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_trans_contabilizar
+  @DOC NVARCHAR(255),
+  @USER NVARCHAR(100)
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DECLARE @sucSal NVARCHAR(20), @sucEnt NVARCHAR(20), @estatus NVARCHAR(30), @docBase BIGINT;
+    SELECT
+      @sucSal = LTRIM(RTRIM(ISNULL(SUC_SAL, ALM_SAL))),
+      @sucEnt = LTRIM(RTRIM(ISNULL(SUC_ENT, ALM_ENT))),
+      @estatus = UPPER(LTRIM(RTRIM(ISNULL(ESTATUS, ''))))
+    FROM dbo.TRAN_CTR_DOCPRE WITH (UPDLOCK, HOLDLOCK)
+    WHERE DOC = @DOC;
+
+    IF @estatus IS NULL THROW 59170, 'Documento no existe.', 1;
+    IF @estatus NOT IN ('REVISANDO', 'INCIDENCIA') THROW 59171, 'Solo se puede contabilizar desde REVISANDO o INCIDENCIA.', 1;
+    IF EXISTS (
+      SELECT 1
+      FROM dbo.TRAN_DET_ART
+      WHERE DOC = @DOC
+        AND ISNULL(BLOQ, 0) <> -1
+        AND (CTD_R IS NULL OR UPPER(LTRIM(RTRIM(ISNULL(ESTATUS_R, '')))) NOT IN ('CONTABILIZADO', 'INCIDENCIA'))
+    )
+      THROW 59173, 'Todos los articulos deben tener cantidad recibida y estatus CONTABILIZADO o INCIDENCIA.', 1;
+    IF NOT EXISTS (
+      SELECT 1
+      FROM dbo.TRAN_DET_ART
+      WHERE DOC = @DOC
+        AND ISNULL(BLOQ, 0) <> -1
+        AND FCN_CONT IS NULL
+        AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS_R, '')))) = 'CONTABILIZADO'
+    )
+      THROW 59174, 'No hay articulos pendientes marcados como CONTABILIZADO para afectar inventario.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.DAT_CMOV WHERE CMOV IN (122, 123, 124) HAVING COUNT(*) = 3)
+      THROW 59172, 'DAT_CMOV no tiene configurados los movimientos 122, 123 y 124.', 1;
+
+    SELECT @docBase = TRY_CONVERT(BIGINT, NDOC)
+    FROM dbo.DAT_CMOV WITH (UPDLOCK, HOLDLOCK)
+    WHERE CMOV = 123;
+    IF @docBase IS NULL SET @docBase = 123000000;
+    SET @docBase = @docBase + 1;
+    UPDATE dbo.DAT_CMOV SET NDOC = @docBase WHERE CMOV = 123;
+
+    INSERT INTO dbo.DAT_MB51
+      (IDPD, [USER], CLSM, DOCP, ART, CTDA, CTOT, FCND, FCNC, TXT, ALMACEN, VTAESP, SUC)
+    SELECT
+      CONVERT(NVARCHAR(36), NEWID()), @USER, 123, @DOC, d.ART,
+      ISNULL(d.CTD_R, 0),
+      ISNULL(d.CTD_R, 0) * ISNULL(aDest.CTOP, aOrig.CTOP),
+      GETDATE(), GETDATE(), CONCAT('TRANSFERENCIA ENTRADA DOC ', @DOC),
+      '001', 0, @sucEnt
+    FROM dbo.TRAN_DET_ART d
+    LEFT JOIN dbo.DAT_ART aDest
+      ON LTRIM(RTRIM(ISNULL(aDest.SUC, ''))) = @sucEnt
+     AND LTRIM(RTRIM(ISNULL(aDest.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+    LEFT JOIN dbo.DAT_ART aOrig
+      ON LTRIM(RTRIM(ISNULL(aOrig.SUC, ''))) = @sucSal
+     AND LTRIM(RTRIM(ISNULL(aOrig.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+    WHERE d.DOC = @DOC
+      AND ISNULL(d.BLOQ, 0) <> -1
+      AND d.FCN_CONT IS NULL
+      AND UPPER(LTRIM(RTRIM(ISNULL(d.ESTATUS_R, '')))) = 'CONTABILIZADO'
+      AND ISNULL(d.CTD_R, 0) > 0;
+
+    UPDATE a
+    SET a.STOCK = ISNULL(a.STOCK, 0) + ISNULL(d.CTD_R, 0)
+    FROM dbo.DAT_ART a
+    JOIN dbo.TRAN_DET_ART d
+      ON LTRIM(RTRIM(ISNULL(a.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+     AND LTRIM(RTRIM(ISNULL(a.SUC, ''))) = @sucEnt
+    WHERE d.DOC = @DOC
+      AND ISNULL(d.BLOQ, 0) <> -1
+      AND d.FCN_CONT IS NULL
+      AND UPPER(LTRIM(RTRIM(ISNULL(d.ESTATUS_R, '')))) = 'CONTABILIZADO';
+
+    INSERT INTO dbo.DAT_MB51
+      (IDPD, [USER], CLSM, DOCP, ART, CTDA, CTOT, FCND, FCNC, TXT, ALMACEN, VTAESP, SUC)
+    SELECT
+      CONVERT(NVARCHAR(36), NEWID()), @USER, 122, @DOC, d.ART,
+      ISNULL(d.DIF_R, 0),
+      ISNULL(d.DIF_R, 0) * ISNULL(a.CTOP, 0),
+      GETDATE(), GETDATE(), CONCAT('TRANSFERENCIA FALTANTE DOC ', @DOC),
+      '001', 0, @sucSal
+    FROM dbo.TRAN_DET_ART d
+    LEFT JOIN dbo.DAT_ART a
+      ON LTRIM(RTRIM(ISNULL(a.SUC, ''))) = @sucSal
+     AND LTRIM(RTRIM(ISNULL(a.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+    WHERE d.DOC = @DOC
+      AND ISNULL(d.BLOQ, 0) <> -1
+      AND d.FCN_CONT IS NULL
+      AND UPPER(LTRIM(RTRIM(ISNULL(d.ESTATUS_R, '')))) = 'CONTABILIZADO'
+      AND ISNULL(d.DIF_R, 0) > 0;
+
+    UPDATE a
+    SET a.STOCK = ISNULL(a.STOCK, 0) + ISNULL(d.DIF_R, 0)
+    FROM dbo.DAT_ART a
+    JOIN dbo.TRAN_DET_ART d
+      ON LTRIM(RTRIM(ISNULL(a.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+     AND LTRIM(RTRIM(ISNULL(a.SUC, ''))) = @sucSal
+    WHERE d.DOC = @DOC
+      AND ISNULL(d.BLOQ, 0) <> -1
+      AND d.FCN_CONT IS NULL
+      AND UPPER(LTRIM(RTRIM(ISNULL(d.ESTATUS_R, '')))) = 'CONTABILIZADO'
+      AND ISNULL(d.DIF_R, 0) > 0;
+
+    INSERT INTO dbo.DAT_MB51
+      (IDPD, [USER], CLSM, DOCP, ART, CTDA, CTOT, FCND, FCNC, TXT, ALMACEN, VTAESP, SUC)
+    SELECT
+      CONVERT(NVARCHAR(36), NEWID()), @USER, 124, @DOC, d.ART,
+      ABS(ISNULL(d.DIF_R, 0)),
+      ABS(ISNULL(d.DIF_R, 0)) * ISNULL(a.CTOP, 0),
+      GETDATE(), GETDATE(), CONCAT('TRANSFERENCIA SOBRANTE DOC ', @DOC),
+      '001', 0, @sucSal
+    FROM dbo.TRAN_DET_ART d
+    LEFT JOIN dbo.DAT_ART a
+      ON LTRIM(RTRIM(ISNULL(a.SUC, ''))) = @sucSal
+     AND LTRIM(RTRIM(ISNULL(a.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+    WHERE d.DOC = @DOC
+      AND ISNULL(d.BLOQ, 0) <> -1
+      AND d.FCN_CONT IS NULL
+      AND UPPER(LTRIM(RTRIM(ISNULL(d.ESTATUS_R, '')))) = 'CONTABILIZADO'
+      AND ISNULL(d.DIF_R, 0) < 0;
+
+    UPDATE a
+    SET a.STOCK = ISNULL(a.STOCK, 0) - ABS(ISNULL(d.DIF_R, 0))
+    FROM dbo.DAT_ART a
+    JOIN dbo.TRAN_DET_ART d
+      ON LTRIM(RTRIM(ISNULL(a.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+     AND LTRIM(RTRIM(ISNULL(a.SUC, ''))) = @sucSal
+    WHERE d.DOC = @DOC
+      AND ISNULL(d.BLOQ, 0) <> -1
+      AND d.FCN_CONT IS NULL
+      AND UPPER(LTRIM(RTRIM(ISNULL(d.ESTATUS_R, '')))) = 'CONTABILIZADO'
+      AND ISNULL(d.DIF_R, 0) < 0;
+
+    UPDATE dbo.TRAN_DET_ART
+    SET FCN_CONT = GETDATE(),
+        USR_CONT = @USER
+    WHERE DOC = @DOC
+      AND ISNULL(BLOQ, 0) <> -1
+      AND FCN_CONT IS NULL
+      AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS_R, '')))) = 'CONTABILIZADO';
+
+    UPDATE h
+    SET h.ESTATUS = CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM dbo.TRAN_DET_ART d
+            WHERE d.DOC = h.DOC
+              AND ISNULL(d.BLOQ, 0) <> -1
+              AND d.FCN_CONT IS NULL
+              AND UPPER(LTRIM(RTRIM(ISNULL(d.ESTATUS_R, '')))) = 'INCIDENCIA'
+          ) THEN 'INCIDENCIA'
+          ELSE 'CONTABILIZADO'
+        END,
+        h.DOC_MB51_ENT = CONVERT(NVARCHAR(50), @docBase),
+        h.CTD = calc.CTD,
+        h.IMP = calc.IMP,
+        h.FCNC = CASE
+          WHEN NOT EXISTS (
+            SELECT 1
+            FROM dbo.TRAN_DET_ART d
+            WHERE d.DOC = h.DOC
+              AND ISNULL(d.BLOQ, 0) <> -1
+              AND d.FCN_CONT IS NULL
+              AND UPPER(LTRIM(RTRIM(ISNULL(d.ESTATUS_R, '')))) = 'INCIDENCIA'
+          ) THEN GETDATE()
+          ELSE h.FCNC
+        END,
+        h.FCNM = GETDATE()
+    FROM dbo.TRAN_CTR_DOCPRE h
+    CROSS APPLY (
+      SELECT
+        SUM(CASE WHEN ISNULL(d.BLOQ, 0) = -1 OR d.FCN_CONT IS NULL THEN 0 ELSE ISNULL(d.CTD_R, 0) END) AS CTD,
+        SUM(CASE WHEN ISNULL(d.BLOQ, 0) = -1 OR d.FCN_CONT IS NULL THEN 0 ELSE ISNULL(d.CTO_R, 0) END) AS IMP
+      FROM dbo.TRAN_DET_ART d
+      WHERE d.DOC = h.DOC
+    ) calc
+    WHERE h.DOC = @DOC;
+
+    COMMIT TRANSACTION;
+    SELECT DOC, ESTATUS, DOC_MB51_ENT FROM dbo.TRAN_CTR_DOCPRE WHERE DOC = @DOC;
+  END TRY
+  BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+  END CATCH
+END;
+GO
