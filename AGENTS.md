@@ -113,5 +113,6 @@
 ## Documentacion viva obligatoria
 - Cada cambio funcional debe actualizar README/AGENTS principal y los README/AGENTS del módulo afectado (app y API) en el mismo trabajo.
 - Punto de venta / Cambio forma de pago REQF (2026-06-18): `PUT /formas-pago/cambios/:idf` debe disparar `sp_fact_sync_folio_vf` cuando el folio tiene `REQF=1` y `AUT=VF` para mantener `FAC_SVR_SHAP/FACT_TICKET_SHP` sincronizadas; la respuesta expone `facturacionSync`.
+- Punto de venta / Cambio forma de pago (2026-06-26): el panel admin agrega filtros en cascada `Sucursal` -> `OPV`; backend acepta `suc/opv` en `GET /formas-pago/cambios/today` para admin y permite operar filas de otro OPV solo con contexto admin + `SUPERPV`.
 - Punto de venta / Caja General - Entrega OPV (2026-06-18): `sp_cg_sync_entrega_opv_abierta`, `sp_cg_cerrar_entrega_opv` y `sp_cg_reactivar_entrega_opv` se serializan por sucursal/fecha/OPV con `sp_getapplock` y limpian `DAT_FORM_ENTR_OPV_SVR` por `IDE` + contexto antes de reinsertar, para evitar duplicados sobre `PK_DATFORMENTROPVSVR`.
 

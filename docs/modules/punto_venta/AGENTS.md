@@ -90,8 +90,9 @@ Enlaces relacionados:
 - genera `NDOC` en transacción (lock + max), base `N6000001+`, usando `COL_LENGTH` para evitar errores cuando la columna falta.
 - valida suma de formas (`sum(impp)` <= total salvo efectivo con cambio) y referencias `REF_DETALLE.ESTATUS='PROCESADO'` usadas.
 - actualiza `PV_CTR_FOL_ASVR` (`ESTA='PAGADO'`, `IMPT`, `AUT='CA'|'VF'`), `PV_CTR_ORDS.ESTATUS=2`, sincroniza `PV_CTR_ORDS.RQFAC` con `REQF/RQFAC` del folio y ejecuta `dbo.sp_mb51_transmitir_folio` para stock MB51.
+- cambio de forma de pago (2026-06-26): `GET /formas-pago/cambios/today` acepta `suc/opv` para admin; la UI muestra filtros en cascada `Sucursal` -> `OPV`, y `PUT /formas-pago/cambios/:idf` permite operar filas de otro OPV solo cuando la sesión es admin + supervisor `SUPERPV`.
 - compatibilidad de homologación MB51 (2026-04): si existe trigger legacy que transforma `MB51PROCES` a `TRANSMITIR`, aplicar `sql/2026-04-03_mb51proceso_homologacion.sql` para conservar `MB51PROCES` en salida operativa.
-- sincronización VF: `sp_fact_sync_folio_vf` en transacción cuando `tipotran='VF'` y `REQF=1`; si no cumple, limpia cabecera/detalle en `FAC_SVR_SHAP/FACT_TICKET_SHP`.
+- sincronización VF: `sp_fact_sync_folio_vf` en transacción cuando `tipotran='VF'` y `REQF=1`; si no cumple, limpia cabecera/detalle en `FAC_SVR_SHAP/FACT_TICKET_SHP`. En cambio de forma de pago, si la primera sincronización no aplica, el backend reintenta con `FORCE=1` antes de reportar error.
 - `Tipofact='CREDITO'` si alguna forma `CREDITO`; de lo contrario `INDIVIDUAL`.
 - fecha de proceso actual para `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, cargos `DAT_CTRL_CTAS`.
 - Cotizaciones con ORD relacionada (2026-06-26): `resolveContext`, `print-preview` y `sp_pv_cotizacion_cerrar` suman todos los renglones de `PV_TICKET_LOG`; contramovimientos tecnicos (`CTD < 0` con `TICKET_REL`) cancelan importes y el cierre permite total cero sin formas de pago.
@@ -160,7 +161,7 @@ Enlaces relacionados:
 - PS comprobantes múltiples (2026-05-22): al finalizar pago, `sp_ps_pago_finalize` persiste `IMPD` por forma (`IMPP-IMPC`) para evitar duplicados cuando hay más de un comprobante no-efectivo en la misma transacción.
 - PS reparación incidente (2026-05-22): script `sql/2026-05-22_ps_fix_comprobantes_duplicados_df01_20260520_vf_0061.sql` corrige formas del caso `DF01-20260520-VF-0061` y re-sincroniza entrega OPV del día.
 - Panel PS: folios `PAGADO` abren directo pago.
-- Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen y aplica regla parcial solo-efectivo, pago valida forma(s) origen, sincroniza facturación con `sp_fact_sync_folio_vf`, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.
+- Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen y aplica regla parcial solo-efectivo, pago valida forma(s) origen, sincroniza facturación con `sp_fact_sync_folio_vf` con reintento `FORCE=1` cuando aplica, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.
 
 ## Caja General: entrega OPV (2026-06-18)
 - `sp_cg_sync_entrega_opv_abierta`, `sp_cg_cerrar_entrega_opv` y `sp_cg_reactivar_entrega_opv` usan `sp_getapplock` por sucursal/fecha/OPV y borrado por `IDE` + contexto antes de reinsertar en `DAT_FORM_ENTR_OPV_SVR`, para evitar duplicados de la PK `PK_DATFORMENTROPVSVR`.

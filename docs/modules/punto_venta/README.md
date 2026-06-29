@@ -266,8 +266,9 @@ Enlaces relacionados:
 - en `CP -> CA/VF`, `sp_pv_cotizacion_cerrar` genera nuevo `IDFOL` visible, conserva `IDFOLINICIAL` y religa `PV_TICKET_LOG`, `PV_CTR_ORDS` y `REF_DETALLE` al folio final dentro de la misma transacción.
 - en `CP -> CA/VF`, el cierre también sincroniza `PV_CTR_ORDS.RQFAC` con el `REQF/RQFAC` efectivo del folio final al mover la ORD a `ESTATUS=2`.
 - `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`): insercion transaccional de formas definitivas (`IDF`, `IDFOL`, `FORM`, `IMPP`, `AUT`, ...). En `CREDITO/DEUDOR` guarda `AUT=IDFOL`. `IMPD` se persiste por forma aplicada (`IMPP-IMPC`; en no-efectivo coincide con `IMPP`).
+- cambio de forma de pago (2026-06-26): `GET /formas-pago/cambios/today` acepta `suc/opv` solo para admin; `PUT /formas-pago/cambios/:idf` deja operar filas de otro OPV bajo contexto admin + `SUPERPV`, y la UI expone filtros `Sucursal` -> `OPV`.
 - `TARJETA CREDITO` se guarda en `DAT_FORM` con `ASPEL=4`; en cierre VF con factura queda como forma no efectivo, requiere referencia y sincroniza `FormaPagoSAT='04'`.
-- sincronización facturación VF (2026-03): en cierre `tipotran='VF'`, `sp_pv_cotizacion_cerrar` exige e invoca `dbo.sp_fact_sync_folio_vf` dentro de la misma transacción para upsert de cabecera `FAC_SVR_SHAP` y rebuild de detalle `FACT_TICKET_SHP` del folio final.
+- sincronización facturación VF (2026-03): en cierre `tipotran='VF'`, `sp_pv_cotizacion_cerrar` exige e invoca `dbo.sp_fact_sync_folio_vf` dentro de la misma transacción para upsert de cabecera `FAC_SVR_SHAP` y rebuild de detalle `FACT_TICKET_SHP` del folio final; el flujo de cambio de forma de pago reintenta con `FORCE=1` antes de fallar si la primera sincronización no aplica.
 - regla de elegibilidad facturación VF (2026-03): solo se sincronizan folios con `AUT='VF'` y `REQF=1`; si un folio no cumple, se limpia su cabecera/detalle en `FAC_SVR_SHAP`/`FACT_TICKET_SHP`.
 - regla `Tipofact` en sincronización VF (2026-03): si el folio tiene alguna forma `CREDITO` en `PV_CTR_FOL_FORM(_SVR)`, se persiste `FAC_SVR_SHAP.Tipofact='CREDITO'`; en caso contrario queda `INDIVIDUAL`.
 - política de fecha de finalización cotización (2026-03): `sp_pv_cotizacion_cerrar` aplica fecha de proceso actual al insertar formas (`FCN`), al actualizar cabecera (`FCNM`) y al generar movimientos contables por `CREDITO/DEUDOR` (`DAT_CTR_DOC`/`DAT_CTRL_CTAS`).
@@ -359,7 +360,7 @@ Enlaces relacionados:
 - folio devolución termina en `ESTA='PAGADO'` y `AUT='DF'/'APDF'`; el envío a `MB51PROCES` se realiza después mediante `PATCH /pvctrfolasvr/:idfol`.
 - SQL soporte:
 - `sql/PV_DEV_DET_TMP_create.sql` crea/ajusta la tabla staging `PV_DEV_DET_TMP`.
-- `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación por evento VF.
+- `sql/sp_fact_sync_folio_vf_create.sql` crea/actualiza `dbo.sp_fact_sync_folio_vf` para sincronización idempotente de facturación por evento VF; el cambio de forma de pago usa esta misma ruta y reintenta con `FORCE=1` si la llamada normal no aplica.
 - `sql/2026-03-20_facturacion_sync_after_devoluciones.sql` depura registros históricos de `IDFOLDEV` en `FAC_SVR_SHAP/FACT_TICKET_SHP` y luego reprocesa folios origen elegibles (`AUT='VF'` + `REQF=1`).
 - `sql/2026-05-14_pv_devoluciones_formas_mixtas_prorrata_indexes.sql` agrega índices para acelerar consultas por `IDFOLORIG` y formas.
 

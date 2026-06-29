@@ -74,8 +74,9 @@ Enlaces relacionados:
 - facturación pendientes paginada (2026-03-13): `GET /facturacion/pendientes` ahora acepta `page`, `pageSize`, `suc`, `estatus`, `razonSocialReceptor`, `rfcReceptor`, `clien`, `idFol`, `tipoFact`.
 - facturación pendientes paginada (2026-03-13): el filtrado se aplica server-side sobre todo el universo (`ESTATUS IN ('PENDIENTE','CANCELACION PENDIENTE')`) y ordena por `FCN DESC`.
 - facturación pendientes paginada (2026-03-13): la respuesta incluye `data`, `total`, `page`, `pageSize`, `totalPages`, `hasPrevPage`, `hasNextPage`.
-- facturación paginación (2026-03-31): el pageSize por defecto de pendientes se ajusta a 100 (manteniendo tope 200) para reducir paginación.
+- facturación paginación (2026-03-31, actualizado 2026-06-29): el pageSize por defecto y máximo de pendientes queda en 150 para alinear frontend y backend.
 - validación masiva por IDFOL (2026-04-01): `POST /facturacion/pendientes/validar-idfols` acepta `idFols` (máx. 500), normaliza duplicados/blancos y responde `validos` (solo ESTATUS `PENDIENTE`, respetando sucursal forzada en modo consulta) y `rechazados`; script `sql/2026-04-01_facturacion_validar_idfols.sql` crea el SP opcional.
+- selección masiva por IDFOL (2026-06-29): `POST /facturacion/pendientes/idfols` acepta `idFols` (máx. 500) y responde una página única con todos los folios `PENDIENTE` encontrados, respetando sucursal forzada para usuarios sin gestión; no requiere SP.
 - facturación pendientes base SQL (2026-03-13): la consulta de listado parte de `SELECT FAC_SVR_SHAP.* FROM FAC_SVR_SHAP WHERE ESTATUS IN ('PENDIENTE','CANCELACION PENDIENTE') ORDER BY FCN DESC`; los filtros opcionales se agregan encima de esa base.
 - facturación pendientes formato IMPT (2026-03-15): el backend redondea `IMPT` a 2 decimales en la respuesta de `GET /facturacion/pendientes` para evitar variaciones por precisión.
 - validación facturación detalle (2026-03-14): `GET /facturacion/:idFol/validar` incorpora `detalleArticulos` (fuente `FACT_TICKET_SHP`) con columnas `IDFOL`, `UPC`, `Descripcion`, `ClaveProdServ`, `Unidad`, `Cantidad`, `ValorUnitario`, `PVTAT`, `Impuesto`, `Total`, además de `totalesDetalle` para UI.

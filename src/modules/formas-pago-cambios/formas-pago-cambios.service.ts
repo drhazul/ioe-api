@@ -3,7 +3,9 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { DataSource, QueryFailedError, QueryRunner } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -46,10 +48,12 @@ type FacturacionSyncResult = {
 @Injectable()
 export class FormasPagoCambiosService {
   private static readonly AUT_ALLOWED: EligibleAut[] = ['AD', 'AP', 'CR', 'VF'];
+  private readonly logger = new Logger(FormasPagoCambiosService.name);
 
   constructor(
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
   ) {}
 
   async listCatalog() {
@@ -84,7 +88,41 @@ export class FormasPagoCambiosService {
 
   async listToday(user: JwtPayload, query?: ListFormaPagoCambioTodayQueryDto) {
     try {
-      const opv = this.resolveOpv(user);
+      const isAdmin = this.isAdmin(user);
+      const actorSuc = this.normalizeUpper(user?.suc ?? '');
+      const actorOpv = this.normalizeUpper(user?.username ?? '');
+      const requestedSuc = this.normalizeUpper(query?.suc ?? '');
+      const requestedOpv = this.normalizeUpper(query?.opv ?? '');
+      const effectiveSuc = isAdmin ? requestedSuc : actorSuc;
+      const effectiveOpv = isAdmin ? requestedOpv : actorOpv;
+
+      if (isAdmin) {
+        if (!effectiveSuc || !effectiveOpv) {
+          return [];
+        }
+      } else {
+        if (!actorSuc) {
+          throw new BadRequestException(
+            'No se pudo resolver sucursal para consultar cambios de forma de pago',
+          );
+        }
+        if (!actorOpv) {
+          throw new BadRequestException(
+            'No se pudo resolver OPV para consultar cambios de forma de pago',
+          );
+        }
+        if (requestedSuc && requestedSuc !== actorSuc) {
+          throw new ForbiddenException(
+            'No autorizado para consultar otra sucursal',
+          );
+        }
+        if (requestedOpv && requestedOpv !== actorOpv) {
+          throw new ForbiddenException(
+            'No autorizado para consultar otro OPV',
+          );
+        }
+      }
+
       const formTable = await this.resolveFormTable();
       const hasFormAut = await this.hasColumn(
         this.dataSource,
@@ -133,12 +171,22 @@ export class FormasPagoCambiosService {
 
       const idfolSearch = this.normalize(query?.idfol);
       const clienSearch = this.normalize(query?.clien);
-      const params: unknown[] = [opv];
+      const params: unknown[] = [];
       const where: string[] = [
         'CONVERT(date, A.FCN) = CONVERT(date, GETDATE())',
-        "UPPER(LTRIM(RTRIM(ISNULL(A.OPVM, '')))) = @0",
         "A.AUT IN ('AD', 'AP', 'CR', 'VF')",
       ];
+
+      if (effectiveSuc) {
+        params.push(effectiveSuc);
+        where.push(`UPPER(LTRIM(RTRIM(ISNULL(A.SUC, '')))) = @${params.length - 1}`);
+      }
+      if (effectiveOpv) {
+        params.push(effectiveOpv);
+        where.push(
+          `UPPER(LTRIM(RTRIM(ISNULL(A.OPVM, '')))) = @${params.length - 1}`,
+        );
+      }
 
       if (idfolSearch) {
         params.push(`%${idfolSearch}%`);
@@ -269,7 +317,8 @@ export class FormasPagoCambiosService {
       }
 
       const target = this.mapCambioDetalleRow(targetRaw);
-      const opv = this.resolveOpv(user);
+      const isAdmin = this.isAdmin(user);
+      const opv = isAdmin ? '' : this.resolveOpv(user);
 
       if (!this.isToday(target.FCN)) {
         throw new ForbiddenException(
@@ -285,7 +334,7 @@ export class FormasPagoCambiosService {
           'La transacción no tiene AUT permitido para cambio de forma',
         );
       }
-      if (this.normalizeUpper(target.OPVM) !== opv) {
+      if (!isAdmin && this.normalizeUpper(target.OPVM) !== opv) {
         throw new ForbiddenException(
           'La transacción no pertenece al OPV autenticado',
         );
@@ -519,35 +568,52 @@ export class FormasPagoCambiosService {
       );
     }
 
-    const rows = await qr.query(
-      `
-      EXEC dbo.sp_fact_sync_folio_vf
-        @IDFOL = @0,
-        @EVENTO = @1,
-        @FORCE = @2
-      `,
-      [idFol, 'CAMBIO_FORMA_PAGO', 0],
-    );
-    const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
-    if (!row) {
+    const runSync = async (force: boolean) => {
+      const rows = await qr.query(
+        `
+        EXEC dbo.sp_fact_sync_folio_vf
+          @IDFOL = @0,
+          @EVENTO = @1,
+          @FORCE = @2
+        `,
+        [idFol, 'CAMBIO_FORMA_PAGO', force ? 1 : 0],
+      );
+      const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+      if (!row) {
+        return {
+          idfol: idFol,
+          syncApplied: false,
+          estatus: null,
+          impt: null,
+          detailRows: 0,
+          evento: 'CAMBIO_FORMA_PAGO',
+        } satisfies FacturacionSyncResult;
+      }
+
       return {
-        idfol: idFol,
-        syncApplied: false,
-        estatus: null,
-        impt: null,
-        detailRows: 0,
-        evento: 'CAMBIO_FORMA_PAGO',
-      };
+        idfol: this.normalize(row.IDFOL) || idFol,
+        syncApplied: (this.toInt(row.SYNC_APPLIED) ?? 0) === 1,
+        estatus: this.normalize(row.ESTATUS) || null,
+        impt: this.toNumber(row.IMPT),
+        detailRows: Math.max(this.toInt(row.DETAIL_ROWS) ?? 0, 0),
+        evento: this.normalize(row.EVENTO) || null,
+      } satisfies FacturacionSyncResult;
+    };
+
+    const initial = await runSync(false);
+    if (initial.syncApplied) {
+      return initial;
     }
 
-    return {
-      idfol: this.normalize(row.IDFOL) || idFol,
-      syncApplied: (this.toInt(row.SYNC_APPLIED) ?? 0) === 1,
-      estatus: this.normalize(row.ESTATUS) || null,
-      impt: this.toNumber(row.IMPT),
-      detailRows: Math.max(this.toInt(row.DETAIL_ROWS) ?? 0, 0),
-      evento: this.normalize(row.EVENTO) || null,
-    };
+    const forced = await runSync(true);
+    if (forced.syncApplied) {
+      this.logger.warn(
+        `Facturacion sync requirio FORCE=1 para ${idFol} en cambio de forma de pago`,
+      );
+      return forced;
+    }
+
+    return forced;
   }
 
   private mapCambioDetalleRow(row: Record<string, unknown>): CambioDetalleRow {
@@ -576,6 +642,47 @@ export class FormasPagoCambiosService {
       );
     }
     return opv;
+  }
+
+  private parseIds(...values: Array<string | undefined>) {
+    const out: number[] = [];
+    for (const value of values) {
+      if (!value) continue;
+      for (const part of value.split(',')) {
+        const n = Number(part.trim());
+        if (Number.isFinite(n)) out.push(n);
+      }
+    }
+    return out;
+  }
+
+  private isAdmin(user?: JwtPayload | null) {
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (username === 'ADMIN') return true;
+
+    const roleId = Number(user?.roleId ?? 0);
+    const nivel = Number(user?.nivel ?? 0);
+
+    const adminRoleIds = this.parseIds(
+      this.config.get<string>('ADMIN_ROLE_IDS'),
+      this.config.get<string>('ADMIN_ROLE_ID'),
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const adminNiveles = this.parseIds(
+      this.config.get<string>('ADMIN_NIVELES'),
+      this.config.get<string>('ADMIN_NIVEL'),
+      process.env.ADMIN_NIVELES,
+      process.env.ADMIN_NIVEL,
+    );
+
+    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [1]).includes(
+      roleId,
+    );
+    const nivelAllowed =
+      adminNiveles.length > 0 && adminNiveles.includes(nivel);
+
+    return roleAllowed || nivelAllowed;
   }
 
   private isToday(value: unknown) {

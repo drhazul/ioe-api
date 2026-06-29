@@ -40,15 +40,15 @@ export class ListFacturacionPendientesQueryDto {
 
   @ApiPropertyOptional({
     description: 'Registros por página',
-    default: 60,
+    default: 150,
     minimum: 1,
-    maximum: 200,
+    maximum: 150,
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(200)
+  @Max(150)
   pageSize?: number;
 
   @ApiPropertyOptional({

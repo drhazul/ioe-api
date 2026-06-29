@@ -90,7 +90,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Ejecutar `npm test` antes de entregar cualquier cambio backend.
 - Cuando se coordinen cambios con el frontend (`ioe_app`), correr también `flutter analyze` y `flutter test` en ese proyecto.
 
-- Punto de venta / Cambio forma de pago REQF (2026-06-18): `PUT /formas-pago/cambios/:idf` re-sincroniza `FAC_SVR_SHAP/FACT_TICKET_SHP` con `sp_fact_sync_folio_vf` cuando el folio tiene `REQF=1` y `AUT=VF`; la respuesta incluye `facturacionSync`.
+- Punto de venta / Cambio forma de pago REQF (2026-06-18): `PUT /formas-pago/cambios/:idf` re-sincroniza `FAC_SVR_SHAP/FACT_TICKET_SHP` con `sp_fact_sync_folio_vf` cuando el folio tiene `REQF=1` y `AUT=VF`; si el primer intento no aplica, el backend reintenta con `FORCE=1` antes de fallar; la respuesta incluye `facturacionSync`.
 
 ## Documentacion viva
 - Mantén este índice y los README/AGENTS de módulo actualizados con cada cambio de contrato o proceso.
