@@ -69,4 +69,3 @@ export class CreatePromocionCriterioDto {
   @IsInt()
   EST?: number;
 }
-

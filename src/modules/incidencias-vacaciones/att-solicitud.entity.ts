@@ -20,10 +20,20 @@ export class AttSolicitudEntity {
   @Column({ type: 'varchar', length: 500, name: 'motivo', nullable: true })
   motivo: string | null;
 
-  @Column({ type: 'varchar', length: 500, name: 'evidencia_url', nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 500,
+    name: 'evidencia_url',
+    nullable: true,
+  })
   evidenciaUrl: string | null;
 
-  @Column({ type: 'varchar', length: 20, name: 'estatus', default: () => "'PENDIENTE'" })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    name: 'estatus',
+    default: () => "'PENDIENTE'",
+  })
   estatus: string | undefined;
 
   @Column({ type: 'int', name: 'aprobado_por', nullable: true })

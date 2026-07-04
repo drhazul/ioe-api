@@ -7,7 +7,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, QueryFailedError, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  QueryFailedError,
+  Repository,
+} from 'typeorm';
 import { FactClientShpEntity } from './factclientshp.entity';
 import { CreateFactClientShpDto } from './dto/create-factclientshp.dto';
 import { UpdateFactClientShpDto } from './dto/update-factclientshp.dto';
@@ -143,8 +148,8 @@ export class FactClientShpService {
     const clienColumn = columns.has('CLIEN')
       ? 'CLIEN'
       : columns.has('CLIENTE')
-      ? 'CLIENTE'
-      : null;
+        ? 'CLIENTE'
+        : null;
     if (!clienColumn) return;
 
     const setClauses: string[] = [];
@@ -201,10 +206,9 @@ export class FactClientShpService {
       const rows = await this.usrModSucRepo
         .createQueryBuilder('ums')
         .select("UPPER(LTRIM(RTRIM(ISNULL(ums.SUC, ''))))", 'SUC')
-        .where(
-          "UPPER(LTRIM(RTRIM(ISNULL(ums.USUARIO, '')))) = :username",
-          { username },
-        )
+        .where("UPPER(LTRIM(RTRIM(ISNULL(ums.USUARIO, '')))) = :username", {
+          username,
+        })
         .andWhere('ums.ACTIVO = :activo', { activo: true })
         .andWhere(
           "UPPER(LTRIM(RTRIM(ISNULL(ums.MODULO, '')))) IN (:...modulos)",
@@ -230,10 +234,7 @@ export class FactClientShpService {
     return this.resolveAuthorizedSucsList(user);
   }
 
-  async findAll(
-    query?: { suc?: string },
-    user?: FactClientUser | null,
-  ) {
+  async findAll(query?: { suc?: string }, user?: FactClientUser | null) {
     const sucFilter = this.normalizeUpper(query?.suc);
     const table = this.repo.metadata.tablePath;
 
@@ -305,10 +306,7 @@ export class FactClientShpService {
     return rows[0];
   }
 
-  async create(
-    dto: CreateFactClientShpDto,
-    user?: FactClientUser | null,
-  ) {
+  async create(dto: CreateFactClientShpDto, user?: FactClientUser | null) {
     const isAdmin = this.isAdmin(user);
     const suc = (user?.suc ?? '').trim();
     if (!isAdmin && !suc) {

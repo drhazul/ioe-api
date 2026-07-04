@@ -20,7 +20,7 @@ export class AppController {
       status: 'ok',
       message: 'Conexión exitosa desde Codex',
       timestamp: new Date().toISOString(),
-      service: 'IOE-API'
+      service: 'IOE-API',
     };
   }
 }

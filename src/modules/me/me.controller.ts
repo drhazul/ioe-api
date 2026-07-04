@@ -23,7 +23,10 @@ export class MeController {
 
   @Get('datmodulos')
   getDatmodulos(@CurrentUser() user: any) {
-    return this.service.getRoleDatmodulos(Number(user.sub), Number(user.roleId));
+    return this.service.getRoleDatmodulos(
+      Number(user.sub),
+      Number(user.roleId),
+    );
   }
 
   @Get('backend-perms')

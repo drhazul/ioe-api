@@ -1046,7 +1046,11 @@ export class PvDevolucionesService {
 
   private assertDevolucionEditable(context: DevolucionContext) {
     const estado = this.normalizeEstadoOperativoCompat(context.estaDev);
-    if (estado === 'PAGADO' || estado === 'MB51PROCES' || estado === 'TRANSMITIR') {
+    if (
+      estado === 'PAGADO' ||
+      estado === 'MB51PROCES' ||
+      estado === 'TRANSMITIR'
+    ) {
       throw new ConflictException(
         `La devolución ${context.idfolDev} ya no es editable por estado ${estado}`,
       );
@@ -3389,10 +3393,14 @@ export class PvDevolucionesService {
     return {
       idfol:
         this.normalizeText(this.getRowValue(row, 'IDFOL')) || input.idfolOrig,
-      syncApplied: (this.toInt(this.getRowValue(row, 'SYNC_APPLIED')) ?? 0) === 1,
+      syncApplied:
+        (this.toInt(this.getRowValue(row, 'SYNC_APPLIED')) ?? 0) === 1,
       estatus: this.nullableText(this.getRowValue(row, 'ESTATUS')),
       impt: impt == null ? null : this.round2(impt),
-      detailRows: Math.max(this.toInt(this.getRowValue(row, 'DETAIL_ROWS')) ?? 0, 0),
+      detailRows: Math.max(
+        this.toInt(this.getRowValue(row, 'DETAIL_ROWS')) ?? 0,
+        0,
+      ),
       evento: this.nullableText(this.getRowValue(row, 'EVENTO')),
     };
   }
@@ -3429,7 +3437,10 @@ export class PvDevolucionesService {
     }
 
     if (await this.tableExists(executor, 'dbo.FAC_SVR_SHAP')) {
-      const headerCols = await this.loadTableColumns(executor, 'dbo.FAC_SVR_SHAP');
+      const headerCols = await this.loadTableColumns(
+        executor,
+        'dbo.FAC_SVR_SHAP',
+      );
       if (headerCols.has('IDFOL')) {
         await executor.query(
           `

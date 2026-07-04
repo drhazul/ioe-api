@@ -142,7 +142,9 @@ export class DatArtService {
     const parseBoolean = (value?: string) => {
       if (!value) return false;
       const normalized = value.trim().toLowerCase();
-      return normalized === '1' || normalized === 'true' || normalized === 'yes';
+      return (
+        normalized === '1' || normalized === 'true' || normalized === 'yes'
+      );
     };
     const sucExact = parseBoolean(query?.sucExact);
     const sucNormalized = query?.suc?.trim().toUpperCase();
@@ -173,10 +175,9 @@ export class DatArtService {
     if (adic !== undefined) where.ADIC = adic;
     const bloqNe = parseNumber(query?.bloqNe);
     if (bloqNe !== undefined) {
-      where.BLOQ = Raw(
-        (alias) => `(${alias} IS NULL OR ${alias} <> :bloqNe)`,
-        { bloqNe },
-      );
+      where.BLOQ = Raw((alias) => `(${alias} IS NULL OR ${alias} <> :bloqNe)`, {
+        bloqNe,
+      });
     }
 
     const parseIntParam = (value?: string) => {
@@ -781,10 +782,7 @@ export class DatArtService {
     const conflict = await this.repo.findOne({
       where: { SUC: suc, UPC: normalizedUpc },
     });
-    if (
-      conflict &&
-      (conflict.ART !== art || conflict.UPC !== currentUpc)
-    ) {
+    if (conflict && (conflict.ART !== art || conflict.UPC !== currentUpc)) {
       throw new ConflictException(
         `UPC ${normalizedUpc} ya está asignado al artículo ${conflict.ART} en la sucursal ${conflict.SUC}`,
       );

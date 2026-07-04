@@ -10,4 +10,3 @@ export class FacturacionUnificacionReverseDto {
   @Transform(({ value }) => normalizeText(value))
   motivo: string;
 }
-

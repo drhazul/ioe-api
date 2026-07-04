@@ -129,15 +129,13 @@ export class PvCtrFolAsvrService {
     }
 
     const shouldQueryCrossScope =
-      !isAdmin && (search.length > 0 || (requestedOpv.length > 0 && !requestedOpvIsActor));
+      !isAdmin &&
+      (search.length > 0 || (requestedOpv.length > 0 && !requestedOpvIsActor));
     let crossRows: Record<string, unknown>[] = [];
 
     if (shouldQueryCrossScope) {
       const crossParams: unknown[] = [];
-    const crossWhere: string[] = [
-      "a.AUT = 'CP'",
-      "a.ESTA = 'PENDIENTE'",
-    ];
+      const crossWhere: string[] = ["a.AUT = 'CP'", "a.ESTA = 'PENDIENTE'"];
 
       if (suc.length > 0) {
         crossWhere.push(`a.SUC = @${crossParams.length}`);
@@ -181,7 +179,10 @@ export class PvCtrFolAsvrService {
     const opv = this.normalizeText(query?.opv ?? '');
     const search = this.normalizeText(query?.search ?? '');
     const fcnm = this.normalizeText(query?.fcnm ?? '');
-    const pageSize = Math.min(20, Math.max(1, Number(query?.pageSize ?? 20) || 20));
+    const pageSize = Math.min(
+      20,
+      Math.max(1, Number(query?.pageSize ?? 20) || 20),
+    );
     const pageRequested = Math.max(1, Number(query?.page ?? 1) || 1);
 
     const hasCriteria = fcnm.length > 0 || search.length > 0 || opv.length > 0;
@@ -204,9 +205,7 @@ export class PvCtrFolAsvrService {
     }
 
     if (opv.length > 0) {
-      where.push(
-        `(a.OPV = @${params.length} OR a.OPVM = @${params.length})`,
-      );
+      where.push(`(a.OPV = @${params.length} OR a.OPVM = @${params.length})`);
       params.push(opv);
     }
 
@@ -234,7 +233,8 @@ export class PvCtrFolAsvrService {
     );
     const total = this.toInt(totalRows?.[0]?.total ?? totalRows?.[0]?.TOTAL);
     const totalPages = total <= 0 ? 0 : Math.ceil(total / pageSize);
-    const page = totalPages > 0 ? Math.min(pageRequested, totalPages) : pageRequested;
+    const page =
+      totalPages > 0 ? Math.min(pageRequested, totalPages) : pageRequested;
     if (total <= 0) {
       return {
         data: [],
@@ -262,7 +262,7 @@ export class PvCtrFolAsvrService {
     );
 
     return {
-      data: ((rows ?? []) as Record<string, unknown>[]),
+      data: (rows ?? []) as Record<string, unknown>[],
       total,
       page,
       pageSize,
@@ -345,8 +345,7 @@ export class PvCtrFolAsvrService {
     const actorOpvSource =
       this.normalizeText(user?.username ?? '') ||
       this.normalizeText(String(user?.sub ?? ''));
-    const actorOpv =
-      (await this.normalizeOpvToUsername(actorOpvSource)) ?? '';
+    const actorOpv = (await this.normalizeOpvToUsername(actorOpvSource)) ?? '';
 
     const requestedSuc = this.normalizeText(dto?.SUC ?? '');
     const requestedOpv =
@@ -727,5 +726,4 @@ export class PvCtrFolAsvrService {
     row.ORIGEN_AUT = nextOrigen;
     row.ESTA = nextEsta;
   }
-
 }

@@ -31,4 +31,3 @@ export class CreateTurnoCatalogoDto {
   })
   hr_salida: string;
 }
-

@@ -36,7 +36,9 @@ export class CheckinsProcessorService {
     private readonly incidenciasVacacionesService: IncidenciasVacacionesService,
   ) {}
 
-  async processCheckIn(dto: ProcessCheckinDto): Promise<CheckinEvaluationResult> {
+  async processCheckIn(
+    dto: ProcessCheckinDto,
+  ): Promise<CheckinEvaluationResult> {
     const checkinAt = new Date(dto.checkin_at);
     if (Number.isNaN(checkinAt.getTime())) {
       throw new BadRequestException('checkin_at inválido');
@@ -59,7 +61,10 @@ export class CheckinsProcessorService {
     const isHoliday = await this.resolveIsHoliday(workdayId);
     const isRestDay = this.resolveIsRestDay(checkinAt);
 
-    if ((isHoliday && !regla.aplicarDiasFestivos) || (isRestDay && !regla.aplicarDescanso)) {
+    if (
+      (isHoliday && !regla.aplicarDiasFestivos) ||
+      (isRestDay && !regla.aplicarDescanso)
+    ) {
       return {
         ok: true,
         colaboradorId: colaborador.id,
@@ -101,7 +106,10 @@ export class CheckinsProcessorService {
       };
     }
 
-    let expectedStart = this.combineDateTime(workdayId, colaborador.horaEntrada);
+    let expectedStart = this.combineDateTime(
+      workdayId,
+      colaborador.horaEntrada,
+    );
     let expectedEnd = this.combineDateTimeWithCrossDay(
       workdayId,
       colaborador.horaEntrada,
@@ -260,7 +268,10 @@ export class CheckinsProcessorService {
     return this.toDateIso(adjusted);
   }
 
-  private combineDateTime(dateIso: string, timeValue: string | null): Date | null {
+  private combineDateTime(
+    dateIso: string,
+    timeValue: string | null,
+  ): Date | null {
     if (!timeValue) return null;
 
     const normalizedRaw = timeValue.trim();
@@ -290,7 +301,9 @@ export class CheckinsProcessorService {
   }
 
   private normalizeTipo(tipoRaw?: string): string {
-    const normalized = String(tipoRaw ?? 'ENTRADA').trim().toUpperCase();
+    const normalized = String(tipoRaw ?? 'ENTRADA')
+      .trim()
+      .toUpperCase();
     if (
       ['ENTRADA', 'SALIDA', 'SALIDA_COMER', 'REGRESO_COMER'].includes(
         normalized,
@@ -326,7 +339,14 @@ export class CheckinsProcessorService {
   private toBool(value: unknown): boolean {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'number') return value !== 0;
-    const normalized = String(value ?? '').trim().toLowerCase();
-    return normalized === '1' || normalized === 'true' || normalized === 'si' || normalized === 'sí';
+    const normalized = String(value ?? '')
+      .trim()
+      .toLowerCase();
+    return (
+      normalized === '1' ||
+      normalized === 'true' ||
+      normalized === 'si' ||
+      normalized === 'sí'
+    );
   }
 }

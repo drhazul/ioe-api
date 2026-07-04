@@ -52,10 +52,7 @@ export class AsistenciaController {
   }
 
   @Post('periodo/cerrar')
-  closePeriodo(
-    @CurrentUser() user: JwtPayload,
-    @Body() dto: PeriodoCierreDto,
-  ) {
+  closePeriodo(@CurrentUser() user: JwtPayload, @Body() dto: PeriodoCierreDto) {
     return this.service.setPeriodoCierre({
       fechaInicio: dto.fecha_inicio,
       fechaFin: dto.fecha_fin,
@@ -66,10 +63,7 @@ export class AsistenciaController {
   }
 
   @Post('periodo/abrir')
-  openPeriodo(
-    @CurrentUser() user: JwtPayload,
-    @Body() dto: PeriodoCierreDto,
-  ) {
+  openPeriodo(@CurrentUser() user: JwtPayload, @Body() dto: PeriodoCierreDto) {
     return this.service.setPeriodoCierre({
       fechaInicio: dto.fecha_inicio,
       fechaFin: dto.fecha_fin,
@@ -117,16 +111,16 @@ export class AsistenciaController {
   }
 
   @Get(['reporte/export/nomina', 'export/nomina'])
-  async exportNomina(
-    @Query() query: NominaExportDto,
-    @Res() res: Response,
-  ) {
+  async exportNomina(@Query() query: NominaExportDto, @Res() res: Response) {
     const report = await this.service.reporte(query);
     const columns = this.exportService.parseNominaColumns(query.columns);
     const format = (query.format ?? 'csv').toLowerCase();
 
     if (format === 'excel' || format === 'xlsx') {
-      const buffer = await this.exportService.exportNominaExcel(report, columns);
+      const buffer = await this.exportService.exportNominaExcel(
+        report,
+        columns,
+      );
       res.setHeader(
         'Content-Type',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

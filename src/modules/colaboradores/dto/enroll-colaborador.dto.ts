@@ -12,4 +12,3 @@ export class EnrollColaboradorDto {
   @IsIn(['FP', 'FACE', 'fp', 'face'])
   tipo?: string;
 }
-

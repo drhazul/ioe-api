@@ -93,9 +93,7 @@ export class RolesService {
       [iddepto],
     );
     if (!rows?.length) {
-      throw new BadRequestException(
-        `DEPARTAMENTO ${iddepto} no existe`,
-      );
+      throw new BadRequestException(`DEPARTAMENTO ${iddepto} no existe`);
     }
   }
 }

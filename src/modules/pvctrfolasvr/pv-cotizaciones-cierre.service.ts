@@ -1943,7 +1943,7 @@ export class PvCotizacionesCierreService {
         [input.idfol, input.user],
       );
     } catch (err) {
-      this.logger.error(`MB51 transmit error for ${input.idfol}`, err as any);
+      this.logger.error(`MB51 transmit error for ${input.idfol}`, err);
       throw err;
     }
 

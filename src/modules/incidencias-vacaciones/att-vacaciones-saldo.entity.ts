@@ -14,4 +14,3 @@ export class AttVacacionesSaldoEntity {
   @Column({ type: 'int', name: 'dias_usados', default: () => '0' })
   diasUsados: number | undefined;
 }
-

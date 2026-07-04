@@ -171,7 +171,10 @@ export class ExportService {
 
   async exportAsistenciaPdf(data: AsistenciaReporteResult): Promise<Buffer> {
     await this.yieldEventLoop();
-    if (!this.pdfReady || typeof this.pdfmakeInstance?.createPdf !== 'function') {
+    if (
+      !this.pdfReady ||
+      typeof this.pdfmakeInstance?.createPdf !== 'function'
+    ) {
       throw new Error('pdfmake no está inicializado correctamente');
     }
 
@@ -338,7 +341,9 @@ export class ExportService {
 
     const out: NominaColumnKey[] = [];
     for (const value of values) {
-      if (!Object.prototype.hasOwnProperty.call(this.nominaColumnsCatalog, value)) {
+      if (
+        !Object.prototype.hasOwnProperty.call(this.nominaColumnsCatalog, value)
+      ) {
         continue;
       }
       const casted = value as NominaColumnKey;
@@ -352,8 +357,7 @@ export class ExportService {
     try {
       const excelLoaded = typeof ExcelJS.Workbook === 'function';
       const pdfLoaded =
-        this.pdfReady &&
-        typeof this.pdfmakeInstance?.createPdf === 'function';
+        this.pdfReady && typeof this.pdfmakeInstance?.createPdf === 'function';
 
       return {
         ok: excelLoaded && pdfLoaded && this.fontsReady,
@@ -405,7 +409,15 @@ export class ExportService {
   }
 
   private defaultNominaColumns(): NominaColumnKey[] {
-    return ['fecha', 'pin', 'nombre', 'sucursal', 'entrada', 'salida', 'estatus'];
+    return [
+      'fecha',
+      'pin',
+      'nombre',
+      'sucursal',
+      'entrada',
+      'salida',
+      'estatus',
+    ];
   }
 
   private resolveNominaColumns(columns: NominaColumnKey[]) {

@@ -4,4 +4,3 @@ import { CreatePromocionCriterioDto } from './create-promocion-criterio.dto';
 export class UpdatePromocionCriterioDto extends PartialType(
   CreatePromocionCriterioDto,
 ) {}
-

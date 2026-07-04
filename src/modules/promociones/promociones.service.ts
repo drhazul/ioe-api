@@ -127,9 +127,7 @@ export class PromocionesService {
         AND ISNULL(TRY_CONVERT(INT, CREADO_POR), 0) = @${params.length}
       )`;
       params.push(userId > 0 ? userId : -1);
-      where.push(
-        `(${ownDraftRule} OR ${rules})`,
-      );
+      where.push(`(${ownDraftRule} OR ${rules})`);
     }
 
     const tipo = this.normalizeText(query?.tipo);
@@ -245,7 +243,9 @@ export class PromocionesService {
       };
     });
     const filtered = allowedSucs.length
-      ? mapped.filter((row) => allowedSucs.includes(this.normalizeUpper(row.suc)))
+      ? mapped.filter((row) =>
+          allowedSucs.includes(this.normalizeUpper(row.suc)),
+        )
       : mapped;
     return [
       ...(allowedSucs.length ? [] : [{ suc: '*', descripcion: 'TODAS' }]),
@@ -344,7 +344,11 @@ export class PromocionesService {
     });
   }
 
-  async createCatalogOption(kind: CatalogKind, dto: CreateCatalogOptionDto, user: JwtPayload) {
+  async createCatalogOption(
+    kind: CatalogKind,
+    dto: CreateCatalogOptionDto,
+    user: JwtPayload,
+  ) {
     await this.assertGestionAccess(user);
     await this.ensureConfigTables();
     const table = this.resolveCatalogTable(kind);
@@ -522,7 +526,9 @@ export class PromocionesService {
       this.assertRequestedSucWithinAllowed(suc, allowedSucs);
     }
     if (sucVals.length) {
-      const placeholders = sucVals.map((_, i) => `@${params.length + i}`).join(', ');
+      const placeholders = sucVals
+        .map((_, i) => `@${params.length + i}`)
+        .join(', ');
       where.push(`UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) IN (${placeholders})`);
       params.push(...sucVals);
     } else if (allowedSucs.length) {
@@ -536,7 +542,9 @@ export class PromocionesService {
     const addInFloat = (col: string, raw?: string) => {
       const values = this.parseMultiNumbers(raw);
       if (!values.length) return;
-      const placeholders = values.map((_, i) => `@${params.length + i}`).join(', ');
+      const placeholders = values
+        .map((_, i) => `@${params.length + i}`)
+        .join(', ');
       where.push(`${col} IN (${placeholders})`);
       params.push(...values);
     };
@@ -548,8 +556,12 @@ export class PromocionesService {
 
     const guiaVals = this.parseMultiTexts(query.guia);
     if (guiaVals.length) {
-      const placeholders = guiaVals.map((_, i) => `@${params.length + i}`).join(', ');
-      where.push(`UPPER(LTRIM(RTRIM(ISNULL(j.GUIA, '')))) IN (${placeholders})`);
+      const placeholders = guiaVals
+        .map((_, i) => `@${params.length + i}`)
+        .join(', ');
+      where.push(
+        `UPPER(LTRIM(RTRIM(ISNULL(j.GUIA, '')))) IN (${placeholders})`,
+      );
       params.push(...guiaVals.map((x) => x.toUpperCase()));
     }
 
@@ -657,7 +669,9 @@ export class PromocionesService {
       this.assertPromoSucTextWithinAllowed(normalized.SUC, allowedSucs);
     }
     const requestedPriority =
-      normalized.PRIORIDAD === undefined ? undefined : this.toNullableInt(normalized.PRIORIDAD);
+      normalized.PRIORIDAD === undefined
+        ? undefined
+        : this.toNullableInt(normalized.PRIORIDAD);
     normalized.PRIORIDAD = undefined;
     this.patchPromoSets(sets, params, normalized);
 
@@ -734,19 +748,33 @@ export class PromocionesService {
         );
       }
       if (hasGratisRel) {
-        await qr.query(`DELETE FROM dbo.PROMO_TICKET_GRATIS_REL WHERE IDDESC = @0`, [idProm]);
+        await qr.query(
+          `DELETE FROM dbo.PROMO_TICKET_GRATIS_REL WHERE IDDESC = @0`,
+          [idProm],
+        );
       }
       if (hasDescApli) {
-        await qr.query(`DELETE FROM dbo.PROMO_TICKET_DESC_APLI WHERE IDDESC = @0`, [idProm]);
+        await qr.query(
+          `DELETE FROM dbo.PROMO_TICKET_DESC_APLI WHERE IDDESC = @0`,
+          [idProm],
+        );
       }
       if (hasConfig) {
-        await qr.query(`DELETE FROM dbo.PROMO_CONFIG WHERE ID_PROM = @0`, [idProm]);
+        await qr.query(`DELETE FROM dbo.PROMO_CONFIG WHERE ID_PROM = @0`, [
+          idProm,
+        ]);
       }
       if (hasCriterio) {
-        await qr.query(`DELETE FROM dbo.PROMO_REGLA_CRITERIO WHERE ID_PROM = @0`, [idProm]);
+        await qr.query(
+          `DELETE FROM dbo.PROMO_REGLA_CRITERIO WHERE ID_PROM = @0`,
+          [idProm],
+        );
       }
       if (hasBeneficio) {
-        await qr.query(`DELETE FROM dbo.PROMO_REGLA_BENEFICIO WHERE ID_PROM = @0`, [idProm]);
+        await qr.query(
+          `DELETE FROM dbo.PROMO_REGLA_BENEFICIO WHERE ID_PROM = @0`,
+          [idProm],
+        );
       }
 
       await qr.query(`DELETE FROM dbo.PROMO_CAB WHERE ID_PROM = @0`, [idProm]);
@@ -779,7 +807,11 @@ export class PromocionesService {
     return this.mapPromoConfigRow(row);
   }
 
-  async saveConfig(idPromRaw: string, dto: SavePromoConfigDto, user: JwtPayload) {
+  async saveConfig(
+    idPromRaw: string,
+    dto: SavePromoConfigDto,
+    user: JwtPayload,
+  ) {
     await this.assertGestionAccess(user);
     await this.ensureConfigTables();
     const userId = (await this.resolveAccessUserIdWithFallback(user)) || null;
@@ -789,8 +821,12 @@ export class PromocionesService {
 
     const tBeneficio = this.normalizeUpper(dto.T_BENEFICIO);
     if (!tBeneficio) throw new BadRequestException('T_BENEFICIO es requerido');
-    const hasArt = (dto.ART_LIST ?? []).some((x) => this.normalizeText(x).length > 0);
-    const hasUpc = (dto.UPC_LIST ?? []).some((x) => this.normalizeText(x).length > 0);
+    const hasArt = (dto.ART_LIST ?? []).some(
+      (x) => this.normalizeText(x).length > 0,
+    );
+    const hasUpc = (dto.UPC_LIST ?? []).some(
+      (x) => this.normalizeText(x).length > 0,
+    );
     if (hasArt && hasUpc) {
       throw new BadRequestException('Selecciona ART o UPC, no ambos');
     }
@@ -809,7 +845,9 @@ export class PromocionesService {
       throw new BadRequestException('CLIENTE requiere una sola sucursal');
     }
     if (cliente != null && sucList.length !== 1) {
-      throw new BadRequestException('CLIENTE solo puede configurarse con una sucursal');
+      throw new BadRequestException(
+        'CLIENTE solo puede configurarse con una sucursal',
+      );
     }
 
     const depaList = this.sanitizeNumberList(dto.DEPA_LIST);
@@ -825,12 +863,16 @@ export class PromocionesService {
     const impDesc = this.toNullableMoney(dto.IMP_DESC);
     const precioGratis = this.toNullableMoney(dto.PRECIO_GRATIS);
     if (tBeneficio === 'PORCENTAJE') {
-      if (prcDesc == null) throw new BadRequestException('PRC_DESC es requerido');
+      if (prcDesc == null)
+        throw new BadRequestException('PRC_DESC es requerido');
     } else if (tBeneficio === 'IMP_FIJO') {
-      if (impDesc == null) throw new BadRequestException('IMP_DESC es requerido');
+      if (impDesc == null)
+        throw new BadRequestException('IMP_DESC es requerido');
     } else if (tBeneficio === 'ART_GRATIS') {
       if (precioGratis == null) {
-        throw new BadRequestException('PRECIO_GRATIS es requerido para ART_GRATIS');
+        throw new BadRequestException(
+          'PRECIO_GRATIS es requerido para ART_GRATIS',
+        );
       }
     }
 
@@ -842,7 +884,9 @@ export class PromocionesService {
         `SELECT TOP 1 ID_CONFIG FROM dbo.PROMO_CONFIG WHERE ID_PROM = @0`,
         [idProm],
       );
-      const idConfig = this.toInt((existingRows?.[0] as Record<string, unknown>)?.ID_CONFIG);
+      const idConfig = this.toInt(
+        (existingRows?.[0] as Record<string, unknown>)?.ID_CONFIG,
+      );
       const payload = [
         idProm,
         tBeneficio,
@@ -940,10 +984,10 @@ export class PromocionesService {
           idProm,
           sucTodas ? '*' : sucList.join(','),
           tBeneficio === 'PORCENTAJE'
-              ? 'PORCENTAJE'
-              : tBeneficio === 'IMP_FIJO'
-                  ? 'IMP_FIJO'
-                  : 'ART_GRATIS',
+            ? 'PORCENTAJE'
+            : tBeneficio === 'IMP_FIJO'
+              ? 'IMP_FIJO'
+              : 'ART_GRATIS',
           prcDesc,
           impDesc,
           userId,
@@ -1078,13 +1122,15 @@ export class PromocionesService {
     };
 
     if (dto.SUC !== undefined) add('SUC', this.normalizeNullableText(dto.SUC));
-    if (dto.CLIENTE !== undefined) add('CLIENTE', this.toNullableNumber(dto.CLIENTE));
+    if (dto.CLIENTE !== undefined)
+      add('CLIENTE', this.toNullableNumber(dto.CLIENTE));
     if (dto.DEPA !== undefined) add('DEPA', this.toNullableNumber(dto.DEPA));
     if (dto.SUBD !== undefined) add('SUBD', this.toNullableNumber(dto.SUBD));
     if (dto.CLAS !== undefined) add('CLAS', this.toNullableNumber(dto.CLAS));
     if (dto.SCLA !== undefined) add('SCLA', this.toNullableNumber(dto.SCLA));
     if (dto.SCLA2 !== undefined) add('SCLA2', this.toNullableNumber(dto.SCLA2));
-    if (dto.GUIA !== undefined) add('GUIA', this.normalizeNullableText(dto.GUIA));
+    if (dto.GUIA !== undefined)
+      add('GUIA', this.normalizeNullableText(dto.GUIA));
     if (dto.ART !== undefined) add('ART', this.normalizeNullableText(dto.ART));
     if (dto.UPC !== undefined) add('UPC', this.normalizeNullableText(dto.UPC));
     if (dto.EST !== undefined) add('EST', Math.trunc(dto.EST));
@@ -1213,14 +1259,22 @@ export class PromocionesService {
       this.assertBeneficioType(t);
       add('T_BENEFICIO', t);
     }
-    if (dto.PRC_DESC !== undefined) add('PRC_DESC', this.toNullableNumber(dto.PRC_DESC));
-    if (dto.IMP_DESC !== undefined) add('IMP_DESC', this.toNullableNumber(dto.IMP_DESC));
-    if (dto.ART_GRATIS !== undefined) add('ART_GRATIS', this.normalizeNullableText(dto.ART_GRATIS));
-    if (dto.UPC_GRATIS !== undefined) add('UPC_GRATIS', this.normalizeNullableText(dto.UPC_GRATIS));
-    if (dto.CANT_GRATIS !== undefined) add('CANT_GRATIS', this.toNullableNumber(dto.CANT_GRATIS));
-    if (dto.PRECIO_GRATIS !== undefined) add('PRECIO_GRATIS', this.toNullableNumber(dto.PRECIO_GRATIS));
-    if (dto.PRIORIDAD !== undefined) add('PRIORIDAD', Math.trunc(dto.PRIORIDAD));
-    if (dto.ACUMULABLE !== undefined) add('ACUMULABLE', Math.trunc(dto.ACUMULABLE));
+    if (dto.PRC_DESC !== undefined)
+      add('PRC_DESC', this.toNullableNumber(dto.PRC_DESC));
+    if (dto.IMP_DESC !== undefined)
+      add('IMP_DESC', this.toNullableNumber(dto.IMP_DESC));
+    if (dto.ART_GRATIS !== undefined)
+      add('ART_GRATIS', this.normalizeNullableText(dto.ART_GRATIS));
+    if (dto.UPC_GRATIS !== undefined)
+      add('UPC_GRATIS', this.normalizeNullableText(dto.UPC_GRATIS));
+    if (dto.CANT_GRATIS !== undefined)
+      add('CANT_GRATIS', this.toNullableNumber(dto.CANT_GRATIS));
+    if (dto.PRECIO_GRATIS !== undefined)
+      add('PRECIO_GRATIS', this.toNullableNumber(dto.PRECIO_GRATIS));
+    if (dto.PRIORIDAD !== undefined)
+      add('PRIORIDAD', Math.trunc(dto.PRIORIDAD));
+    if (dto.ACUMULABLE !== undefined)
+      add('ACUMULABLE', Math.trunc(dto.ACUMULABLE));
     if (dto.EST !== undefined) add('EST', Math.trunc(dto.EST));
 
     if (!sets.length) {
@@ -1283,7 +1337,11 @@ export class PromocionesService {
     };
   }
 
-  async aplicarFolio(idfolRaw: string, dto: ApplyPromocionesDto, user: JwtPayload) {
+  async aplicarFolio(
+    idfolRaw: string,
+    dto: ApplyPromocionesDto,
+    user: JwtPayload,
+  ) {
     const idfol = this.normalizeText(idfolRaw);
     if (!idfol) throw new BadRequestException('IDFOL es requerido');
     await this.ensureTableExists('dbo.PROMO_TICKET_DESC_APLI');
@@ -1383,9 +1441,10 @@ export class PromocionesService {
           `,
           [lineId],
         );
-        const ctdLine = this.toPositiveNumber(
-          (qtyRows?.[0] as Record<string, unknown>)?.CTD,
-        ) ?? 1;
+        const ctdLine =
+          this.toPositiveNumber(
+            (qtyRows?.[0] as Record<string, unknown>)?.CTD,
+          ) ?? 1;
         let acumulado = 0;
         let forcedGratisPrice: number | null = null;
         let forcedGratisTotal: number | null = null;
@@ -1397,9 +1456,7 @@ export class PromocionesService {
           if (a.idProm !== b.idProm) return a.idProm - b.idProm;
           return a.idBeneficio - b.idBeneficio;
         });
-        const anyNoAcumulable = sorted.some(
-          (x) => (x.acumulable ?? 0) !== 1,
-        );
+        const anyNoAcumulable = sorted.some((x) => (x.acumulable ?? 0) !== 1);
         const estimateBenefit = (row: PromoEvalRow) => {
           const tipo = this.normalizeUpper(row.tBeneficio);
           if (tipo === 'ART_GRATIS') {
@@ -1411,7 +1468,9 @@ export class PromocionesService {
             return this.round2(Math.max((pvtatOrig * pct) / 100, 0));
           }
           if (tipo === 'IMP_FIJO') {
-            return this.round2(Math.max(this.toPositiveMoney(row.impDesc) ?? 0, 0));
+            return this.round2(
+              Math.max(this.toPositiveMoney(row.impDesc) ?? 0, 0),
+            );
           }
           return 0;
         };
@@ -1442,7 +1501,8 @@ export class PromocionesService {
           const tipo = this.normalizeUpper(candidate.tBeneficio);
 
           if (tipo === 'ART_GRATIS') {
-            const precioGratis = this.toPositiveMoney(candidate.precioGratis) ?? 0.01;
+            const precioGratis =
+              this.toPositiveMoney(candidate.precioGratis) ?? 0.01;
             forcedGratisPrice = precioGratis;
             forcedGratisTotal = this.round2(ctdLine * precioGratis);
             const descuentoGratis = this.round2(
@@ -1461,9 +1521,15 @@ export class PromocionesService {
                 VALUES (@0, @1, 'PENDIENTE', @2);
                 SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS ID_REL;
                 `,
-                [resolvedIdfol, candidate.idProm, Number(user.sub ?? 0) || null],
+                [
+                  resolvedIdfol,
+                  candidate.idProm,
+                  Number(user.sub ?? 0) || null,
+                ],
               );
-              const idRel = Number((relInsert?.[0] as Record<string, unknown>)?.ID_REL ?? 0);
+              const idRel = Number(
+                (relInsert?.[0] as Record<string, unknown>)?.ID_REL ?? 0,
+              );
               if (idRel > 0) {
                 await qr.query(
                   `
@@ -1497,7 +1563,9 @@ export class PromocionesService {
             const pct = this.toPositiveNumber(candidate.prcDesc) ?? 0;
             descuento = this.round2((pvtatOrig * pct) / 100);
           } else if (tipo === 'IMP_FIJO') {
-            descuento = this.round2(this.toPositiveMoney(candidate.impDesc) ?? 0);
+            descuento = this.round2(
+              this.toPositiveMoney(candidate.impDesc) ?? 0,
+            );
           } else {
             continue;
           }
@@ -1553,7 +1621,11 @@ export class PromocionesService {
             'PVTAT = @2',
             'UPDATED_AT = GETDATE()',
           ];
-          const params: unknown[] = [lineId, forcedGratisPrice, forcedGratisTotal];
+          const params: unknown[] = [
+            lineId,
+            forcedGratisPrice,
+            forcedGratisTotal,
+          ];
           if (hasIdPromoCol) {
             setParts.push(`IDPROMO = @${params.length}`);
             params.push(appliedPromoId);
@@ -1573,7 +1645,11 @@ export class PromocionesService {
         } else {
           const nuevoPvtat = this.round2(Math.max(pvtatOrig - acumulado, 0));
           const nuevoPvta = this.round2(nuevoPvtat / ctdLine);
-          const setParts = ['PVTA = @1', 'PVTAT = @2', 'UPDATED_AT = GETDATE()'];
+          const setParts = [
+            'PVTA = @1',
+            'PVTAT = @2',
+            'UPDATED_AT = GETDATE()',
+          ];
           const params: unknown[] = [lineId, nuevoPvta, nuevoPvtat];
           if (hasIdPromoCol) {
             setParts.push(`IDPROMO = @${params.length}`);
@@ -1743,10 +1819,9 @@ export class PromocionesService {
         `,
         resetParams,
       );
-      await qr.query(
-        `DELETE FROM dbo.PROMO_TICKET_DESC_APLI WHERE ID = @0`,
-        [lineId],
-      );
+      await qr.query(`DELETE FROM dbo.PROMO_TICKET_DESC_APLI WHERE ID = @0`, [
+        lineId,
+      ]);
 
       const candidatesRaw = await qr.query(
         `
@@ -1821,19 +1896,19 @@ export class PromocionesService {
       let gratisPendientes = 0;
       let appliedPromoId: number | null = null;
       let appliedTipoPromo: string | null = null;
-      const orderedCandidates = [...(candidatesRaw as Record<string, unknown>[])].sort(
-        (a, b) => {
-          const pa = this.toInt(a.PRIORIDAD) ?? 100;
-          const pb = this.toInt(b.PRIORIDAD) ?? 100;
-          if (pa !== pb) return pa - pb;
-          const ia = this.toInt(a.ID_PROM) ?? 0;
-          const ib = this.toInt(b.ID_PROM) ?? 0;
-          if (ia !== ib) return ia - ib;
-          const ba = this.toInt(a.ID_BENEFICIO) ?? 0;
-          const bb = this.toInt(b.ID_BENEFICIO) ?? 0;
-          return ba - bb;
-        },
-      );
+      const orderedCandidates = [
+        ...(candidatesRaw as Record<string, unknown>[]),
+      ].sort((a, b) => {
+        const pa = this.toInt(a.PRIORIDAD) ?? 100;
+        const pb = this.toInt(b.PRIORIDAD) ?? 100;
+        if (pa !== pb) return pa - pb;
+        const ia = this.toInt(a.ID_PROM) ?? 0;
+        const ib = this.toInt(b.ID_PROM) ?? 0;
+        if (ia !== ib) return ia - ib;
+        const ba = this.toInt(a.ID_BENEFICIO) ?? 0;
+        const bb = this.toInt(b.ID_BENEFICIO) ?? 0;
+        return ba - bb;
+      });
       const anyNoAcumulable = orderedCandidates.some(
         (x) => (this.toInt(x.ACUMULABLE) ?? 0) !== 1,
       );
@@ -1887,7 +1962,9 @@ export class PromocionesService {
 
         if (tipo === 'ART_GRATIS') {
           const precioGratis = this.toPositiveMoney(raw.PRECIO_GRATIS) ?? 0.01;
-          const descuento = this.round2(Math.max((currentPvta - precioGratis) * qty, 0));
+          const descuento = this.round2(
+            Math.max((currentPvta - precioGratis) * qty, 0),
+          );
           totalDescuento = this.round2(totalDescuento + descuento);
           aplicaciones += 1;
           appliedPromoId = idProm;
@@ -1903,7 +1980,9 @@ export class PromocionesService {
               `,
               [idfol, idProm, Number(user.sub ?? 0) || null],
             );
-            const idRel = Number((relInsert?.[0] as Record<string, unknown>)?.ID_REL ?? 0);
+            const idRel = Number(
+              (relInsert?.[0] as Record<string, unknown>)?.ID_REL ?? 0,
+            );
             if (idRel > 0) {
               await qr.query(
                 `
@@ -2124,7 +2203,9 @@ export class PromocionesService {
       [idCriterio.toString()],
     );
     if (!rows?.length) {
-      throw new NotFoundException(`PROMO_REGLA_CRITERIO ${idCriterio} no existe`);
+      throw new NotFoundException(
+        `PROMO_REGLA_CRITERIO ${idCriterio} no existe`,
+      );
     }
     return this.toInt((rows[0] as Record<string, unknown>).ID_PROM) ?? 0;
   }
@@ -2135,7 +2216,9 @@ export class PromocionesService {
       [idBeneficio.toString()],
     );
     if (!rows?.length) {
-      throw new NotFoundException(`PROMO_REGLA_BENEFICIO ${idBeneficio} no existe`);
+      throw new NotFoundException(
+        `PROMO_REGLA_BENEFICIO ${idBeneficio} no existe`,
+      );
     }
     return this.toInt((rows[0] as Record<string, unknown>).ID_PROM) ?? 0;
   }
@@ -2147,7 +2230,10 @@ export class PromocionesService {
     return { all: false, sucs };
   }
 
-  private assertRequestedSucWithinAllowed(sucRaw: string, allowedSucs: string[]) {
+  private assertRequestedSucWithinAllowed(
+    sucRaw: string,
+    allowedSucs: string[],
+  ) {
     if (!allowedSucs.length) return;
     const suc = this.normalizeUpper(sucRaw);
     if (!suc) return;
@@ -2156,14 +2242,20 @@ export class PromocionesService {
     }
   }
 
-  private assertRequestedSucsWithinAllowed(sucList: string[], allowedSucs: string[]) {
+  private assertRequestedSucsWithinAllowed(
+    sucList: string[],
+    allowedSucs: string[],
+  ) {
     if (!allowedSucs.length) return;
     for (const suc of sucList) {
       this.assertRequestedSucWithinAllowed(suc, allowedSucs);
     }
   }
 
-  private assertPromoSucTextWithinAllowed(sucRaw: unknown, allowedSucs: string[]) {
+  private assertPromoSucTextWithinAllowed(
+    sucRaw: unknown,
+    allowedSucs: string[],
+  ) {
     if (!allowedSucs.length) return;
     const parsed = this.parsePromoSucText(sucRaw);
     if (parsed.all) {
@@ -2182,8 +2274,9 @@ export class PromocionesService {
       throw new ForbiddenException('Usuario inválido para resolver sucursales');
     }
 
-    const safeCodes = PromocionesService.PROMO_GESTION_MODULE_CODES
-      .map((code) => code.replace(/'/g, "''"))
+    const safeCodes = PromocionesService.PROMO_GESTION_MODULE_CODES.map(
+      (code) => code.replace(/'/g, "''"),
+    )
       .map((code) => `'${code}'`)
       .join(', ');
 
@@ -2212,7 +2305,10 @@ export class PromocionesService {
     );
   }
 
-  private async assertPromoScopeAccess(idProm: number, user?: JwtPayload | null) {
+  private async assertPromoScopeAccess(
+    idProm: number,
+    user?: JwtPayload | null,
+  ) {
     const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
     if (!allowedSucs.length) return;
     const userId = await this.resolveAccessUserIdWithFallback(user);
@@ -2231,7 +2327,9 @@ export class PromocionesService {
 
     const promoSucs = this.parsePromoSucText(row.SUC);
     if (promoSucs.all) {
-      throw new ForbiddenException('Sin acceso para gestionar promoción global');
+      throw new ForbiddenException(
+        'Sin acceso para gestionar promoción global',
+      );
     }
 
     const intersects = promoSucs.sucs.some((suc) => allowedSucs.includes(suc));
@@ -2381,7 +2479,11 @@ export class PromocionesService {
     return this.toInt((rows?.[0] as Record<string, unknown>)?.MAX_PRIO) ?? 0;
   }
 
-  private async reorderPromoPriority(idProm: number, targetPriorityRaw: number, modPor: number | null) {
+  private async reorderPromoPriority(
+    idProm: number,
+    targetPriorityRaw: number,
+    modPor: number | null,
+  ) {
     const targetPriority = Math.max(1, Math.trunc(targetPriorityRaw));
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -2395,7 +2497,8 @@ export class PromocionesService {
         `,
         [idProm],
       );
-      const current = this.toInt((currRows?.[0] as Record<string, unknown>)?.PRIORIDAD) ?? 1;
+      const current =
+        this.toInt((currRows?.[0] as Record<string, unknown>)?.PRIORIDAD) ?? 1;
       if (current !== targetPriority) {
         if (targetPriority < current) {
           await qr.query(
@@ -2460,10 +2563,16 @@ export class PromocionesService {
       upcList: string[];
     },
   ) {
-    await qr.query(`DELETE FROM dbo.PROMO_REGLA_CRITERIO WHERE ID_PROM = @0`, [idProm]);
-    await qr.query(`DELETE FROM dbo.PROMO_REGLA_BENEFICIO WHERE ID_PROM = @0`, [idProm]);
+    await qr.query(`DELETE FROM dbo.PROMO_REGLA_CRITERIO WHERE ID_PROM = @0`, [
+      idProm,
+    ]);
+    await qr.query(`DELETE FROM dbo.PROMO_REGLA_BENEFICIO WHERE ID_PROM = @0`, [
+      idProm,
+    ]);
 
-    const sucs = config.sucTodas ? [null] : config.sucList.map((s) => s.toUpperCase());
+    const sucs = config.sucTodas
+      ? [null]
+      : config.sucList.map((s) => s.toUpperCase());
     const depas = config.depaList.length ? config.depaList : [null];
     const subds = config.subdList.length ? config.subdList : [null];
     const clases = config.clasList.length ? config.clasList : [null];
@@ -2492,36 +2601,37 @@ export class PromocionesService {
         }
       }
     } else {
-    for (const suc of sucs) {
-      for (const depa of depas) {
-        for (const subd of subds) {
-          for (const clas of clases) {
-            for (const scla of sclas) {
-              for (const scla2 of scla2s) {
-                for (const guia of guias) {
-                  for (const art of arts) {
-                    for (const upc of upcs) {
-                      await qr.query(
-                        `
+      for (const suc of sucs) {
+        for (const depa of depas) {
+          for (const subd of subds) {
+            for (const clas of clases) {
+              for (const scla of sclas) {
+                for (const scla2 of scla2s) {
+                  for (const guia of guias) {
+                    for (const art of arts) {
+                      for (const upc of upcs) {
+                        await qr.query(
+                          `
                         INSERT INTO dbo.PROMO_REGLA_CRITERIO (
                           ID_PROM, SUC, CLIENTE, DEPA, SUBD, CLAS, SCLA, SCLA2, GUIA, ART, UPC, EST
                         )
                         VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, 1)
                         `,
-                        [
-                          idProm,
-                          suc,
-                          config.cliente,
-                          depa,
-                          subd,
-                          clas,
-                          scla,
-                          scla2,
-                          guia,
-                          art,
-                          upc,
-                        ],
-                      );
+                          [
+                            idProm,
+                            suc,
+                            config.cliente,
+                            depa,
+                            subd,
+                            clas,
+                            scla,
+                            scla2,
+                            guia,
+                            art,
+                            upc,
+                          ],
+                        );
+                      }
                     }
                   }
                 }
@@ -2530,7 +2640,6 @@ export class PromocionesService {
           }
         }
       }
-    }
     }
 
     await qr.query(
@@ -2568,7 +2677,10 @@ export class PromocionesService {
     return raw.length > 255 ? raw.slice(0, 255) : raw;
   }
 
-  private async resolveFolioClient(qr: { query: (sql: string, params?: unknown[]) => Promise<unknown[]> }, idfol: string) {
+  private async resolveFolioClient(
+    qr: { query: (sql: string, params?: unknown[]) => Promise<unknown[]> },
+    idfol: string,
+  ) {
     const rows = await qr.query(
       `
       SELECT TOP 1 TRY_CONVERT(INT, CLIEN) AS CLIENTE
@@ -2706,38 +2818,69 @@ export class PromocionesService {
 
   private normalizePromoPayload(dto: Partial<CreatePromocionDto>) {
     return {
-      SUC: dto.SUC === undefined ? undefined : this.normalizeNullableText(dto.SUC),
+      SUC:
+        dto.SUC === undefined ? undefined : this.normalizeNullableText(dto.SUC),
       T_PROM:
-        dto.T_PROM === undefined ? undefined : this.normalizeNullableText(dto.T_PROM),
+        dto.T_PROM === undefined
+          ? undefined
+          : this.normalizeNullableText(dto.T_PROM),
       TIPO_DESC:
         dto.TIPO_DESC === undefined
           ? undefined
           : this.normalizeNullableText(dto.TIPO_DESC),
-      FCN_INI: dto.FCN_INI === undefined ? undefined : this.normalizeNullableText(dto.FCN_INI),
-      FCN_TER: dto.FCN_TER === undefined ? undefined : this.normalizeNullableText(dto.FCN_TER),
+      FCN_INI:
+        dto.FCN_INI === undefined
+          ? undefined
+          : this.normalizeNullableText(dto.FCN_INI),
+      FCN_TER:
+        dto.FCN_TER === undefined
+          ? undefined
+          : this.normalizeNullableText(dto.FCN_TER),
       DESC_PROMO:
         dto.DESC_PROMO === undefined
           ? undefined
           : this.normalizeNullableText(dto.DESC_PROMO),
-      IMP_COM: dto.IMP_COM === undefined ? undefined : this.toNullableMoney(dto.IMP_COM),
-      IMP_DESC: dto.IMP_DESC === undefined ? undefined : this.toNullableMoney(dto.IMP_DESC),
-      PRC_DESC: dto.PRC_DESC === undefined ? undefined : this.toNullableNumber(dto.PRC_DESC),
+      IMP_COM:
+        dto.IMP_COM === undefined
+          ? undefined
+          : this.toNullableMoney(dto.IMP_COM),
+      IMP_DESC:
+        dto.IMP_DESC === undefined
+          ? undefined
+          : this.toNullableMoney(dto.IMP_DESC),
+      PRC_DESC:
+        dto.PRC_DESC === undefined
+          ? undefined
+          : this.toNullableNumber(dto.PRC_DESC),
       ALCANCE:
-        dto.ALCANCE === undefined ? undefined : this.normalizeNullableText(dto.ALCANCE),
+        dto.ALCANCE === undefined
+          ? undefined
+          : this.normalizeNullableText(dto.ALCANCE),
       DETALLE_PROMO:
         dto.DETALLE_PROMO === undefined
           ? undefined
           : this.normalizeNullableText(dto.DETALLE_PROMO),
       EST: dto.EST === undefined ? undefined : this.toNullableInt(dto.EST),
       REG_CLIENTE:
-        dto.REG_CLIENTE === undefined ? undefined : this.toNullableInt(dto.REG_CLIENTE),
+        dto.REG_CLIENTE === undefined
+          ? undefined
+          : this.toNullableInt(dto.REG_CLIENTE),
       ACUMULABLE:
-        dto.ACUMULABLE === undefined ? undefined : this.toNullableInt(dto.ACUMULABLE),
+        dto.ACUMULABLE === undefined
+          ? undefined
+          : this.toNullableInt(dto.ACUMULABLE),
       COMBINABLE:
-        dto.COMBINABLE === undefined ? undefined : this.toNullableInt(dto.COMBINABLE),
-      F_PGO: dto.F_PGO === undefined ? undefined : this.normalizeNullableText(dto.F_PGO),
+        dto.COMBINABLE === undefined
+          ? undefined
+          : this.toNullableInt(dto.COMBINABLE),
+      F_PGO:
+        dto.F_PGO === undefined
+          ? undefined
+          : this.normalizeNullableText(dto.F_PGO),
       PRIORIDAD:
-        dto.PRIORIDAD === undefined ? undefined : this.toNullableInt(dto.PRIORIDAD),
+        dto.PRIORIDAD === undefined
+          ? undefined
+          : this.toNullableInt(dto.PRIORIDAD),
       MAX_APLI_FOLIO:
         dto.MAX_APLI_FOLIO === undefined
           ? undefined
@@ -2828,7 +2971,9 @@ export class PromocionesService {
       `,
       [idfolInput],
     );
-    const idfol = this.normalizeText((rows?.[0] as Record<string, unknown>)?.IDFOL);
+    const idfol = this.normalizeText(
+      (rows?.[0] as Record<string, unknown>)?.IDFOL,
+    );
     if (!idfol) {
       throw new NotFoundException(`No existe folio ${idfolInput}`);
     }
@@ -2840,7 +2985,9 @@ export class PromocionesService {
 
     const userId = await this.resolveAccessUserIdWithFallback(user);
     if (!Number.isFinite(userId) || userId <= 0) {
-      throw new ForbiddenException('Usuario inválido para gestionar promociones');
+      throw new ForbiddenException(
+        'Usuario inválido para gestionar promociones',
+      );
     }
 
     const rows = await this.dataSource.query(
@@ -2853,7 +3000,9 @@ export class PromocionesService {
       `,
       [userId],
     );
-    const roleCode = this.normalizeUpper((rows?.[0] as Record<string, unknown>)?.ROLE_CODE);
+    const roleCode = this.normalizeUpper(
+      (rows?.[0] as Record<string, unknown>)?.ROLE_CODE,
+    );
     if (!PromocionesService.GESTION_ROLE_CODES.has(roleCode)) {
       throw new ForbiddenException(
         'Solo admin, jefe operaciones y supervisor pueden gestionar promociones',
@@ -2949,7 +3098,9 @@ export class PromocionesService {
       `,
       [userId],
     );
-    return this.normalizeUpper((rows?.[0] as Record<string, unknown>)?.USERNAME);
+    return this.normalizeUpper(
+      (rows?.[0] as Record<string, unknown>)?.USERNAME,
+    );
   }
 
   private normalizeUpper(value: unknown) {

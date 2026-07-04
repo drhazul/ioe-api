@@ -77,6 +77,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Punto de venta: `docs/modules/punto_venta/README.md` (instrucciones: `docs/modules/punto_venta/AGENTS.md`)
 - Ordenes de trabajo: `docs/modules/ordenes_trabajo/README.md` (instrucciones: `docs/modules/ordenes_trabajo/AGENTS.md`)
 - Reloj checador: `docs/modules/reloj_checador/README.md` (instrucciones: `docs/modules/reloj_checador/AGENTS.md`)
+- Inventarios: `docs/modules/inventarios/README.md` (instrucciones: `docs/modules/inventarios/AGENTS.md`)
 
 ## Tecnologias
 - NestJS, TypeORM (MSSQL), RxJS.

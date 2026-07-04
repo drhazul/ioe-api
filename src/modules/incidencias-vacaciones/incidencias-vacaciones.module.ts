@@ -1,8 +1,4 @@
-import {
-  MiddlewareConsumer,
-  Module,
-  NestModule,
-} from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AttPermisoTipoEntity } from './att-permiso-tipo.entity';
 import { AttSolicitudEntity } from './att-solicitud.entity';
@@ -25,8 +21,8 @@ import { IncidenciasVacacionesService } from './incidencias-vacaciones.service';
 })
 export class IncidenciasVacacionesModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(IncidenciasPayloadDebugMiddleware).forRoutes(
-      IncidenciasVacacionesController,
-    );
+    consumer
+      .apply(IncidenciasPayloadDebugMiddleware)
+      .forRoutes(IncidenciasVacacionesController);
   }
 }

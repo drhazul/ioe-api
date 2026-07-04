@@ -9,7 +9,12 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { DataSource, In, Repository } from 'typeorm';
@@ -82,7 +87,9 @@ export class ColaboradoresService {
     process.env.QR_SECRET_KEY ?? 'IOE_APP_QR_SECRET'
   ).trim();
   private readonly nom035Secret = (
-    process.env.NOM035_SECRET_KEY ?? process.env.QR_SECRET_KEY ?? 'IOE_NOM035_SECRET'
+    process.env.NOM035_SECRET_KEY ??
+    process.env.QR_SECRET_KEY ??
+    'IOE_NOM035_SECRET'
   ).trim();
 
   constructor(
@@ -116,18 +123,24 @@ export class ColaboradoresService {
         .leftJoinAndSelect('c.horario', 'horario')
         .orderBy('c.id', 'ASC');
 
-      if (filters?.sucursal_id != null && Number.isFinite(filters.sucursal_id)) {
+      if (
+        filters?.sucursal_id != null &&
+        Number.isFinite(filters.sucursal_id)
+      ) {
         qb.andWhere('c.sucursalId = :sucId', { sucId: filters.sucursal_id });
       }
 
       if ((filters?.departamento ?? '').trim().length > 0) {
-        qb.andWhere('UPPER(LTRIM(RTRIM(ISNULL(c.departamento, \'\')))) = :depto', {
-          depto: filters!.departamento!.trim().toUpperCase(),
-        });
+        qb.andWhere(
+          "UPPER(LTRIM(RTRIM(ISNULL(c.departamento, '')))) = :depto",
+          {
+            depto: filters!.departamento!.trim().toUpperCase(),
+          },
+        );
       }
 
       if ((filters?.cargo ?? '').trim().length > 0) {
-        qb.andWhere('UPPER(LTRIM(RTRIM(ISNULL(c.cargo, \'\')))) = :cargo', {
+        qb.andWhere("UPPER(LTRIM(RTRIM(ISNULL(c.cargo, '')))) = :cargo", {
           cargo: filters!.cargo!.trim().toUpperCase(),
         });
       }
@@ -168,9 +181,7 @@ export class ColaboradoresService {
         const idEmpleado = this.resolveIdEmpleadoForRow(row);
         const hasPin = (row.pin ?? '').trim().length > 0;
         const qrToken = hasPin
-          ? this.encodeQrPayload(
-              this.buildQrPayload(idEmpleado, fullName),
-            )
+          ? this.encodeQrPayload(this.buildQrPayload(idEmpleado, fullName))
           : null;
 
         return {
@@ -231,27 +242,30 @@ export class ColaboradoresService {
       WHERE ISNULL(departamento, '') <> ''
       ORDER BY departamento ASC
     `);
-    return ((rows as Record<string, unknown>[]) ?? []).map(
-      (r) => String(r.departamento ?? r.DEPARTAMENTO ?? '').trim(),
-    ).filter(Boolean);
+    return ((rows as Record<string, unknown>[]) ?? [])
+      .map((r) => String(r.departamento ?? r.DEPARTAMENTO ?? '').trim())
+      .filter(Boolean);
   }
 
   async listDistinctCargos(departamento?: string | null): Promise<string[]> {
     const params: unknown[] = [];
     let deptFilter = '';
     if ((departamento ?? '').trim().length > 0) {
-      deptFilter = ' AND UPPER(LTRIM(RTRIM(ISNULL(departamento, \'\')))) = @0';
+      deptFilter = " AND UPPER(LTRIM(RTRIM(ISNULL(departamento, '')))) = @0";
       params.push(departamento!.trim().toUpperCase());
     }
-    const rows = await this.dataSource.query(`
+    const rows = await this.dataSource.query(
+      `
       SELECT DISTINCT LTRIM(RTRIM(cargo)) AS cargo
       FROM dbo.COLABORADORES
       WHERE ISNULL(cargo, '') <> ''${deptFilter}
       ORDER BY cargo ASC
-    `, params);
-    return ((rows as Record<string, unknown>[]) ?? []).map(
-      (r) => String(r.cargo ?? r.CARGO ?? '').trim(),
-    ).filter(Boolean);
+    `,
+      params,
+    );
+    return ((rows as Record<string, unknown>[]) ?? [])
+      .map((r) => String(r.cargo ?? r.CARGO ?? '').trim())
+      .filter(Boolean);
   }
 
   async getTerminalProfile(
@@ -309,7 +323,9 @@ export class ColaboradoresService {
     }
 
     const colabId = Number(colaborador.id ?? 0);
-    const statusMap = await this.loadTemplateStatusMap(colabId > 0 ? [colabId] : []);
+    const statusMap = await this.loadTemplateStatusMap(
+      colabId > 0 ? [colabId] : [],
+    );
     const status = statusMap.get(colabId) ?? {
       hasHuella: false,
       hasRostro: false,
@@ -323,7 +339,9 @@ export class ColaboradoresService {
     );
     const idEmpleado = this.resolveIdEmpleadoForRow(colaborador);
     const hasPin = (colaborador.pin ?? '').trim().length > 0;
-    const qrToken = this.encodeQrPayload(this.buildQrPayload(idEmpleado, fullName));
+    const qrToken = this.encodeQrPayload(
+      this.buildQrPayload(idEmpleado, fullName),
+    );
     const preferredAuthMethod = status.hasRostro
       ? 'FACE'
       : status.hasHuella
@@ -422,7 +440,9 @@ export class ColaboradoresService {
     }
 
     const colabId = Number(loaded.id ?? 0);
-    const statusMap = await this.loadTemplateStatusMap(colabId > 0 ? [colabId] : []);
+    const statusMap = await this.loadTemplateStatusMap(
+      colabId > 0 ? [colabId] : [],
+    );
     const status = statusMap.get(colabId) ?? {
       hasHuella: false,
       hasRostro: false,
@@ -512,7 +532,11 @@ export class ColaboradoresService {
 
       for (const row of (rows as Record<string, unknown>[]) ?? []) {
         const horarioId = Number(row.horario_id ?? row.HORARIO_ID ?? 0);
-        if (!Number.isFinite(horarioId) || horarioId <= 0 || used.has(horarioId)) {
+        if (
+          !Number.isFinite(horarioId) ||
+          horarioId <= 0 ||
+          used.has(horarioId)
+        ) {
           continue;
         }
 
@@ -535,7 +559,8 @@ export class ColaboradoresService {
     return {
       colaborador_id: colaborador.id,
       id_empleado: this.resolveIdEmpleadoForRow(colaborador),
-      nombre: `${colaborador.nombre ?? ''} ${colaborador.apellido ?? ''}`.trim(),
+      nombre:
+        `${colaborador.nombre ?? ''} ${colaborador.apellido ?? ''}`.trim(),
       total_horarios: assignments.length,
       asignaciones: assignments,
     };
@@ -556,16 +581,25 @@ export class ColaboradoresService {
       const pinMasked = incomingPinRaw === '••••';
       const plainPin = pinMasked ? null : this.normalizePin(incomingPinRaw);
       const idEmpleado = this.normalizeEmpleadoId(dto.id_empleado);
-      const nombre = this.fitVarchar(this.normalizeHumanText(dto.nombre, 100), 100);
+      const nombre = this.fitVarchar(
+        this.normalizeHumanText(dto.nombre, 100),
+        100,
+      );
       const apellido = this.fitVarchar(
         this.normalizeHumanText(dto.apellido, 100),
         100,
       );
       const apellidoPaterno = dto.apellido_paterno
-        ? this.fitVarchar(this.normalizeHumanText(dto.apellido_paterno, 100), 100)
+        ? this.fitVarchar(
+            this.normalizeHumanText(dto.apellido_paterno, 100),
+            100,
+          )
         : null;
       const apellidoMaterno = dto.apellido_materno
-        ? this.fitVarchar(this.normalizeHumanText(dto.apellido_materno, 100), 100)
+        ? this.fitVarchar(
+            this.normalizeHumanText(dto.apellido_materno, 100),
+            100,
+          )
         : null;
       const departamento = this.fitVarchar(
         this.normalizeHumanTextOrNull(dto.departamento, 100),
@@ -579,7 +613,9 @@ export class ColaboradoresService {
       const curp = this.normalizeUpperTextOrNull(dto.curp, 18);
       const nss = this.normalizeDigitsOrNull(dto.nss, 11);
       const jornadaTipo = this.normalizeJornadaTipo(dto.jornada_tipo);
-      const estatusContrato = this.normalizeEstatusContrato(dto.estatus_contrato);
+      const estatusContrato = this.normalizeEstatusContrato(
+        dto.estatus_contrato,
+      );
 
       await this.ensureSucursalExists(sucursalId);
       await this.ensureHorarioExists(horarioId);
@@ -677,7 +713,10 @@ export class ColaboradoresService {
 
       await this.saveLinkedSucursales(saved.id ?? 0, linkedIds);
 
-      const linkedSucursales = this.mapSucursalesFromIds(linkedIds, sucursalesMap);
+      const linkedSucursales = this.mapSucursalesFromIds(
+        linkedIds,
+        sucursalesMap,
+      );
       let sync: SyncSummary = {
         queued: 0,
         sucursales: linkedSucursales.length,
@@ -766,8 +805,13 @@ export class ColaboradoresService {
     try {
       const previousEstado = current.estado ?? true;
 
-      const pinPatchRaw = dto.pin !== undefined ? String(dto.pin).trim() : undefined;
-      if (pinPatchRaw !== undefined && pinPatchRaw.length > 0 && pinPatchRaw !== '••••') {
+      const pinPatchRaw =
+        dto.pin !== undefined ? String(dto.pin).trim() : undefined;
+      if (
+        pinPatchRaw !== undefined &&
+        pinPatchRaw.length > 0 &&
+        pinPatchRaw !== '••••'
+      ) {
         const pin = this.normalizePin(pinPatchRaw);
         const sameAsCurrent = await this.verifyPin(pin, current.pin ?? '');
         if (!sameAsCurrent) {
@@ -876,7 +920,9 @@ export class ColaboradoresService {
       }
 
       if (dto.estatus_contrato !== undefined) {
-        current.estatusContrato = this.normalizeEstatusContrato(dto.estatus_contrato);
+        current.estatusContrato = this.normalizeEstatusContrato(
+          dto.estatus_contrato,
+        );
       }
 
       if (dto.documentacion_completa !== undefined) {
@@ -884,7 +930,8 @@ export class ColaboradoresService {
       }
 
       const currentLinkedIds =
-        dto.sucursales_ids ?? (await this.getLinkedSucursalIds(current.id ?? 0));
+        dto.sucursales_ids ??
+        (await this.getLinkedSucursalIds(current.id ?? 0));
       const linkedCandidateIds = this.normalizeLinkedSucursales(
         current.sucursalId,
         currentLinkedIds,
@@ -893,7 +940,9 @@ export class ColaboradoresService {
 
       const saved = await this.colaboradoresRepo.save(current);
       const currentPin =
-        pinPatchRaw !== undefined && pinPatchRaw.length > 0 && pinPatchRaw !== '••••'
+        pinPatchRaw !== undefined &&
+        pinPatchRaw.length > 0 &&
+        pinPatchRaw !== '••••'
           ? this.normalizePin(pinPatchRaw)
           : null;
       await this.syncUsuarioIdentity(
@@ -961,7 +1010,11 @@ export class ColaboradoresService {
     }
   }
 
-  async requestEnroll(id: number, dto: EnrollColaboradorDto, ctx: RequestContext) {
+  async requestEnroll(
+    id: number,
+    dto: EnrollColaboradorDto,
+    ctx: RequestContext,
+  ) {
     const colaborador = await this.colaboradoresRepo.findOne({
       where: { id },
       relations: { sucursal: true },
@@ -976,7 +1029,10 @@ export class ColaboradoresService {
     );
     await this.ensureSucursalesExist(linkedIds);
     const sucursalesMap = await this.resolveSucursalesByIds(linkedIds);
-    const linkedSucursales = this.mapSucursalesFromIds(linkedIds, sucursalesMap);
+    const linkedSucursales = this.mapSucursalesFromIds(
+      linkedIds,
+      sucursalesMap,
+    );
 
     const tipo = this.normalizeEnrollType(dto.tipo);
     const commandBase = tipo === 'FACE' ? 'ENROLL_FACE' : 'ENROLL_FP';
@@ -1038,7 +1094,9 @@ export class ColaboradoresService {
     if (dto.id_empleado !== undefined) {
       const requestedIdEmpleado = this.normalizeEmpleadoId(dto.id_empleado);
       if (requestedIdEmpleado !== idEmpleado) {
-        throw new BadRequestException('ID_EMPLEADO inválido para mantenimiento');
+        throw new BadRequestException(
+          'ID_EMPLEADO inválido para mantenimiento',
+        );
       }
     }
 
@@ -1060,7 +1118,10 @@ export class ColaboradoresService {
         throw new BadRequestException('new_pin requerido para acción de NIP');
       }
       const normalizedPin = this.normalizePin(pinCandidate);
-      const sameAsCurrent = await this.verifyPin(normalizedPin, colaborador.pin ?? '');
+      const sameAsCurrent = await this.verifyPin(
+        normalizedPin,
+        colaborador.pin ?? '',
+      );
       if (!sameAsCurrent) {
         await this.assertPinUnique(normalizedPin, colaborador.id);
       }
@@ -1071,7 +1132,8 @@ export class ColaboradoresService {
     const forceDisableFace = dto.has_face === false;
     const forceDisableFingerprint = dto.has_fingerprint === false;
     const resetFace = faceAction === 'CAMBIAR' || forceDisableFace;
-    const resetFingerprint = fingerprintAction === 'CAMBIAR' || forceDisableFingerprint;
+    const resetFingerprint =
+      fingerprintAction === 'CAMBIAR' || forceDisableFingerprint;
 
     if (resetFace || resetFingerprint) {
       const resetDto: ResetBiometriaDto = {
@@ -1093,7 +1155,11 @@ export class ColaboradoresService {
     }
     if (fingerprintAction === 'REGISTRAR' || fingerprintAction === 'CAMBIAR') {
       enrollSummary.push(
-        await this.requestEnroll(id, { tipo: 'FP' } as EnrollColaboradorDto, ctx),
+        await this.requestEnroll(
+          id,
+          { tipo: 'FP' } as EnrollColaboradorDto,
+          ctx,
+        ),
       );
     }
 
@@ -1174,7 +1240,9 @@ export class ColaboradoresService {
             [id, username, mail],
           );
 
-          await manager.delete(ColaboradorSucursalEntity, { colaboradorId: id });
+          await manager.delete(ColaboradorSucursalEntity, {
+            colaboradorId: id,
+          });
           await manager.delete(ColaboradorEntity, { id });
         });
       } catch (error) {
@@ -1237,7 +1305,11 @@ export class ColaboradoresService {
     };
   }
 
-  async resetBiometria(id: number, dto: ResetBiometriaDto, ctx: RequestContext) {
+  async resetBiometria(
+    id: number,
+    dto: ResetBiometriaDto,
+    ctx: RequestContext,
+  ) {
     const colaborador = await this.colaboradoresRepo.findOne({ where: { id } });
     if (!colaborador) {
       throw new NotFoundException(`Colaborador ${id} no existe`);
@@ -1309,10 +1381,14 @@ export class ColaboradoresService {
 
     const colaborador = await this.findColaboradorByDeviceIdentifier(pin, true);
     if (!colaborador) {
-      throw new NotFoundException(`Identificador ${pin} no existe en COLABORADORES`);
+      throw new NotFoundException(
+        `Identificador ${pin} no existe en COLABORADORES`,
+      );
     }
     if (!(await this.bioTemplatesTableExists())) {
-      throw new BadRequestException('BIO_TEMPLATES no existe. Ejecuta script 121.');
+      throw new BadRequestException(
+        'BIO_TEMPLATES no existe. Ejecuta script 121.',
+      );
     }
 
     await this.dataSource.query(
@@ -1427,18 +1503,19 @@ export class ColaboradoresService {
       180,
     );
     if (fullName.toUpperCase() !== payload.nombre.toUpperCase()) {
-      throw new BadRequestException('Credencial QR inválida (nombre no coincide)');
+      throw new BadRequestException(
+        'Credencial QR inválida (nombre no coincide)',
+      );
     }
 
     const suc = colaborador.sucursal;
-    const gpsOverride = await this.incidenciasVacacionesService.hasGpsBypassForDate(
-      colaborador.id ?? 0,
-      this.toDateIso(new Date()),
-    );
+    const gpsOverride =
+      await this.incidenciasVacacionesService.hasGpsBypassForDate(
+        colaborador.id ?? 0,
+        this.toDateIso(new Date()),
+      );
     const geofenceEnabled =
-      !gpsOverride &&
-      suc?.latitud != null &&
-      suc.longitud != null;
+      !gpsOverride && suc?.latitud != null && suc.longitud != null;
 
     await this.logAuditEvent({
       adminId: ctx.actorId,
@@ -1496,9 +1573,8 @@ export class ColaboradoresService {
     if (!Number.isFinite(colaboradorId) || colaboradorId <= 0) {
       throw new BadRequestException('Colaborador inválido');
     }
-    const pinAsText = await this.resolveMarcajePinStringByColaboradorId(
-      colaboradorId,
-    );
+    const pinAsText =
+      await this.resolveMarcajePinStringByColaboradorId(colaboradorId);
 
     const tipo = this.normalizeTipo(input.tipo);
     const lat = Number(input.lat);
@@ -1516,10 +1592,11 @@ export class ColaboradoresService {
       this.normalizeUpperNullable(login.colaborador.sucursal_codigo) ?? '';
 
     const geo = login.geofence;
-    const gpsOverride = await this.incidenciasVacacionesService.hasGpsBypassForDate(
-      colaboradorId,
-      this.toDateIso(new Date()),
-    );
+    const gpsOverride =
+      await this.incidenciasVacacionesService.hasGpsBypassForDate(
+        colaboradorId,
+        this.toDateIso(new Date()),
+      );
     let withinGeofence = true;
     let distanceM: number | null = null;
     let pendingReview = false;
@@ -1877,7 +1954,10 @@ export class ColaboradoresService {
       };
     }
 
-    const limit = Math.min(200, Math.max(1, Math.trunc(Number(limitRaw) || 30)));
+    const limit = Math.min(
+      200,
+      Math.max(1, Math.trunc(Number(limitRaw) || 30)),
+    );
     const rows = await this.dataSource.query(
       `
       SELECT TOP (${limit})
@@ -2127,7 +2207,10 @@ export class ColaboradoresService {
         await this.getLinkedSucursalIds(colaborador.id ?? 0),
       );
       const sucursalesMap = await this.resolveSucursalesByIds(linkedIds);
-      const linkedSucursales = this.mapSucursalesFromIds(linkedIds, sucursalesMap);
+      const linkedSucursales = this.mapSucursalesFromIds(
+        linkedIds,
+        sucursalesMap,
+      );
 
       const sync = await this.enqueueDeleteUserCommands(
         colaborador,
@@ -2153,7 +2236,10 @@ export class ColaboradoresService {
     }
   }
 
-  private async saveLinkedSucursales(colaboradorId: number, sucursalIds: number[]) {
+  private async saveLinkedSucursales(
+    colaboradorId: number,
+    sucursalIds: number[],
+  ) {
     if (!Number.isFinite(colaboradorId) || colaboradorId <= 0) return;
     if (!(await this.colaboradorSucursalesTableExists())) return;
 
@@ -2173,8 +2259,12 @@ export class ColaboradoresService {
     if (!Number.isFinite(colaboradorId) || colaboradorId <= 0) return [];
     if (!(await this.colaboradorSucursalesTableExists())) return [];
 
-    const rows = await this.colabSucursalRepo.find({ where: { colaboradorId } });
-    return [...new Set(rows.map((r) => Number(r.sucursalId)).filter((v) => v > 0))];
+    const rows = await this.colabSucursalRepo.find({
+      where: { colaboradorId },
+    });
+    return [
+      ...new Set(rows.map((r) => Number(r.sucursalId)).filter((v) => v > 0)),
+    ];
   }
 
   private async loadLinkedSucursalesMap(colaboradorIds: number[]) {
@@ -2213,7 +2303,7 @@ export class ColaboradoresService {
   ) {
     const ids = [
       Number(primarySucursalId ?? 0),
-      ...((extraSucursalIds ?? []).map((value) => Number(value))),
+      ...(extraSucursalIds ?? []).map((value) => Number(value)),
     ]
       .filter((value) => Number.isFinite(value) && value > 0)
       .map((value) => Math.trunc(value));
@@ -2225,7 +2315,9 @@ export class ColaboradoresService {
     const uniqueIds = [...new Set(ids.filter((id) => id > 0))];
     if (!uniqueIds.length) return new Map<number, SucursalEntity>();
 
-    const rows = await this.sucursalesRepo.find({ where: { id: In(uniqueIds) } });
+    const rows = await this.sucursalesRepo.find({
+      where: { id: In(uniqueIds) },
+    });
     const map = new Map<number, SucursalEntity>();
     for (const row of rows) {
       if (row.id != null) map.set(row.id, row);
@@ -2328,7 +2420,10 @@ export class ColaboradoresService {
     return [...set];
   }
 
-  private async enqueueDeviceCommand(input: { sucCode: string; command: string }) {
+  private async enqueueDeviceCommand(input: {
+    sucCode: string;
+    command: string;
+  }) {
     const tableReady = await this.comandosTableExists();
     if (!tableReady) {
       return {
@@ -2383,7 +2478,8 @@ export class ColaboradoresService {
       120,
     );
     const privilegio =
-      colaborador.esAdminDispositivo || Number(colaborador.privilegio ?? 0) === 14
+      colaborador.esAdminDispositivo ||
+      Number(colaborador.privilegio ?? 0) === 14
         ? 14
         : 0;
     const estado = colaborador.estado ? 1 : 0;
@@ -2398,7 +2494,11 @@ export class ColaboradoresService {
     );
   }
 
-  private buildDeleteUserCommand(idEmpleado: string, sucCode: string, motivo: string) {
+  private buildDeleteUserCommand(
+    idEmpleado: string,
+    sucCode: string,
+    motivo: string,
+  ) {
     const reason = this.normalizeUpperNullable(motivo) ?? 'N/A';
     return `DELETE USER|PIN=${idEmpleado}|SUC=${sucCode}|MOTIVO=${reason}`;
   }
@@ -2492,14 +2592,14 @@ export class ColaboradoresService {
 
     const tipos = new Set(
       ((rows as Record<string, unknown>[]) ?? [])
-        .map((row) => this.normalizeUpperNullable(row.tipo_doc ?? row.TIPO_DOC) ?? '')
+        .map(
+          (row) =>
+            this.normalizeUpperNullable(row.tipo_doc ?? row.TIPO_DOC) ?? '',
+        )
         .filter((value) => value.length > 0),
     );
 
-    const completa =
-      tipos.has('RFC') &&
-      tipos.has('CURP') &&
-      tipos.has('NSS');
+    const completa = tipos.has('RFC') && tipos.has('CURP') && tipos.has('NSS');
 
     await this.colaboradoresRepo.update(
       { id: colaboradorId },
@@ -2554,7 +2654,9 @@ export class ColaboradoresService {
       throw new ConflictException('Registro duplicado');
     }
     if (
-      String(message).toLowerCase().includes('string or binary data would be truncated')
+      String(message)
+        .toLowerCase()
+        .includes('string or binary data would be truncated')
     ) {
       throw new BadRequestException(
         'Error de Base de Datos: El PIN o los datos son demasiado largos para la columna actual.',
@@ -2600,7 +2702,9 @@ export class ColaboradoresService {
   }
 
   private fitVarchar(value: unknown, max: number) {
-    const text = String(value ?? '').trim().replace(/\s+/g, ' ');
+    const text = String(value ?? '')
+      .trim()
+      .replace(/\s+/g, ' ');
     if (!text.length) return '';
     return text.length > max ? text.substring(0, max) : text;
   }
@@ -2754,7 +2858,9 @@ export class ColaboradoresService {
     return digits.substring(0, max);
   }
 
-  private normalizeJornadaTipo(value: unknown): 'DIURNA' | 'NOCTURNA' | 'MIXTA' {
+  private normalizeJornadaTipo(
+    value: unknown,
+  ): 'DIURNA' | 'NOCTURNA' | 'MIXTA' {
     const normalized = this.normalizeUpperNullable(value) ?? 'DIURNA';
     if (normalized === 'NOCTURNA') return 'NOCTURNA';
     if (normalized === 'MIXTA') return 'MIXTA';
@@ -2784,7 +2890,10 @@ export class ColaboradoresService {
     const iv = randomBytes(12);
     const key = createHash('sha256').update(this.nom035Secret).digest();
     const cipher = createCipheriv('aes-256-gcm', key, iv);
-    const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+    const encrypted = Buffer.concat([
+      cipher.update(text, 'utf8'),
+      cipher.final(),
+    ]);
     const tag = cipher.getAuthTag();
     return `v1:${iv.toString('base64')}:${tag.toString('base64')}:${encrypted.toString('base64')}`;
   }
@@ -2864,7 +2973,8 @@ export class ColaboradoresService {
       `,
       [colaboradorId],
     );
-    const existsById = (existingByIdRows as Record<string, unknown>[]).length > 0;
+    const existsById =
+      (existingByIdRows as Record<string, unknown>[]).length > 0;
 
     if (existsById) {
       await this.dataSource.query(
@@ -3118,7 +3228,9 @@ export class ColaboradoresService {
       `,
       [colaboradorId, target],
     );
-    return Number(rows?.[0]?.HAS_TEMPLATE ?? rows?.[0]?.has_template ?? 0) === 1;
+    return (
+      Number(rows?.[0]?.HAS_TEMPLATE ?? rows?.[0]?.has_template ?? 0) === 1
+    );
   }
 
   private assertQrSecret(secretKey: string) {

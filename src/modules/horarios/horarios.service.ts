@@ -38,7 +38,10 @@ type ColaboradorHorarioRow = {
 @Injectable()
 export class HorariosService {
   private readonly logger = new Logger(HorariosService.name);
-  private static readonly WEEKLY_LIMITS: Record<'DIURNA' | 'NOCTURNA' | 'MIXTA', number> = {
+  private static readonly WEEKLY_LIMITS: Record<
+    'DIURNA' | 'NOCTURNA' | 'MIXTA',
+    number
+  > = {
     DIURNA: 48,
     NOCTURNA: 42,
     MIXTA: 45,
@@ -86,7 +89,8 @@ export class HorariosService {
       otRequiereAutorizacion: dto.ot_requiere_autorizacion ?? false,
       horasJornadaMinutos: dto.horas_jornada_minutos ?? 480,
       horasExtraMinimoMinutos: dto.horas_extra_minimo_minutos ?? 0,
-      horasExtraRequiereAutorizacion: dto.horas_extra_requiere_autorizacion ?? false,
+      horasExtraRequiereAutorizacion:
+        dto.horas_extra_requiere_autorizacion ?? false,
       activo: dto.activo ?? true,
     });
 
@@ -144,7 +148,8 @@ export class HorariosService {
       row.horasExtraMinimoMinutos = dto.horas_extra_minimo_minutos;
     }
     if (dto.horas_extra_requiere_autorizacion !== undefined) {
-      row.horasExtraRequiereAutorizacion = dto.horas_extra_requiere_autorizacion;
+      row.horasExtraRequiereAutorizacion =
+        dto.horas_extra_requiere_autorizacion;
     }
     if (dto.activo !== undefined) {
       row.activo = dto.activo;
@@ -214,7 +219,9 @@ export class HorariosService {
       `,
       [turno.nombre.trim().toUpperCase()],
     );
-    const insertedId = Number(horarioRows?.[0]?.id ?? horarioRows?.[0]?.ID ?? 0);
+    const insertedId = Number(
+      horarioRows?.[0]?.id ?? horarioRows?.[0]?.ID ?? 0,
+    );
 
     return {
       id: insertedId,
@@ -286,7 +293,10 @@ export class HorariosService {
     const colaboradores = await this.loadActiveColaboradores();
     const turnosByName = await this.loadTurnosCatalogByName();
     const warnings: string[] = [];
-    const buckets = new Map<string, { sucursal: string; departamento: string }>();
+    const buckets = new Map<
+      string,
+      { sucursal: string; departamento: string }
+    >();
 
     for (const colab of colaboradores) {
       const jornada = this.resolveJornadaTipo(colab.turno_predeterminado);
@@ -355,14 +365,18 @@ export class HorariosService {
     return {
       id: Number(row.id ?? row.ID ?? 0),
       nombre: String(row.nombre ?? row.NOMBRE ?? '').trim(),
-      hr_entrada: this.normalizeTime(String(row.hr_entrada ?? row.HR_ENTRADA ?? '00:00:00')),
+      hr_entrada: this.normalizeTime(
+        String(row.hr_entrada ?? row.HR_ENTRADA ?? '00:00:00'),
+      ),
       hr_salida_comida: this.normalizeTime(
         String(row.hr_salida_comida ?? row.HR_SALIDA_COMIDA ?? '00:00:00'),
       ),
       hr_regreso_comida: this.normalizeTime(
         String(row.hr_regreso_comida ?? row.HR_REGRESO_COMIDA ?? '00:00:00'),
       ),
-      hr_salida: this.normalizeTime(String(row.hr_salida ?? row.HR_SALIDA ?? '00:00:00')),
+      hr_salida: this.normalizeTime(
+        String(row.hr_salida ?? row.HR_SALIDA ?? '00:00:00'),
+      ),
     };
   }
 
@@ -400,7 +414,8 @@ export class HorariosService {
   }) {
     const jornada = this.resolveJornadaTipo(row.nombre);
     const lunch = this.diffMinutes(row.hr_salida_comida, row.hr_regreso_comida);
-    const dailyMinutes = this.diffMinutes(row.hr_entrada, row.hr_salida) - lunch;
+    const dailyMinutes =
+      this.diffMinutes(row.hr_entrada, row.hr_salida) - lunch;
     const weeklyHours = (Math.max(0, dailyMinutes) * 6) / 60;
     const max = HorariosService.WEEKLY_LIMITS[jornada];
     if (weeklyHours > max) {
@@ -446,7 +461,10 @@ export class HorariosService {
     }
     const day = base.getDay();
     const diff = day === 0 ? -6 : 1 - day;
-    return this.addDays(new Date(base.getFullYear(), base.getMonth(), base.getDate()), diff);
+    return this.addDays(
+      new Date(base.getFullYear(), base.getMonth(), base.getDate()),
+      diff,
+    );
   }
 
   private addDays(date: Date, days: number) {
@@ -486,8 +504,9 @@ export class HorariosService {
     const all = await this.repo.find();
     const existing = all.find(
       (item) =>
-        String(item.nombre ?? '').trim().toUpperCase() ===
-        turno.nombre.trim().toUpperCase(),
+        String(item.nombre ?? '')
+          .trim()
+          .toUpperCase() === turno.nombre.trim().toUpperCase(),
     );
     const lunch = Math.max(
       0,
@@ -540,15 +559,25 @@ export class HorariosService {
     sucursalRaw?: string,
     departamentoRaw?: string,
   ) {
-    const hasIdEmpleado = await this.columnExists('COLABORADORES', 'id_empleado');
-    const hasDepartamento = await this.columnExists('COLABORADORES', 'departamento');
+    const hasIdEmpleado = await this.columnExists(
+      'COLABORADORES',
+      'id_empleado',
+    );
+    const hasDepartamento = await this.columnExists(
+      'COLABORADORES',
+      'departamento',
+    );
     const hasCargo = await this.columnExists('COLABORADORES', 'cargo');
-    const sucursal = String(sucursalRaw ?? '').trim().toUpperCase();
-    const departamento = String(departamentoRaw ?? '').trim().toUpperCase();
+    const sucursal = String(sucursalRaw ?? '')
+      .trim()
+      .toUpperCase();
+    const departamento = String(departamentoRaw ?? '')
+      .trim()
+      .toUpperCase();
     const params: unknown[] = [];
     const where: string[] = ['ISNULL(c.estado, 1) = 1'];
     if (sucursal.length) {
-      where.push('UPPER(LTRIM(RTRIM(ISNULL(s.codigo, \'\')))) = @0');
+      where.push("UPPER(LTRIM(RTRIM(ISNULL(s.codigo, '')))) = @0");
       params.push(sucursal);
     }
     if (departamento.length) {
@@ -598,16 +627,24 @@ export class HorariosService {
     return ((rows as Record<string, unknown>[]) ?? []).map((row) => ({
       colaborador_id: Number(row.colaborador_id ?? row.COLABORADOR_ID ?? 0),
       id_empleado: String(row.id_empleado ?? row.ID_EMPLEADO ?? '').trim(),
-      nombre_completo: String(row.nombre_completo ?? row.NOMBRE_COMPLETO ?? '').trim(),
+      nombre_completo: String(
+        row.nombre_completo ?? row.NOMBRE_COMPLETO ?? '',
+      ).trim(),
       sucursal: String(row.sucursal ?? row.SUCURSAL ?? '').trim(),
       departamento: String(row.departamento ?? row.DEPARTAMENTO ?? '').trim(),
       cargo: String(row.cargo ?? row.CARGO ?? '').trim(),
       turno_predeterminado: String(
         row.turno_predeterminado ?? row.TURNO_PREDETERMINADO ?? 'SIN_TURNO',
       ).trim(),
-      hora_entrada: this.normalizeTime(String(row.hora_entrada ?? row.HORA_ENTRADA ?? '09:00:00')),
-      hora_salida: this.normalizeTime(String(row.hora_salida ?? row.HORA_SALIDA ?? '18:00:00')),
-      minutos_almuerzo: Number(row.minutos_almuerzo ?? row.MINUTOS_ALMUERZO ?? 60),
+      hora_entrada: this.normalizeTime(
+        String(row.hora_entrada ?? row.HORA_ENTRADA ?? '09:00:00'),
+      ),
+      hora_salida: this.normalizeTime(
+        String(row.hora_salida ?? row.HORA_SALIDA ?? '18:00:00'),
+      ),
+      minutos_almuerzo: Number(
+        row.minutos_almuerzo ?? row.MINUTOS_ALMUERZO ?? 60,
+      ),
     })) as ColaboradorHorarioRow[];
   }
 
@@ -616,10 +653,13 @@ export class HorariosService {
     turnosByName: Map<string, TurnoCatalogoRow>,
     days: string[],
   ) {
-    const turnoByName = turnosByName.get(row.turno_predeterminado.toUpperCase());
+    const turnoByName = turnosByName.get(
+      row.turno_predeterminado.toUpperCase(),
+    );
     const entrada = turnoByName?.hr_entrada ?? row.hora_entrada;
     const salidaComida =
-      turnoByName?.hr_salida_comida ?? this.minutesToTime(this.timeToMinutes(entrada) + 4 * 60);
+      turnoByName?.hr_salida_comida ??
+      this.minutesToTime(this.timeToMinutes(entrada) + 4 * 60);
     const regresoComida =
       turnoByName?.hr_regreso_comida ??
       this.minutesToTime(this.timeToMinutes(salidaComida) + 60);
@@ -687,11 +727,16 @@ export class HorariosService {
     row: ColaboradorHorarioRow,
     turnosByName: Map<string, TurnoCatalogoRow>,
   ) {
-    const turnoByName = turnosByName.get(row.turno_predeterminado.toUpperCase());
+    const turnoByName = turnosByName.get(
+      row.turno_predeterminado.toUpperCase(),
+    );
     const entrada = turnoByName?.hr_entrada ?? row.hora_entrada;
     const salida = turnoByName?.hr_salida ?? row.hora_salida;
     const lunch = turnoByName
-      ? this.diffMinutes(turnoByName.hr_salida_comida, turnoByName.hr_regreso_comida)
+      ? this.diffMinutes(
+          turnoByName.hr_salida_comida,
+          turnoByName.hr_regreso_comida,
+        )
       : Math.max(0, row.minutos_almuerzo);
     return Math.max(0, this.diffMinutes(entrada, salida) - lunch);
   }
@@ -702,7 +747,8 @@ export class HorariosService {
   }
 
   private minutesToTime(totalMinutes: number) {
-    const normalized = ((Math.trunc(totalMinutes) % (24 * 60)) + 24 * 60) % (24 * 60);
+    const normalized =
+      ((Math.trunc(totalMinutes) % (24 * 60)) + 24 * 60) % (24 * 60);
     const hh = Math.floor(normalized / 60)
       .toString()
       .padStart(2, '0');
@@ -724,7 +770,8 @@ export class HorariosService {
       [`dbo.${tableName}`, columnName],
     );
 
-    const value = (rows?.[0] as Record<string, unknown> | undefined)?.exists_flag;
+    const value = (rows?.[0] as Record<string, unknown> | undefined)
+      ?.exists_flag;
     return Number(value ?? 0) === 1;
   }
 }

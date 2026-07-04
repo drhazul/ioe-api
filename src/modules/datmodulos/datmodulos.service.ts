@@ -68,7 +68,12 @@ export class DatmodulosService {
   async remove(codigo: string) {
     const row = await this.findOne(codigo);
     if (!row.ACTIVO) {
-      return { deleted: false, logical: true, alreadyInactive: true, CODIGO: codigo };
+      return {
+        deleted: false,
+        logical: true,
+        alreadyInactive: true,
+        CODIGO: codigo,
+      };
     }
     row.ACTIVO = false;
     row.FCNR = new Date();

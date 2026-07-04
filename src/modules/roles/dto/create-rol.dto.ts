@@ -30,7 +30,10 @@ export class CreateRolDto {
   @IsBoolean()
   ACTIVO?: boolean;
 
-  @ApiPropertyOptional({ example: 4, description: 'Departamento (DEPARTAMENTO.IDDEPTO)' })
+  @ApiPropertyOptional({
+    example: 4,
+    description: 'Departamento (DEPARTAMENTO.IDDEPTO)',
+  })
   @IsOptional()
   @IsInt()
   @Min(1)

@@ -73,6 +73,7 @@ import { MasterdataConfigModule } from './modules/masterdata-config/masterdata-c
 import { PromocionesModule } from './modules/promociones/promociones.module';
 import { MermasModule } from './modules/mermas/mermas.module';
 import { EmpresasModule } from './modules/empresas/empresas.module';
+import { TransferenciasModule } from './modules/transferencias/transferencias.module';
 
 @Module({
   imports: [
@@ -147,6 +148,7 @@ import { EmpresasModule } from './modules/empresas/empresas.module';
     EmpresasModule,
     PromocionesModule,
     MermasModule,
+    TransferenciasModule,
   ],
   providers: [
     {

@@ -1145,15 +1145,11 @@ ORDER BY i.POS ASC, f.FCN DESC, f.IDFOL DESC;`,
     const data = scopedRows.slice(offset, offset + pageSize);
 
     for (const row of data) {
-      const imptValue = Number(
-        (row as Record<string, unknown>).IMPT ??
-          (row as Record<string, unknown>).impt ??
-          0,
-      );
+      const imptValue = Number(row.IMPT ?? row.impt ?? 0);
       if (Number.isFinite(imptValue)) {
         const rounded = Number(imptValue.toFixed(2));
-        (row as Record<string, unknown>).IMPT = rounded;
-        (row as Record<string, unknown>).impt = rounded;
+        row.IMPT = rounded;
+        row.impt = rounded;
       }
     }
 
@@ -2933,8 +2929,8 @@ SET NUMERIC_ROUNDABORT OFF;`;
       : [];
     for (const item of rawErrors) {
       if (!item || typeof item !== 'object') continue;
-      const field = String((item as any).field ?? '').trim();
-      const message = String((item as any).message ?? '').trim();
+      const field = String(item.field ?? '').trim();
+      const message = String(item.message ?? '').trim();
       if (!message) continue;
       facturifyErrors.push(field ? `${field}: ${message}` : message);
     }

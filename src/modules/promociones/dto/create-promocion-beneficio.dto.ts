@@ -75,4 +75,3 @@ export class CreatePromocionBeneficioDto {
   @IsInt()
   EST?: number;
 }
-

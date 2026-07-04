@@ -69,7 +69,9 @@ export class OrdFlujoVisService {
 
     const modulo = this.normalizeModulo(query?.modulo, { required: false });
     if (modulo) {
-      filters.push(`UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) = ${this.param(params.length)}`);
+      filters.push(
+        `UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) = ${this.param(params.length)}`,
+      );
       params.push(modulo);
     }
 
@@ -253,7 +255,8 @@ export class OrdFlujoVisService {
         esta: esta ?? current.esta,
         soloExterno: dto.SOLO_EXTERNO ?? current.soloExterno,
         activo: dto.ACTIVO ?? current.activo,
-        orden: esta !== undefined ? this.buildOrdenFromEsta(esta) : current.orden,
+        orden:
+          esta !== undefined ? this.buildOrdenFromEsta(esta) : current.orden,
       },
       id,
     );
@@ -356,7 +359,9 @@ export class OrdFlujoVisService {
       this.normalizeRoleCode(dto.ROLE_CODE, { required: true }) ?? '';
     await this.ensureRoleCodeExists(roleCode);
     if (!modulo || !panelMode || !roleCode) {
-      throw new BadRequestException('MODULO, PANEL_MODE y ROLE_CODE son requeridos');
+      throw new BadRequestException(
+        'MODULO, PANEL_MODE y ROLE_CODE son requeridos',
+      );
     }
     const esta = await this.ensureValidEsta(dto.ESTA);
     return {
@@ -502,9 +507,15 @@ export class OrdFlujoVisService {
     if (!row || typeof row !== 'object') return null;
     const r = row as Record<string, unknown>;
     const id = this.toInt(r.ID);
-    const modulo = String(r.MODULO ?? '').trim().toUpperCase();
-    const panelMode = String(r.PANEL_MODE ?? '').trim().toLowerCase();
-    const roleCode = String(r.ROLE_CODE ?? '').trim().toUpperCase();
+    const modulo = String(r.MODULO ?? '')
+      .trim()
+      .toUpperCase();
+    const panelMode = String(r.PANEL_MODE ?? '')
+      .trim()
+      .toLowerCase();
+    const roleCode = String(r.ROLE_CODE ?? '')
+      .trim()
+      .toUpperCase();
     const esta = this.toFloatOrNull(r.ESTA);
     if (!id || !modulo || !panelMode || !roleCode || esta == null) return null;
 
@@ -614,7 +625,9 @@ export class OrdFlujoVisService {
         upper.includes('DUPLICATE') ||
         upper.includes('UX_DAT_JAO_ORD_FLUJO_VIS_UNQ')
       ) {
-        throw new ConflictException('Ya existe el registro para MODULO/PANEL_MODE/ROLE_CODE/ESTA');
+        throw new ConflictException(
+          'Ya existe el registro para MODULO/PANEL_MODE/ROLE_CODE/ESTA',
+        );
       }
       if (upper.includes('REFERENCE') || upper.includes('FOREIGN KEY')) {
         throw new ConflictException(

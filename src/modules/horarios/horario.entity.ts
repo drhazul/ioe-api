@@ -20,7 +20,12 @@ export class HorarioEntity {
   @Column({ type: 'bit', name: 'dia_festivo', default: () => '0' })
   diaFestivo: boolean | undefined;
 
-  @Column({ type: 'time', precision: 0, name: 'inicio_entrada', nullable: true })
+  @Column({
+    type: 'time',
+    precision: 0,
+    name: 'inicio_entrada',
+    nullable: true,
+  })
   inicioEntrada: string | null;
 
   @Column({ type: 'time', precision: 0, name: 'fin_entrada', nullable: true })
@@ -48,7 +53,11 @@ export class HorarioEntity {
   @Column({ type: 'int', name: 'horas_jornada_minutos', default: () => '480' })
   horasJornadaMinutos: number | undefined;
 
-  @Column({ type: 'int', name: 'horas_extra_minimo_minutos', default: () => '0' })
+  @Column({
+    type: 'int',
+    name: 'horas_extra_minimo_minutos',
+    default: () => '0',
+  })
   horasExtraMinimoMinutos: number | undefined;
 
   @Column({

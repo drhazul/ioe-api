@@ -13,9 +13,9 @@ export class AppController {
   // --- ESTA ES LA RUTA MANUAL QUE FALTA ---
   @Get('health')
   checkHealth() {
-    return { 
-      status: 'ok', 
-      message: 'Servidor IOE funcionando correctamente' 
+    return {
+      status: 'ok',
+      message: 'Servidor IOE funcionando correctamente',
     };
   }
 }

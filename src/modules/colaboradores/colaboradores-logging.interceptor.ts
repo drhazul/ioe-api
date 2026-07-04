@@ -116,4 +116,3 @@ export class ColaboradoresLoggingInterceptor implements NestInterceptor {
     return String(error);
   }
 }
-

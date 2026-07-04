@@ -8,4 +8,3 @@ export class VacacionesDashboardDto {
   @Min(2000)
   anio?: number;
 }
-

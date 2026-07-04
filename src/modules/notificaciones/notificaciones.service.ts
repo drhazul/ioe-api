@@ -202,8 +202,7 @@ export class NotificacionesService implements OnModuleInit {
       ok: true,
       date: dateIso,
       source: source.table,
-      inserted:
-        Number(rows?.[0]?.inserted ?? rows?.[0]?.INSERTED ?? 0) || 0,
+      inserted: Number(rows?.[0]?.inserted ?? rows?.[0]?.INSERTED ?? 0) || 0,
     };
   }
 
@@ -454,7 +453,9 @@ export class NotificacionesService implements OnModuleInit {
       `,
     );
 
-    const exists = Number(rows?.[0]?.exists_flag ?? rows?.[0]?.EXISTS_FLAG ?? 0);
+    const exists = Number(
+      rows?.[0]?.exists_flag ?? rows?.[0]?.EXISTS_FLAG ?? 0,
+    );
     if (exists !== 1) {
       throw new BadRequestException(
         'No existe dbo.NOTIFICACIONES. Ejecuta script 123_NOTIFICACIONES_create.sql',

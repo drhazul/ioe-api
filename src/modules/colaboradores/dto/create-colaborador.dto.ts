@@ -45,7 +45,10 @@ export class CreateColaboradorDto {
   @Length(1, 40)
   id_empleado: string;
 
-  @ApiPropertyOptional({ example: 1002, description: 'ID numérico COLABORADORES.id_usuario' })
+  @ApiPropertyOptional({
+    example: 1002,
+    description: 'ID numérico COLABORADORES.id_usuario',
+  })
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -119,7 +122,9 @@ export class CreateColaboradorDto {
   rol?: string;
 
   @ApiPropertyOptional({ example: true, default: true })
-  @Transform(({ value, obj }) => value ?? obj?.status_activo ?? obj?.STATUS_ACTIVO)
+  @Transform(
+    ({ value, obj }) => value ?? obj?.status_activo ?? obj?.STATUS_ACTIVO,
+  )
   @IsOptional()
   @IsBoolean()
   estado?: boolean;

@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { constants, existsSync, accessSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  constants,
+  existsSync,
+  accessSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import * as path from 'node:path';
 import { DataSource } from 'typeorm';
 import { ExportService } from '../asistencia/export.service';
@@ -36,7 +42,7 @@ export class HealthService {
   private async checkDatabaseConnection() {
     try {
       const row = await this.dataSource.query(
-        "SELECT DB_NAME() AS database_name, @@VERSION AS sql_version",
+        'SELECT DB_NAME() AS database_name, @@VERSION AS sql_version',
       );
       return {
         ok: true,
@@ -115,14 +121,26 @@ export class HealthService {
           first,
           'has_colaboradores_sucursales',
         ),
-        COLABORADORES_HORARIOS: this.readBool(first, 'has_colaboradores_horarios'),
-        ATT_ASISTENCIA_ESTATUS: this.readBool(first, 'has_att_asistencia_estatus'),
+        COLABORADORES_HORARIOS: this.readBool(
+          first,
+          'has_colaboradores_horarios',
+        ),
+        ATT_ASISTENCIA_ESTATUS: this.readBool(
+          first,
+          'has_att_asistencia_estatus',
+        ),
         NOTIFICACIONES: this.readBool(first, 'has_notificaciones'),
         MARCAJES: this.readBool(first, 'has_marcajes'),
         ATT_PERMISOS_TIPOS: this.readBool(first, 'has_att_permisos_tipos'),
         ATT_SOLICITUDES: this.readBool(first, 'has_att_solicitudes'),
-        ATT_VACACIONES_SALDOS: this.readBool(first, 'has_att_vacaciones_saldos'),
-        ATT_NOM035_RESPUESTAS: this.readBool(first, 'has_att_nom035_respuestas'),
+        ATT_VACACIONES_SALDOS: this.readBool(
+          first,
+          'has_att_vacaciones_saldos',
+        ),
+        ATT_NOM035_RESPUESTAS: this.readBool(
+          first,
+          'has_att_nom035_respuestas',
+        ),
         HISTORICO_PUESTOS: this.readBool(first, 'has_historico_puestos'),
         FESTIVOS: this.readBool(first, 'has_festivos'),
         INCENTIVOS: this.readBool(first, 'has_incentivos'),
@@ -137,7 +155,10 @@ export class HealthService {
         COLABORADORES_rfc: this.readBool(first, 'has_colab_rfc'),
         COLABORADORES_curp: this.readBool(first, 'has_colab_curp'),
         COLABORADORES_nss: this.readBool(first, 'has_colab_nss'),
-        COLABORADORES_jornada_tipo: this.readBool(first, 'has_colab_jornada_tipo'),
+        COLABORADORES_jornada_tipo: this.readBool(
+          first,
+          'has_colab_jornada_tipo',
+        ),
         COLABORADORES_estatus_contrato: this.readBool(
           first,
           'has_colab_estatus_contrato',
@@ -166,9 +187,18 @@ export class HealthService {
           first,
           'has_hor_ot_requiere_autorizacion',
         ),
-        HORARIOS_horas_jornada_minutos: this.readBool(first, 'has_hor_horas_jornada_minutos'),
-        HORARIOS_horas_extra_minimo: this.readBool(first, 'has_hor_horas_extra_minimo'),
-        HORARIOS_horas_extra_auth: this.readBool(first, 'has_hor_horas_extra_auth'),
+        HORARIOS_horas_jornada_minutos: this.readBool(
+          first,
+          'has_hor_horas_jornada_minutos',
+        ),
+        HORARIOS_horas_extra_minimo: this.readBool(
+          first,
+          'has_hor_horas_extra_minimo',
+        ),
+        HORARIOS_horas_extra_auth: this.readBool(
+          first,
+          'has_hor_horas_extra_auth',
+        ),
         HORARIOS_activo: this.readBool(first, 'has_hor_activo'),
         HISTORICO_PUESTOS_idrol: this.readBool(first, 'has_hp_idrol'),
         HISTORICO_PUESTOS_id_incent: this.readBool(first, 'has_hp_id_incent'),
@@ -230,10 +260,7 @@ export class HealthService {
     }
   }
 
-  private readBool(
-    row: Record<string, unknown> | null,
-    key: string,
-  ): boolean {
+  private readBool(row: Record<string, unknown> | null, key: string): boolean {
     const value = this.readValue(row, key);
     return Number(value) === 1;
   }

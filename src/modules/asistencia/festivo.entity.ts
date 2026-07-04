@@ -11,7 +11,12 @@ export class FestivoEntity {
   @Column({ type: 'date', name: 'fecha' })
   fecha: string | undefined;
 
-  @Column({ type: 'varchar', length: 30, name: 'tipo', default: () => "'OFICIAL'" })
+  @Column({
+    type: 'varchar',
+    length: 30,
+    name: 'tipo',
+    default: () => "'OFICIAL'",
+  })
   tipo: string | undefined;
 
   @Column({ type: 'varchar', length: 255, name: 'descripcion', nullable: true })

@@ -22,7 +22,10 @@ import { CleanupComandosDto } from './dto/cleanup-comandos.dto';
 import { CreateSucursalDto } from './dto/create-sucursal.dto';
 import { ImportUsbDto } from './dto/import-usb.dto';
 import { KioscoVisitaDto } from './dto/kiosco-visita.dto';
-import { SucursalCommandAction, SucursalCommandDto } from './dto/sucursal-command.dto';
+import {
+  SucursalCommandAction,
+  SucursalCommandDto,
+} from './dto/sucursal-command.dto';
 import { SucursalEventDto } from './dto/sucursal-event.dto';
 import { UpdateSucursalDto } from './dto/update-sucursal.dto';
 import { UploadAsistenciaFotoDto } from './dto/upload-asistencia-foto.dto';
@@ -205,7 +208,11 @@ export class SucursalesService implements OnModuleInit {
     const nextRadio =
       dto.radio_metros !== undefined ? dto.radio_metros : current.radioMetros;
 
-    this.validateGeofence(nextLat ?? undefined, nextLon ?? undefined, nextRadio ?? undefined);
+    this.validateGeofence(
+      nextLat ?? undefined,
+      nextLon ?? undefined,
+      nextRadio ?? undefined,
+    );
 
     if (nextCodigo !== (current.codigo ?? '')) {
       const exists = await this.repo.exist({
@@ -271,7 +278,8 @@ export class SucursalesService implements OnModuleInit {
       );
       const policy = policyRows?.[0] as Record<string, unknown> | undefined;
       if (policy) {
-        latitud = latitud ?? this.toNumber(this.readValue(policy, 'GEOFENCE_LAT'));
+        latitud =
+          latitud ?? this.toNumber(this.readValue(policy, 'GEOFENCE_LAT'));
         longitud =
           longitud ?? this.toNumber(this.readValue(policy, 'GEOFENCE_LON'));
         radioMetros =
@@ -339,7 +347,9 @@ export class SucursalesService implements OnModuleInit {
       throw new BadRequestException('suc requerida');
     }
     if (!(await this.comandosTableExists())) {
-      throw new BadRequestException('COMANDOS_ADMS no existe. Ejecuta script 118.');
+      throw new BadRequestException(
+        'COMANDOS_ADMS no existe. Ejecuta script 118.',
+      );
     }
 
     const allowed = new Set<string>([
@@ -348,14 +358,18 @@ export class SucursalesService implements OnModuleInit {
       SucursalCommandAction.CLEAR_ADMIN,
       SucursalCommandAction.SYNC_USERS,
     ]);
-    const commandAction = String(dto.command ?? '').trim().toUpperCase();
+    const commandAction = String(dto.command ?? '')
+      .trim()
+      .toUpperCase();
     if (!allowed.has(commandAction)) {
       throw new BadRequestException('Comando no permitido');
     }
 
     const explicitDevice = this.normalizeNullable(dto.device_id);
     const devices =
-      explicitDevice != null ? [explicitDevice] : await this.resolveDeviceIdsForSuc(suc);
+      explicitDevice != null
+        ? [explicitDevice]
+        : await this.resolveDeviceIdsForSuc(suc);
 
     let queued = 0;
     const now = new Date().toISOString();
@@ -402,7 +416,9 @@ export class SucursalesService implements OnModuleInit {
   async listRecentCommands(codigoRaw: string, limitRaw: number) {
     const codigo = this.normalizeNullable(codigoRaw);
     if (codigo == null) throw new BadRequestException('codigo requerido');
-    const limit = Number.isFinite(limitRaw) ? Math.min(20, Math.max(1, Math.trunc(limitRaw))) : 5;
+    const limit = Number.isFinite(limitRaw)
+      ? Math.min(20, Math.max(1, Math.trunc(limitRaw)))
+      : 5;
 
     if (!(await this.comandosTableExists())) {
       return { ok: true, codigo, rows: [] as Array<Record<string, unknown>> };
@@ -531,7 +547,8 @@ export class SucursalesService implements OnModuleInit {
       [olderThanMinutes, suc],
     );
 
-    const deleted = this.toInt(this.readValue(rows?.[0] ?? null, 'DELETED')) ?? 0;
+    const deleted =
+      this.toInt(this.readValue(rows?.[0] ?? null, 'DELETED')) ?? 0;
 
     return {
       ok: true,
@@ -744,7 +761,10 @@ export class SucursalesService implements OnModuleInit {
     const payload = this.resolvePhotoPayload(dto, file);
     await fs.mkdir(this.uploadsDir, { recursive: true });
 
-    const extension = this.resolvePhotoExtension(payload.mimeType, dto.fileName);
+    const extension = this.resolvePhotoExtension(
+      payload.mimeType,
+      dto.fileName,
+    );
     const safeFileName = `${Date.now()}_${idUsuario}_${randomUUID()}.${extension}`;
     const absolutePath = path.join(this.uploadsDir, safeFileName);
     const relativePath = path.join('uploads', 'asistencia', safeFileName);
@@ -862,7 +882,8 @@ export class SucursalesService implements OnModuleInit {
       [safeDays],
     );
 
-    const deleted = this.toInt(this.readValue(deleteRows?.[0] ?? null, 'DELETED')) ?? 0;
+    const deleted =
+      this.toInt(this.readValue(deleteRows?.[0] ?? null, 'DELETED')) ?? 0;
 
     return {
       ok: true,
@@ -1046,7 +1067,9 @@ export class SucursalesService implements OnModuleInit {
 
     for (const row of rows as Record<string, unknown>[]) {
       const suc = this.normalizeNullable(this.readString(row, 'SUC'));
-      const deviceId = this.normalizeNullable(this.readString(row, 'DEVICE_ID'));
+      const deviceId = this.normalizeNullable(
+        this.readString(row, 'DEVICE_ID'),
+      );
       const lastSeenRaw = this.readValue(row, 'LAST_SEEN_UTC');
 
       if (suc == null || deviceId == null || lastSeenRaw == null) continue;
@@ -1265,7 +1288,10 @@ export class SucursalesService implements OnModuleInit {
       input.verificationMode ??
       this.verificationModeFromCode(input.verifyMode) ??
       null;
-    const authMethod = this.resolveAuthMethod(input.authMethod, verificationMode);
+    const authMethod = this.resolveAuthMethod(
+      input.authMethod,
+      verificationMode,
+    );
     const verifyMode =
       this.normalizeVerifyModeInt(input.verifyMode) ??
       this.verifyModeFromLabel(verificationMode) ??
@@ -1681,7 +1707,9 @@ export class SucursalesService implements OnModuleInit {
       SELECT CASE WHEN COL_LENGTH('dbo.SUCURSALES', 'sucursal_token') IS NULL THEN 0 ELSE 1 END AS EXISTS_FLAG
       `,
     );
-    return (this.toInt(this.readValue(rows?.[0] ?? null, 'EXISTS_FLAG')) ?? 0) === 1;
+    return (
+      (this.toInt(this.readValue(rows?.[0] ?? null, 'EXISTS_FLAG')) ?? 0) === 1
+    );
   }
 
   private async lastSeenColumnExists() {
@@ -1690,7 +1718,9 @@ export class SucursalesService implements OnModuleInit {
       SELECT CASE WHEN COL_LENGTH('dbo.SUCURSALES', 'last_seen_at') IS NULL THEN 0 ELSE 1 END AS EXISTS_FLAG
       `,
     );
-    return (this.toInt(this.readValue(rows?.[0] ?? null, 'EXISTS_FLAG')) ?? 0) === 1;
+    return (
+      (this.toInt(this.readValue(rows?.[0] ?? null, 'EXISTS_FLAG')) ?? 0) === 1
+    );
   }
 
   private async validateSucursalToken(suc: string, token: string) {
@@ -1778,7 +1808,9 @@ export class SucursalesService implements OnModuleInit {
       `,
       [tableName],
     );
-    return (this.toInt(this.readValue(rows?.[0] ?? null, 'EXISTS_FLAG')) ?? 0) === 1;
+    return (
+      (this.toInt(this.readValue(rows?.[0] ?? null, 'EXISTS_FLAG')) ?? 0) === 1
+    );
   }
 
   private async resolveDeviceIdsForSuc(suc: string) {
@@ -1795,7 +1827,9 @@ export class SucursalesService implements OnModuleInit {
     );
     const values = new Set<string>();
     for (const row of (rows as Record<string, unknown>[]) ?? []) {
-      const deviceId = this.normalizeNullable(this.readString(row, 'DEVICE_ID'));
+      const deviceId = this.normalizeNullable(
+        this.readString(row, 'DEVICE_ID'),
+      );
       if (deviceId != null) values.add(deviceId);
     }
     return [...values];
@@ -1985,7 +2019,10 @@ export class SucursalesService implements OnModuleInit {
       [idUsuario],
     );
 
-    const horaEntrada = this.readString(horarioRows?.[0] ?? null, 'hora_entrada');
+    const horaEntrada = this.readString(
+      horarioRows?.[0] ?? null,
+      'hora_entrada',
+    );
     const horaSalida = this.readString(horarioRows?.[0] ?? null, 'hora_salida');
     const hourMinutes = eventDate.getHours() * 60 + eventDate.getMinutes();
     const entradaMinutes = this.toTimeMinutes(horaEntrada);
@@ -2009,7 +2046,10 @@ export class SucursalesService implements OnModuleInit {
     return auth;
   }
 
-  private normalizeVerificationMode(value: unknown, verifyMode?: number | null) {
+  private normalizeVerificationMode(
+    value: unknown,
+    verifyMode?: number | null,
+  ) {
     const mode = this.normalizeNullable(value);
     if (mode == null) {
       return this.verificationModeFromCode(verifyMode);
@@ -2189,7 +2229,9 @@ export class SucursalesService implements OnModuleInit {
       `,
       [idUsuario, dateIso],
     );
-    return (this.toInt(this.readValue(rows?.[0] ?? null, 'has_bypass')) ?? 0) === 1;
+    return (
+      (this.toInt(this.readValue(rows?.[0] ?? null, 'has_bypass')) ?? 0) === 1
+    );
   }
 
   private async applyRequiresReviewFlag(

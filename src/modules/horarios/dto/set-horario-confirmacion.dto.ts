@@ -23,4 +23,3 @@ export class SetHorarioConfirmacionDto {
   @IsIn(['PENDIENTE', 'CONFIRMADO'])
   estatus: 'PENDIENTE' | 'CONFIRMADO';
 }
-

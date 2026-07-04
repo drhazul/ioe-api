@@ -32,6 +32,31 @@ import { AssignFrontGroupToUserDto } from './dto/assign-front-group-to-user.dto'
 
 @Injectable()
 export class AccessService {
+  private static readonly MERMA_AUDIT_MODULE_CODES = new Set<string>([
+    'DAT_AUDIT_MERMA',
+  ]);
+  private static readonly MERMA_CONSULTA_MODULE_CODES = new Set<string>([
+    'DAT_CONSU_MERMA',
+  ]);
+  private static readonly MERMA_GESTION_MODULE_CODES = new Set<string>([
+    'DAT_JAA_MERM',
+    'DAT_JAA_MEM',
+  ]);
+
+  private static readonly MERMA_ALLOWED_AUDIT_CONSULTA_ROLES = new Set<string>([
+    'JEFE DE INVENTARIOS',
+    'JEFE DE INENTARIOS',
+    'ANALISTA DE INVENTARIOS',
+    'ADMINISTRADOR',
+  ]);
+  private static readonly MERMA_ALLOWED_GESTION_ROLES = new Set<string>([
+    'JEFE DE INVENTARIOS',
+    'JEFE DE INENTARIOS',
+    'ANALISTA DE INVENTARIOS',
+    'ENCARGADO DE SUCURSAL',
+    'ADMINISTRADOR',
+  ]);
+
   constructor(
     @InjectRepository(ModuloEntity)
     private readonly modRepo: Repository<ModuloEntity>,
@@ -603,10 +628,7 @@ export class AccessService {
     );
   }
 
-  async setFrontUserEnrollment(
-    userId: number,
-    dto: AssignFrontGroupToUserDto,
-  ) {
+  async setFrontUserEnrollment(userId: number, dto: AssignFrontGroupToUserDto) {
     await this.ensureUserExists(userId);
     const groupId = Number(dto.idGrupmodFront);
     await this.ensureFrontGroupExists(groupId);
@@ -632,21 +654,26 @@ export class AccessService {
 
   // -------- FRONT MENU --------
   async getFrontMenu(userId: number, roleId: number) {
+    const roleName = await this.resolveRoleNameById(roleId);
+
     const resolved = await this.resolveEffectiveFrontGroups(userId, roleId);
     if (resolved.accesoTotal) {
       const rows = await this.modFrontRepo.find({ where: { ACTIVO: true } });
-      return rows
-        .map((m) => ({
+      const scopedRows = this.applyMermaModuleVisibilityByRoleName(
+        rows.map((m) => ({
           codigo: m.CODIGO,
           nombre: m.NOMBRE,
           depto: m.DEPTO ?? null,
-        }))
-        .sort((a, b) => {
-          const deptoA = (a.depto ?? '').trim();
-          const deptoB = (b.depto ?? '').trim();
-          const deptoCmp = deptoA.localeCompare(deptoB);
-          return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
-        });
+        })),
+        roleName,
+        roleId,
+      );
+      return scopedRows.sort((a, b) => {
+        const deptoA = (a.depto ?? '').trim();
+        const deptoB = (b.depto ?? '').trim();
+        const deptoCmp = deptoA.localeCompare(deptoB);
+        return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
+      });
     }
 
     if (!resolved.allowedGroupIds || resolved.allowedGroupIds.length === 0) {
@@ -669,18 +696,66 @@ export class AccessService {
       if (r.MODULO) byId.set(r.MODULO.IDMOD_FRONT, r.MODULO);
     }
 
-    return Array.from(byId.values())
-      .map((m) => ({
-        codigo: m.CODIGO,
-        nombre: m.NOMBRE,
-        depto: m.DEPTO ?? null,
-      }))
-      .sort((a, b) => {
-        const deptoA = (a.depto ?? '').trim();
-        const deptoB = (b.depto ?? '').trim();
-        const deptoCmp = deptoA.localeCompare(deptoB);
-        return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
-      });
+    const rows = Array.from(byId.values()).map((m) => ({
+      codigo: m.CODIGO,
+      nombre: m.NOMBRE,
+      depto: m.DEPTO ?? null,
+    }));
+
+    return this.applyMermaModuleVisibilityByRoleName(
+      rows,
+      roleName,
+      roleId,
+    ).sort((a, b) => {
+      const deptoA = (a.depto ?? '').trim();
+      const deptoB = (b.depto ?? '').trim();
+      const deptoCmp = deptoA.localeCompare(deptoB);
+      return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
+    });
+  }
+
+  private normalizeText(value: unknown): string {
+    return String(value ?? '')
+      .trim()
+      .toUpperCase();
+  }
+
+  private async resolveRoleNameById(roleId: number): Promise<string> {
+    if (!Number.isFinite(roleId) || roleId <= 0) return '';
+    const row = await this.rolRepo.findOne({ where: { IDROL: roleId } });
+    return this.normalizeText(row?.NOMBRE);
+  }
+
+  private applyMermaModuleVisibilityByRoleName(
+    modules: Array<{ codigo: string; nombre: string; depto: string | null }>,
+    roleName: string,
+    roleId: number,
+  ) {
+    if (!modules.length) return modules;
+    const normalizedRoleName = this.normalizeText(roleName);
+    if (roleId === 0 || roleId === 1 || normalizedRoleName.includes('ADMIN')) {
+      return modules;
+    }
+
+    return modules.filter((moduleRow) => {
+      const code = this.normalizeText(moduleRow.codigo);
+      const isMermaAudit =
+        AccessService.MERMA_AUDIT_MODULE_CODES.has(code) ||
+        AccessService.MERMA_CONSULTA_MODULE_CODES.has(code);
+      if (isMermaAudit) {
+        return AccessService.MERMA_ALLOWED_AUDIT_CONSULTA_ROLES.has(
+          normalizedRoleName,
+        );
+      }
+
+      if (AccessService.MERMA_GESTION_MODULE_CODES.has(code)) {
+        return AccessService.MERMA_ALLOWED_GESTION_ROLES.has(
+          normalizedRoleName,
+        );
+      }
+
+      return true;
+    });
   }
 
   private async buildFrontEnrollmentItems(
@@ -748,7 +823,8 @@ export class AccessService {
     const group = await this.grupFrontRepo.findOne({
       where: { IDGRUPMOD_FRONT: groupId },
     });
-    if (!group) throw new NotFoundException(`GRUPMOD_FRONT ${groupId} no existe`);
+    if (!group)
+      throw new NotFoundException(`GRUPMOD_FRONT ${groupId} no existe`);
   }
 
   private async ensureUserExists(userId: number) {
@@ -773,9 +849,7 @@ export class AccessService {
       ? null
       : Array.from(
           new Set(
-            sourceAssigns
-              .map((a) => a.IDGRUPMOD_FRONT)
-              .filter((x) => x !== 0),
+            sourceAssigns.map((a) => a.IDGRUPMOD_FRONT).filter((x) => x !== 0),
           ),
         );
 

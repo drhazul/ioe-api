@@ -117,13 +117,15 @@ export class ColaboradoresController {
     @Req() req: any,
     @Res({ passthrough: true }) res: Response,
   ) {
-    return this.service.create(dto, {
-      actorId: Number(user?.sub ?? 0) || null,
-      ip: this.requestIp(req),
-    }).then((result) => {
-      res.status(result.created ? HttpStatus.CREATED : HttpStatus.OK);
-      return result.data;
-    });
+    return this.service
+      .create(dto, {
+        actorId: Number(user?.sub ?? 0) || null,
+        ip: this.requestIp(req),
+      })
+      .then((result) => {
+        res.status(result.created ? HttpStatus.CREATED : HttpStatus.OK);
+        return result.data;
+      });
   }
 
   @Get(':id/credencial-qr')

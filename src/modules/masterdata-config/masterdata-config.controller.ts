@@ -20,4 +20,3 @@ export class MasterdataConfigController {
     return this.service.saveConfig(payload);
   }
 }
-

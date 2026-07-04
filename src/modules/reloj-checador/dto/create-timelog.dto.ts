@@ -20,7 +20,9 @@ export class CreateTimelogDto {
   @Min(1)
   id_usuario!: number;
 
-  @ApiPropertyOptional({ description: 'Fecha/hora marcaje (cliente); servidor usa GETDATE()' })
+  @ApiPropertyOptional({
+    description: 'Fecha/hora marcaje (cliente); servidor usa GETDATE()',
+  })
   @IsOptional()
   @IsISO8601()
   punch_time?: string;
@@ -33,7 +35,9 @@ export class CreateTimelogDto {
   @Length(1, 255)
   pin!: string;
 
-  @ApiPropertyOptional({ description: 'Tipo de verificación (MARCAJES.verify_mode_label)' })
+  @ApiPropertyOptional({
+    description: 'Tipo de verificación (MARCAJES.verify_mode_label)',
+  })
   @Transform(({ value, obj }) =>
     String(
       value ??
@@ -120,7 +124,9 @@ export class CreateTimelogDto {
   @Length(3, 80)
   GPS_COORDINATES?: string;
 
-  @ApiPropertyOptional({ description: 'Temperatura reportada por dispositivo (°C)' })
+  @ApiPropertyOptional({
+    description: 'Temperatura reportada por dispositivo (°C)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -159,7 +165,9 @@ export class CreateTimelogDto {
     description: 'Fecha/hora local del dispositivo (ISO-8601)',
   })
   @Transform(({ value, obj }) =>
-    String(value ?? obj?.fecha_hora_local ?? obj?.FECHA_HORA_LOCAL ?? '').trim(),
+    String(
+      value ?? obj?.fecha_hora_local ?? obj?.FECHA_HORA_LOCAL ?? '',
+    ).trim(),
   )
   @IsISO8601()
   FECHA_HORA_LOCAL!: string; // Corregido con ![cite: 1, 2]

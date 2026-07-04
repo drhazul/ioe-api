@@ -118,7 +118,10 @@ export class IncidenciasVacacionesService {
       ],
     );
 
-    const inserted = (insertedRows?.[0] ?? null) as Record<string, unknown> | null;
+    const inserted = (insertedRows?.[0] ?? null) as Record<
+      string,
+      unknown
+    > | null;
     if (inserted == null) {
       throw new BadRequestException('No se pudo insertar solicitud');
     }
@@ -132,9 +135,7 @@ export class IncidenciasVacacionesService {
       fechaInicio: String(
         inserted.fecha_inicio ?? inserted.FECHA_INICIO ?? range.inicio,
       ),
-      fechaFin: String(
-        inserted.fecha_fin ?? inserted.FECHA_FIN ?? range.fin,
-      ),
+      fechaFin: String(inserted.fecha_fin ?? inserted.FECHA_FIN ?? range.fin),
       motivo: this.cleanText(inserted.motivo ?? inserted.MOTIVO, 500),
       evidenciaUrl: this.cleanText(
         inserted.evidencia_url ?? inserted.EVIDENCIA_URL,
@@ -203,7 +204,10 @@ export class IncidenciasVacacionesService {
       });
     }
 
-    if ((query.fecha_inicio ?? '').trim().length && (query.fecha_fin ?? '').trim().length) {
+    if (
+      (query.fecha_inicio ?? '').trim().length &&
+      (query.fecha_fin ?? '').trim().length
+    ) {
       const range = this.resolveRange(query.fecha_inicio!, query.fecha_fin!);
       qb.andWhere('(s.fecha_inicio <= :fin AND s.fecha_fin >= :inicio)', {
         inicio: range.inicio,
@@ -247,14 +251,15 @@ export class IncidenciasVacacionesService {
       throw new NotFoundException(`Solicitud ${id} no existe`);
     }
 
-    const nextStatus = String(dto.estatus ?? 'PENDIENTE')
-      .trim();
+    const nextStatus = String(dto.estatus ?? 'PENDIENTE').trim();
     const normalizedStatus = this.normalizeEnumCode(nextStatus);
     if (!['PENDIENTE', 'APROBADO', 'RECHAZADO'].includes(normalizedStatus)) {
       throw new BadRequestException('Estatus inválido');
     }
-    const nextStatusFinal =
-      normalizedStatus as 'PENDIENTE' | 'APROBADO' | 'RECHAZADO';
+    const nextStatusFinal = normalizedStatus as
+      | 'PENDIENTE'
+      | 'APROBADO'
+      | 'RECHAZADO';
     solicitud.estatus = nextStatusFinal;
     solicitud.aprobadoPor =
       nextStatusFinal === 'APROBADO'
@@ -272,7 +277,10 @@ export class IncidenciasVacacionesService {
     const tipo = await this.tiposRepo.findOne({ where: { id: saved.tipoId } });
 
     if (saved.estatus?.toUpperCase() === 'APROBADO' && tipo != null) {
-      await this.refreshVacationBalanceForDate(saved.colaboradorId ?? 0, saved.fechaInicio);
+      await this.refreshVacationBalanceForDate(
+        saved.colaboradorId ?? 0,
+        saved.fechaInicio,
+      );
     }
 
     await this.logAudit('UPDATE_SOLICITUD_ESTATUS', ctx, {
@@ -285,10 +293,7 @@ export class IncidenciasVacacionesService {
     return this.toSolicitudView(saved, tipo ?? undefined);
   }
 
-  async uploadEvidencia(
-    file: Express.Multer.File,
-    ctx: RequestContext,
-  ) {
+  async uploadEvidencia(file: Express.Multer.File, ctx: RequestContext) {
     if (!file || !file.buffer || !file.buffer.length) {
       throw new BadRequestException('Archivo de evidencia requerido');
     }
@@ -432,13 +437,14 @@ export class IncidenciasVacacionesService {
 
     const year = Number(anio ?? new Date().getFullYear());
     if (!Number.isFinite(year) || year < 2000 || year > 2200) {
-      throw new BadRequestException('Año inválido para dashboard de vacaciones');
+      throw new BadRequestException(
+        'Año inválido para dashboard de vacaciones',
+      );
     }
 
     try {
-      const diasTotales = await this.calculateVacationDaysBySeniority(
-        colaboradorId,
-      );
+      const diasTotales =
+        await this.calculateVacationDaysBySeniority(colaboradorId);
       const diasUsados = await this.calculateVacationDaysUsed(
         colaboradorId,
         year,
@@ -475,13 +481,14 @@ export class IncidenciasVacacionesService {
         dias_disponibles: Math.max(0, diasTotales - diasUsados),
         dias_tomados: diasUsados,
         dias_totales: diasTotales,
-        proximas_vacaciones: ((upcomingRows as Record<string, unknown>[]) ?? [])
-          .map((row) => ({
-            id: Number(row.id ?? 0),
-            tipo: this.cleanText(row.tipo_nombre, 120) ?? '',
-            fecha_inicio: this.toDateIsoFromUnknown(row.fecha_inicio),
-            fecha_fin: this.toDateIsoFromUnknown(row.fecha_fin),
-          })),
+        proximas_vacaciones: (
+          (upcomingRows as Record<string, unknown>[]) ?? []
+        ).map((row) => ({
+          id: Number(row.id ?? 0),
+          tipo: this.cleanText(row.tipo_nombre, 120) ?? '',
+          fecha_inicio: this.toDateIsoFromUnknown(row.fecha_inicio),
+          fecha_fin: this.toDateIsoFromUnknown(row.fecha_fin),
+        })),
       };
     } catch (error) {
       console.error('ERROR VACACIONES DASHBOARD:', {
@@ -514,7 +521,9 @@ export class IncidenciasVacacionesService {
     if (!(await this.tableExists('dbo.ATT_SOLICITUDES'))) return map;
     if (!(await this.tableExists('dbo.ATT_PERMISOS_TIPOS'))) return map;
 
-    const unique = [...new Set(colaboradorIds.filter((v) => Number.isFinite(v) && v > 0))];
+    const unique = [
+      ...new Set(colaboradorIds.filter((v) => Number.isFinite(v) && v > 0)),
+    ];
     if (!unique.length) return map;
 
     const rows = await this.dataSource.query(
@@ -726,12 +735,24 @@ export class IncidenciasVacacionesService {
     );
   }
 
-  private async refreshVacationBalanceForDate(colaboradorId: number, dateIso?: string) {
+  private async refreshVacationBalanceForDate(
+    colaboradorId: number,
+    dateIso?: string,
+  ) {
     const year = Number((dateIso ?? this.toDateIso(new Date())).slice(0, 4));
     if (!Number.isFinite(year) || year < 2000) return;
-    const diasTotales = await this.calculateVacationDaysBySeniority(colaboradorId);
-    const diasUsados = await this.calculateVacationDaysUsed(colaboradorId, year);
-    await this.upsertVacationBalance(colaboradorId, year, diasTotales, diasUsados);
+    const diasTotales =
+      await this.calculateVacationDaysBySeniority(colaboradorId);
+    const diasUsados = await this.calculateVacationDaysUsed(
+      colaboradorId,
+      year,
+    );
+    await this.upsertVacationBalance(
+      colaboradorId,
+      year,
+      diasTotales,
+      diasUsados,
+    );
   }
 
   private async resolveIngresoDate(colaboradorId: number) {
@@ -739,7 +760,10 @@ export class IncidenciasVacacionesService {
       'dbo.COLABORADORES',
       'fecha_ingreso',
     );
-    const hasCreatedAt = await this.columnExists('dbo.COLABORADORES', 'creado_en');
+    const hasCreatedAt = await this.columnExists(
+      'dbo.COLABORADORES',
+      'creado_en',
+    );
 
     const ingresoExpr = hasFechaIngreso
       ? 'c.fecha_ingreso'
@@ -800,7 +824,9 @@ export class IncidenciasVacacionesService {
     const inicio = this.toDateIso(start);
     const fin = this.toDateIso(end);
     if (inicio > fin) {
-      throw new BadRequestException('fecha_inicio no puede ser mayor que fecha_fin');
+      throw new BadRequestException(
+        'fecha_inicio no puede ser mayor que fecha_fin',
+      );
     }
     return {
       inicio,
@@ -816,9 +842,7 @@ export class IncidenciasVacacionesService {
       throw new BadRequestException(`${fieldName} es requerido`);
     }
 
-    const isoCandidate = value.includes('T')
-      ? value
-      : `${value}T00:00:00`;
+    const isoCandidate = value.includes('T') ? value : `${value}T00:00:00`;
     const parsed = new Date(isoCandidate);
     if (Number.isNaN(parsed.getTime())) {
       throw new BadRequestException(
@@ -913,7 +937,9 @@ export class IncidenciasVacacionesService {
   private toBool(value: unknown) {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'number') return value !== 0;
-    const text = String(value ?? '').trim().toLowerCase();
+    const text = String(value ?? '')
+      .trim()
+      .toLowerCase();
     return text === '1' || text === 'true' || text === 'si' || text === 'sí';
   }
 
@@ -1031,12 +1057,7 @@ export class IncidenciasVacacionesService {
       )
       VALUES (@0, @1, 'incidencias-vacaciones', @2, @3, GETDATE());
       `,
-      [
-        ctx.actorId,
-        accion,
-        ctx.ip,
-        JSON.stringify(details),
-      ],
+      [ctx.actorId, accion, ctx.ip, JSON.stringify(details)],
     );
   }
 }

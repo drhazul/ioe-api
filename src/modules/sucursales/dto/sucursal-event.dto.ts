@@ -128,7 +128,8 @@ export class SucursalEventDto {
 
   @ApiPropertyOptional({
     example: true,
-    description: 'Marca true cuando terminal estuvo offline y sincroniza después',
+    description:
+      'Marca true cuando terminal estuvo offline y sincroniza después',
   })
   @IsOptional()
   @IsBoolean()

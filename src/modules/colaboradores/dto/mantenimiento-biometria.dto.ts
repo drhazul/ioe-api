@@ -1,11 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsBoolean,
-  IsIn,
-  IsOptional,
-  IsString,
-  Length,
-} from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator';
 
 const MANTENIMIENTO_ACTIONS = ['SIN_CAMBIO', 'REGISTRAR', 'CAMBIAR'] as const;
 type MantenimientoAction = (typeof MANTENIMIENTO_ACTIONS)[number];
@@ -47,7 +41,10 @@ export class MantenimientoBiometriaDto {
   @IsIn(MANTENIMIENTO_ACTIONS)
   pin_action?: MantenimientoAction;
 
-  @ApiPropertyOptional({ example: '100245', description: 'Nuevo NIP/PIN del colaborador' })
+  @ApiPropertyOptional({
+    example: '100245',
+    description: 'Nuevo NIP/PIN del colaborador',
+  })
   @IsOptional()
   @IsString()
   @Length(1, 30)

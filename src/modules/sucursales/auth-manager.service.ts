@@ -96,7 +96,9 @@ export class AuthManagerService {
     );
 
     const row = rows?.[0] as Record<string, unknown> | undefined;
-    const securePinHash = String(row?.secure_pin ?? row?.SECURE_PIN ?? '').trim();
+    const securePinHash = String(
+      row?.secure_pin ?? row?.SECURE_PIN ?? '',
+    ).trim();
     const collaboratorPin = String(row?.pin ?? row?.PIN ?? '').trim();
     const hasBiometricActive =
       Number(
@@ -113,8 +115,7 @@ export class AuthManagerService {
         if (this.isBcryptHash(securePinHash)) {
           pinAccepted = await bcrypt.compare(provided, securePinHash);
         } else {
-          pinAccepted =
-            securePinHash.toUpperCase() === provided.toUpperCase();
+          pinAccepted = securePinHash.toUpperCase() === provided.toUpperCase();
         }
       }
 
