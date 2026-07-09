@@ -2164,15 +2164,20 @@ export class OrdenesTrabajoService {
         @SUC=@${5 + extraParams.length}
     `;
 
-    const rows = await this.dataSource.query(sql, [
-      iord,
-      ...extraParams,
-      actor,
-      ip,
-      scope.isAdmin ? 1 : 0,
-      scope.allowedSucsCsv,
-      scope.requestedSuc,
-    ]);
+    let rows: unknown[];
+    try {
+      rows = await this.dataSource.query(sql, [
+        iord,
+        ...extraParams,
+        actor,
+        ip,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        scope.requestedSuc,
+      ]);
+    } catch (error) {
+      throw this.mapError(error, `No fue posible procesar la ORD ${iord}`);
+    }
 
     const result = this.firstRow(rows);
     if (!result) {
@@ -3598,7 +3603,7 @@ export class OrdenesTrabajoService {
     const finalDiff =
       this.toFloat(result.data.DIFERENCIA_ECONOMICA) ?? sealedDiff ?? 0;
 
-    await this.normalizeCambioMermaNewOrdRecord(finalNewIord, artNuevo);
+    await this.normalizeCambioMermaNewOrdRecord(finalNewIord, artNuevo, ctdCM);
     await this.forceEstatus2FromActionData(result.data);
     await this.finalizeCambioMermaOriginalAfterAuthorize(
       iord,
@@ -4184,16 +4189,20 @@ export class OrdenesTrabajoService {
   private async normalizeCambioMermaNewOrdRecord(
     iordRaw: string,
     artNuevoRaw: string | null,
+    ctdCMRaw?: number | null,
   ) {
     const iord = this.normalizeText(iordRaw);
     if (!iord) return;
     const artNuevo = this.normalizeText(artNuevoRaw);
+    const ctdCM = this.toFloat(ctdCMRaw);
     await this.dataSource.query(
       `
       UPDATE o
       SET
         ART = COALESCE(NULLIF(@1, ''), o.ART),
         MAT = COALESCE(NULLIF(@1, ''), o.MAT),
+        CTD = COALESCE(@2, TRY_CONVERT(FLOAT, o.CTD)),
+        CTD_C_M = COALESCE(@2, TRY_CONVERT(FLOAT, o.CTD_C_M)),
         TIPOM = 0,
         MOTR = NULL,
         DESCART = COALESCE(
@@ -4207,7 +4216,7 @@ export class OrdenesTrabajoService {
        AND UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(COALESCE(NULLIF(@1, ''), o.ART), ''))))
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
       `,
-      [iord, artNuevo ?? ''],
+      [iord, artNuevo ?? '', ctdCM],
     );
   }
 

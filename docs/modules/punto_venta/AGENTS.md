@@ -118,6 +118,7 @@ Enlaces relacionados:
 - devolución parcial solo cuando el ticket origen tiene una sola forma y es `EFECTIVO`.
 - si ticket origen tiene forma mixta o no-efectivo, devolución debe ser total y respetar cada forma/referencia de origen.
 - finalización valida que payload de `formas` coincida con forma(s) esperada(s) del origen; si no coincide responde `409`.
+- forma original (2026-07-06): `TARJETA CREDITO` se conserva como forma de devolución válida con importe negativo y referencia `AUT` del origen; si no existen formas origen disponibles, el backend responde `409` en vez de usar `EFECTIVO`.
 - soporte SQL sugerido: `sql/2026-05-14_pv_devoluciones_formas_mixtas_prorrata_indexes.sql` (índices para `IDFOLORIG` y tabla de formas).
 
 ## Pago de Servicios PS (implementado 2026-03)

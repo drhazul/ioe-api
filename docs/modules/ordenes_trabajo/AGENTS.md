@@ -107,5 +107,6 @@ Enlaces relacionados:
 - trazabilidad API/UI ORDs (2026-04-21): para `GET /ordenes-trabajo/asignar/colaboradores`, el contrato se mantiene (`suc` por query); la UI debe enviarla conforme a `DAT_LAB.SUC` del laboratorio asignado a la ORD. El payload `laboratorios` agrega `labSuc` para diferenciar la sucursal real del laboratorio frente a la sucursal de acceso.
 - fix incidencia ORDs (2026-04-05): `sp_ordenes_trabajo_regresar_incidencia_lote` restituye parámetro `@TIPOM` (motivo `DAT_ORD_TMOV`) y corrige error SQL de argumentos al ejecutar `POST /ordenes-trabajo/regresar-incidencia/lote`.
 - catálogo estados ORD (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT`; script `sql/2026-03-22_dat_est_ord_esta_float.sql`.
-
+- cambio/merma CTD nueva ORD (2026-07-09): la nueva ORD derivada debe persistir `CTD = CTD_C_M`; backend lo refuerza tras autorizar y el script `sql/2026-07-09_ordenes_trabajo_cambio_merma_nueva_ord_ctdcm_fix.sql` actualiza SPs y repara derivadas ya creadas con cantidad distinta.
+- cambio/merma autorización final (2026-07-09): `sp_ordenes_trabajo_registrar_ctrl_ctas_diff` debe generar `NDOC` sin reutilizar `DAT_CTR_DOC.DOC`; usar lock global y loop de existencia. Script: `sql/2026-07-09_ordenes_trabajo_ctrl_ctas_ndoc_global_fix.sql`.
 

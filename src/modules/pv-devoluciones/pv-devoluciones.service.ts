@@ -121,6 +121,7 @@ export class PvDevolucionesService {
   private static readonly FORMAS_PERMITIDAS = new Set([
     'EFECTIVO',
     'TARJETA',
+    'TARJETA CREDITO',
     'CHEQUE',
     'TRANSFERENCIA',
     'DEPOSITO 3RO',
@@ -564,11 +565,7 @@ export class PvDevolucionesService {
       tipotran: context.tipotran,
       rqfac,
     });
-    await this.assertPartialRefundPolicy(
-      this.dataSource,
-      context,
-      lines,
-    );
+    await this.assertPartialRefundPolicy(this.dataSource, context, lines);
     const formasSugeridas = await this.suggestFormasPago(
       this.dataSource,
       context.idfolOrig,
@@ -1877,13 +1874,9 @@ export class PvDevolucionesService {
       idfolDev,
     );
     if (!buckets.length) {
-      return [
-        {
-          form: 'EFECTIVO',
-          impp: this.round2(total),
-          aut: null,
-        },
-      ];
+      throw new ConflictException(
+        'No se encontraron formas de pago disponibles del ticket origen para aplicar la devolución',
+      );
     }
 
     const creditBuckets = buckets.filter((item) => item.isCreditoDeudor);
@@ -1904,8 +1897,11 @@ export class PvDevolucionesService {
       const abonoCreditoTotal = this.round2(
         Math.min(total, maxByDebt, maxByCreditAvailable),
       );
-      const sugeridas: Array<{ form: string; impp: number; aut: string | null }> =
-        [];
+      const sugeridas: Array<{
+        form: string;
+        impp: number;
+        aut: string | null;
+      }> = [];
       if (abonoCreditoTotal > 0) {
         const creditAlloc = this.allocateByAvailability(
           abonoCreditoTotal,
@@ -1923,11 +1919,11 @@ export class PvDevolucionesService {
         }
       }
 
-      const restante = this.round2(
-        Math.max(total - abonoCreditoTotal, 0),
-      );
+      const restante = this.round2(Math.max(total - abonoCreditoTotal, 0));
       if (restante > 0) {
-        const nonCreditBuckets = buckets.filter((item) => !item.isCreditoDeudor);
+        const nonCreditBuckets = buckets.filter(
+          (item) => !item.isCreditoDeudor,
+        );
         const availableNonCredit = this.round2(
           nonCreditBuckets.reduce((acc, item) => acc + item.amountAvailable, 0),
         );
@@ -2063,7 +2059,10 @@ export class PvDevolucionesService {
       const row = raw as Record<string, unknown>;
       const form = this.normalizeForma(this.getRowValue(row, 'FORM'));
       if (!form || !PvDevolucionesService.FORMAS_PERMITIDAS.has(form)) continue;
-      const aut = form === 'EFECTIVO' ? null : this.nullableText(this.getRowValue(row, 'AUT'));
+      const aut =
+        form === 'EFECTIVO'
+          ? null
+          : this.nullableText(this.getRowValue(row, 'AUT'));
       const amount = this.extractFormaAmountFromRow(row, {
         hasImpp,
         hasImpd,
@@ -2106,7 +2105,10 @@ export class PvDevolucionesService {
       const row = raw as Record<string, unknown>;
       const form = this.normalizeForma(this.getRowValue(row, 'FORM'));
       if (!form) continue;
-      const aut = form === 'EFECTIVO' ? null : this.nullableText(this.getRowValue(row, 'AUT'));
+      const aut =
+        form === 'EFECTIVO'
+          ? null
+          : this.nullableText(this.getRowValue(row, 'AUT'));
       const key = this.buildFormaKey(form, aut);
       const bucket = map.get(key);
       const amount = this.extractFormaAmountFromRow(row, {
@@ -2130,7 +2132,9 @@ export class PvDevolucionesService {
           return b.amountAvailable - a.amountAvailable;
         }
         if (a.form !== b.form) return a.form.localeCompare(b.form);
-        return this.normalizeUpper(a.aut).localeCompare(this.normalizeUpper(b.aut));
+        return this.normalizeUpper(a.aut).localeCompare(
+          this.normalizeUpper(b.aut),
+        );
       });
   }
 
@@ -2201,9 +2205,14 @@ export class PvDevolucionesService {
     const availableCents = availability.map((value) =>
       Math.max(0, Math.round(this.round2(value) * 100)),
     );
-    const availableTotalCents = availableCents.reduce((acc, value) => acc + value, 0);
+    const availableTotalCents = availableCents.reduce(
+      (acc, value) => acc + value,
+      0,
+    );
     if (availableTotalCents <= 0) {
-      throw new ConflictException('No hay saldo disponible por forma para aplicar devolución');
+      throw new ConflictException(
+        'No hay saldo disponible por forma para aplicar devolución',
+      );
     }
     if (targetCents > availableTotalCents) {
       throw new ConflictException(
@@ -2277,7 +2286,9 @@ export class PvDevolucionesService {
     return [...formas].sort((a, b) => {
       if (b.impp !== a.impp) return b.impp - a.impp;
       if (a.form !== b.form) return a.form.localeCompare(b.form);
-      return this.normalizeUpper(a.aut).localeCompare(this.normalizeUpper(b.aut));
+      return this.normalizeUpper(a.aut).localeCompare(
+        this.normalizeUpper(b.aut),
+      );
     });
   }
 
@@ -2305,6 +2316,8 @@ export class PvDevolucionesService {
       CASH: 'EFECTIVO',
       TARJETA: 'TARJETA',
       CARD: 'TARJETA',
+      TARJETACREDITO: 'TARJETA CREDITO',
+      TARJETADECREDITO: 'TARJETA CREDITO',
       CHEQUE: 'CHEQUE',
       TRANSFERENCIA: 'TRANSFERENCIA',
       TRANSFER: 'TRANSFERENCIA',

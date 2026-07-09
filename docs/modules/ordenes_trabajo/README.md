@@ -121,5 +121,6 @@ Enlaces relacionados:
   - compatibilidad catálogo estados (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT` (script `sql/2026-03-22_dat_est_ord_esta_float.sql`) para soportar estados intermedios (p. ej. `9.1`).
   - trazabilidad API/UI ORDs (2026-04-21): la carga de colaboradores para `Asignar` sigue usando `GET /ordenes-trabajo/asignar/colaboradores?suc=...`; la UI envía `DAT_LAB.SUC` del laboratorio asignado a la ORD. El catálogo `laboratorios` del panel expone `labSuc` además de `suc`.
   - fix incidencia ORDs (2026-04-05): script `sql/2026-04-05_ordenes_trabajo_regresar_incidencia_tipom_fix.sql` corrige la firma de `sp_ordenes_trabajo_regresar_incidencia_lote` para incluir `@TIPOM` y volver a permitir `POST /ordenes-trabajo/regresar-incidencia/lote` sin error de argumentos; además persiste `TIPOM` para flujo `9.1/9.2`.
-
+- cambio/merma CTD nueva ORD (2026-07-09): `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` clonan la ORD nueva con `CTD = CTD_C_M`; el service re-normaliza `CTD/CTD_C_M` tras autorizar. Script: `sql/2026-07-09_ordenes_trabajo_cambio_merma_nueva_ord_ctdcm_fix.sql`.
+- cambio/merma autorización final (2026-07-09): `sp_ordenes_trabajo_registrar_ctrl_ctas_diff` genera `NDOC` con lock global y salta `DAT_CTR_DOC.DOC` ya existente para evitar PK duplicada durante diferencias contables. Script: `sql/2026-07-09_ordenes_trabajo_ctrl_ctas_ndoc_global_fix.sql`.
 

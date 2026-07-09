@@ -171,7 +171,7 @@ BEGIN
         @IORD_ORIG = @IORD,
         @IORD_NEW = @newIord,
         @NEW_ART = @artSalida,
-        @NEW_CTD = @ctdOrig,
+        @NEW_CTD = @ctdAfectada,
         @TIPOM = 0,
         @MOTR = NULL,
         @REEORD = @IORD,
