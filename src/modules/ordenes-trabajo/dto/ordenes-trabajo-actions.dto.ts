@@ -238,6 +238,12 @@ export class ScanOrdDto {
   @IsString()
   @Length(1, 255)
   code!: string;
+
+  @ApiPropertyOptional({ example: 'DF14' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 10)
+  suc?: string;
 }
 
 export class ValidateEnviarOrdDto {
@@ -245,6 +251,12 @@ export class ValidateEnviarOrdDto {
   @IsString()
   @Length(1, 255)
   code!: string;
+
+  @ApiPropertyOptional({ example: 'DF14' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 10)
+  suc?: string;
 }
 
 export class SendOrdBatchDto {
@@ -259,6 +271,19 @@ export class SendOrdBatchDto {
   @IsString({ each: true })
   @Length(1, 255, { each: true })
   iords!: string[];
+}
+
+export class EntregarOrdBatchDto extends SendOrdBatchDto {
+  @ApiPropertyOptional({ example: 'Entregado conforme en mostrador' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  observaciones?: string;
+
+  @ApiPropertyOptional({ example: 'FIRMA_DIGITAL_BASE64' })
+  @IsOptional()
+  @IsString()
+  firmaCliente?: string;
 }
 
 export class AssignOrdBatchDto extends SendOrdBatchDto {
@@ -342,6 +367,12 @@ export class SaveOrdDetalleDto {
     message: 'hrEnt debe tener formato HH:MM',
   })
   hrEnt?: string;
+
+  @ApiPropertyOptional({ example: 'DF14' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 10)
+  suc?: string;
 
   @ApiProperty({ type: [SaveOrdDetalleLineaDto] })
   @IsDefined()

@@ -31,6 +31,7 @@ Enlaces relacionados:
 - `POST /ordenes-trabajo/enviar/validar` (valida ORD por `IORD/IDFOL` para flujo de envío, exige `ESTSEGU=3` y laboratorio asignado)
 - `POST /ordenes-trabajo/enviar/lote` (cambio masivo a `ESTSEGU=5` para ORDs relacionadas/seleccionadas)
 - `GET /ordenes-trabajo/asignar/colaboradores` (catálogo `PV_OPV` por `SUC`, `NIVEL=41`)
+- `GET /ordenes-trabajo/asignar/colaboradores` amplía catálogo con sucursales origen activas desde `DAT_SUC_COLAB_ACCESO` cuando la sucursal destino tiene relación configurada; sin relación, conserva catálogo propio.
 - `POST /ordenes-trabajo/asignar/validar` (valida ORD en `ESTSEGU=7`)
 - `POST /ordenes-trabajo/asignar/lote` (cambio masivo `7 -> 8`, actualiza `ASIGN` y `FCNAS` cuando existe)
 - `POST /ordenes-trabajo/trabajo-terminado/validar` (valida ORD en `ESTSEGU=8`)
@@ -53,10 +54,12 @@ Enlaces relacionados:
 - selección de renglones y escaneo se resuelven en frontend/appstate y en endpoints dedicados, sin depender de flags legacy persistidos.
 - `enviar/lote` valida acceso por sucursal (`USR_MOD_SUC`), exige `ESTSEGU=3` y laboratorio asignado en todas las ORDs del lote, y aplica transición a `ESTSEGU=5`.
 - `recibir/lote` valida acceso por sucursal, exige `ESTSEGU=5` y aplica transición a `ESTSEGU=7`.
-- `entregar/lote` valida acceso por sucursal, exige `ESTSEGU=10` y aplica transición a `ESTSEGU=11`.
+- `entregar/lote` valida acceso por sucursal, exige `ESTSEGU=10`, crea un folio de entrega en `PV_CTR_ORDS_ENTREGA` con una sola firma capturada y aplica transición a `ESTSEGU=11` relacionando cada ORD mediante `PV_CTR_ORDS.ID_ENTREGA`.
 - `regresar-incidencia/lote` valida `ESTSEGU=8` con colaborador asignado, exige motivo `DAT_ORD_TMOV.IDT` y actualiza `TIPOM`; el panel entrega `ASIGNADO` como label de `PV_OPV` (`NOMB + APELM + APELP`).
 - `GET /ordenes-trabajo` soporta `panelMode='estado'` para consulta solo lectura; `flowStatusOptions` toma estados desde `DAT_EST_ORD`, `OPV` se resuelve con `USUARIO.NOMBRE` y el home debe usar módulo `DAT_JAO_ORD_ESTADO`.
 - garantía 9.3 (2026-04-29): `POST /ordenes-trabajo/:iord/garantia` ahora mueve `ESTSEGU` de `11` a `9.3`; el panel `entregadas` queda restringido a `admin`/`JEF_TALLER` y solo expone `VER_DETALLE`.
+- `PV_CTR_ORDS.ID_ENTREGA` enlaza la ORD con `PV_CTR_ORDS_ENTREGA`; el detalle de `ESTSEGU=11` imprime evidencia con cabecera, detalle, folio de entrega y firma base64 guardada una vez por folio.
+- `PV_CTR_ORDS_ENTREGA_DET` conserva historial por folio con clave surrogate y unicidad por `ID_ENTREGA + IORD`.
 - aplicar merma/cambio (2026-04-29): nuevo `POST /ordenes-trabajo/:iord/aplicar-merma-cambio` exige `ESTSEGU=9.3`, valida `TIPOM (1|2)` y `MOTR` (`DAT_ORD_MOTM`) y enruta a `9.1/9.2` para continuar el mismo flujo de cambio/merma.
 - recepción laboratorio externo (2026-05-01): `POST /ordenes-trabajo/recibir/validar|lote` habilita `SCAN_RECIBIR` para `ANALISTA_ORD/ANALISTA` solo sobre ORDs de laboratorio externo; recepción cambia `ESTSEGU=5 -> 10` para externo y mantiene `5 -> 7` para laboratorio interno.
 - envío laboratorio externo (2026-05-03): `POST /ordenes-trabajo/enviar/lote` envía ORDs con `DAT_LAB.UBILAB='EXTERNO'` a flujo `ESTSEGU=9` (pendiente recibir en analista); laboratorio interno conserva `3 -> 5`.
@@ -64,7 +67,7 @@ Enlaces relacionados:
 - matriz persistente de visibilidad (2026-05-03): tabla `dbo.DAT_JAO_ORD_FLUJO_VIS` define estatus visibles por `ROLE_CODE` y `PANEL_MODE` para módulo `DAT_JAO_ORD`; `SOLO_EXTERNO=1` restringe flujo al laboratorio externo (`DAT_LAB.UBILAB='EXTERNO'`).
 - `POST /ordenes-trabajo/:iord/detalle/guardar` acepta `hrEnt='HH:MM'` y actualiza `PV_CTR_ORDS.HR_ENT` conservando la fecha existente de entrega cuando aplica.
 - `ANULAR` queda restringido a `admin` y `JEF_TALLER`; la mutación sigue auditando en `AUDIT_LOG` con acción `ORD_ANULAR_LOTE`.
-- `cambio-material` valida `ESTSEGU=9.1` y `TIPOM=1`; `merma` valida `ESTSEGU=9.2` y `TIPOM=2`; ambos validan `CTD_C_M` (`1|0.5`) en DTO/service/SP.
+- `cambio-material` valida `ESTSEGU=9.1` y `TIPOM=1`; `merma` valida `ESTSEGU=9.2` y `TIPOM=2`; ambos validan `CTD_C_M` contra `CTD` original (`1` -> `1|0.5`, `0.5` -> `0.5`) en DTO/service/SP y calculan diferencia sobre la fracción afectada.
 - `cambio-merma/context|preparar|solicitar-autorizacion|retrabajo|autorizar` implementa semáforo interno `selCtrlOrd` (`NULL/0/13/14/15`), con `14` en revisión, `15` retrabajo y `Autorizar` como cierre final.
 - `cambio-merma/solicitar-autorizacion` fija siempre `selCtrlOrd=14`; `cambio-merma/retrabajo` devuelve el caso a `15`; `cambio-merma/autorizar` crea la nueva ORD, ejecuta SP final, registra MB51/diferencia y anula la original.
 - solo `admin`, `ANALISTA_INV` e `INVJEF` pueden ejecutar `cambio-merma/autorizar`.
@@ -74,15 +77,21 @@ Enlaces relacionados:
 - panel ORDs (2026-05-06): `GET /ordenes-trabajo/asignar/colaboradores` permite también a `ANALISTA_INV` e `INVJEF` consultar catálogo de asignados para filtros sin error de rol.
 - panel ORDs (2026-05-06): script `sql/2026-05-06_ord_flujo_vis_analista_inv_invjef_expand.sql` amplía `DAT_JAO_ORD_FLUJO_VIS` operativo para `ANALISTA_INV/INVJEF` con el mismo set de flujos visibles de `ANALISTA_ORD`.
 - panel ORDs (2026-05-06): script `sql/2026-05-06_ordenes_trabajo_panel_analista_inv_selctrl14_fix.sql` actualiza `dbo.sp_ordenes_trabajo_panel` para contemplar `ANALISTA_INV/INVJEF` y exigir `selCtrlOrd=14` en su cola operativa de revisión.
+- panel ORDs multi-sucursal analista (2026-05-22): script `sql/2026-05-22_ordenes_trabajo_panel_home_suc_scope_fix_df14.sql` ajusta `dbo.sp_ordenes_trabajo_panel` para que, cuando llegue `@SUC` explícita y permitida en `@ALLOWED_SUCS`, no aplique recorte adicional por `@HOME_SUC`; corrige visibilidad reciente en `DF14` para usuarios `ANALISTA_ORD` con acceso multi-sucursal.
+- validación/edición multi-sucursal por IORD (2026-05-29): en consultas por `IORD/IDFOL` para `detalle/guardar`, `*/validar` y `scan`, la autorización usa sucursales permitidas completas de `USR_MOD_SUC` y ya no bloquea por `HOME_SUC`; `ScanOrdDto`, `ValidateEnviarOrdDto` y `SaveOrdDetalleDto` aceptan `suc` opcional para fijar contexto cuando frontend lo envía.
+- cambio-merma integridad artículo-descripción (2026-05-29): al autorizar cambio/merma, la ORD nueva no debe heredar `MOTR` ni descripción previa; se sincroniza `DESCART` con `DAT_ART.DES` del `ART` nuevo y se respeta que la ORD original no cambie artículo/descripción salvo solicitud explícita desde UI. Script: `sql/2026-05-29_ordenes_trabajo_cambio_merma_descart_motr_fix.sql`.
+- validación por código multi-sucursal (2026-05-30): en `validateOrdByRequiredFlow` y `assertOrdTypeAccessByCode`, cuando el código `IORD` trae prefijo `DFxx` autorizado por `USR_MOD_SUC`, se usa ese prefijo como sucursal efectiva de búsqueda para evitar `No existe ORD ... o no tiene acceso` por contexto `suc` errado.
+- ORDs derivadas cambio/merma (2026-05-22): `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` deben clonar ORD nueva con `TIPOM=0` para evitar herencia de incidencia; `sp_ordenes_trabajo_regresar_tienda_lote` debe priorizar `9 -> 10` cuando la ORD tenga relación `REEORD` (script `sql/2026-05-22_ordenes_trabajo_derivadas_flujo_9_fix.sql`).
 - reserva NVA_IORD (2026-05-06): script `sql/2026-05-06_ordenes_trabajo_nva_iord_reserva_colision_fix.sql` refuerza `sp_pv_ctr_ords_generate_iord` para tomar consecutivo también contra `PV_ORD_CAMBIO_MERMA_TMP.NVA_IORD` y evitar que punto de venta reutilice IORD reservadas por cambio/merma.
 - reserva NVA_IORD (2026-05-06): `GET /ordenes-trabajo/:iord/cambio-merma/context` y flujos de captura revalidan reserva; si `NVA_IORD` ya existe en `PV_CTR_ORDS`, backend regenera y sella nuevo consecutivo en staging.
 - catálogo de motivos de movimiento: `DAT_ORD_MOTM` (`IDM`, `MOTM`, `TIPO`, `RESPONSABLE`) + `@MOTR` en SPs para trazar motivo seleccionado.
 - staging `dbo.PV_ORD_CAMBIO_MERMA_TMP` es obligatorio para la captura temporal previa a la creación definitiva.
 - los SPs de cambio/merma calculan diferencia económica usando precio real de origen (`PV_TICKET_LOG`) y aplican afectación contable solo si la diferencia sobre `CTD_C_M` es distinta de cero.
 - cálculo de `Subtotal/IVA/Total` en contexto cambio/merma se alinea con cotizaciones/pago usando `DAT_SUC.IVA_INTEGRADO` + `PV_CTR_FOL_ASVR.REQF/RQFAC` y tipo `AUT/ORIGEN_AUT`; no inferir `tipotran` por patrón textual de `IDFOL`.
+- cambio material / Merma (2026-06-17): `Subtotal/IVA/Total` de la ORD original usan `PVTAT` base del ticket log como importe ya totalizado; el fallback a `PVTA` queda fuera y no se vuelve a multiplicar por `CTD`.
 - cálculo fiscal folio (2026-04-19): para `REQF` se debe usar fallback `RQFAC` desde `PV_CTR_FOL_ASVR` tanto en contexto/API como en SPs de creación, evitando dependencia de `PV_CTR_ORDS.RQFAC` cuando venga `NULL`.
 - staging UX/API (2026-04-19): `GET .../cambio-merma/context` expone `hasStagingRecord` para que frontend bloquee captura/autorización hasta insertar staging en `PV_ORD_CAMBIO_MERMA_TMP`.
-- costo nueva ORD (2026-04-19): contexto y SPs de creación igualan costo de nueva ORD al costo base de la ORD original para evitar diferencias de precio.
+- costo nueva ORD (2026-04-19): contexto y SPs de creación toman precio unitario de la nueva ORD desde `DAT_ART` por sucursal y artículo; la ORD original sigue usando `PVTAT base` del ticket log.
 - recepción unificada sin destino (`TALLER/ANALISTA`): backend fija recepción operativa a `ESTSEGU=7`.
 - permisos de recepción (`RECIBIR` y `SCAN_RECIBIR`) restringidos a `ENC_MAQUILA/ENCARGADO_MAQUILA/ENC_BISEL/ENCARGADO_BISELADO` y `JEF_TALLER`; admin conserva acceso total.
 - trazabilidad UI (app): en modal de envío se retira botón `Agregar ORD`; la captura manual agrega por `Enter` en el campo `ORD` (sin cambios de contrato API).
@@ -92,11 +101,12 @@ Enlaces relacionados:
 - compat ORD panel/detalle (2026-03-30): `sp_ordenes_trabajo_panel` ahora filtra `@CLIENT` contra `CLIEN` y `NCLIENTE`; `sp_ordenes_trabajo_detalle` devuelve `PV_CTR_ORDS_DET` en secuencia `OD`, `OI`, `ADD`, y el service refuerza ese orden en la respuesta JSON.
 - trazabilidad UI/Home (app, 2026-03-24): `ioe_app` agrega accesos rápidos en Home para `Enviar`, `Asignar`, `Regresar a tienda`, `Recibir` y `Entregar`; visibilidad se resuelve consumiendo `allowedActions` del panel ORDs.
 - trazabilidad UI/Home (app, 2026-03-24): los accesos Home abren páginas standalone (no el panel) replicando la mecánica de validación/captura de los popups del panel; backend reutiliza los mismos endpoints.
-- trazabilidad UI/Home (app, 2026-03-24): `Entregar` directa captura firma digital y usa `POST /ordenes-trabajo/:iord/entregar` por cada ORD; sin cambios backend/SQL.
+- trazabilidad UI/Home (app, 2026-03-24): `Entregar` directa captura firma digital, agrupa ORDs relacionadas en un folio de entrega y confirma el lote con backend; la evidencia se imprime desde `GET /ordenes-trabajo/:iord/detalle`.
 - regla obligatoria panel/home (2026-04-07): si se ajusta una regla de flujo o validacion de negocio en botoneras del panel, se debe actualizar en el mismo cambio la validacion/ejecucion equivalente para accesos de Home (endpoints `*/validar` y `*/lote`) para evitar diferencias funcionales entre ambos flujos.
 - trazabilidad API/UI ORDs (2026-03-30): `OrdenesTrabajoService.getDetail` reordena `details` en memoria como defensa extra aunque SQL ya venga ordenado.
 - trazabilidad API/UI ORDs (2026-04-21): para `GET /ordenes-trabajo/asignar/colaboradores`, el contrato se mantiene (`suc` por query); la UI debe enviarla conforme a `DAT_LAB.SUC` del laboratorio asignado a la ORD. El payload `laboratorios` agrega `labSuc` para diferenciar la sucursal real del laboratorio frente a la sucursal de acceso.
 - fix incidencia ORDs (2026-04-05): `sp_ordenes_trabajo_regresar_incidencia_lote` restituye parámetro `@TIPOM` (motivo `DAT_ORD_TMOV`) y corrige error SQL de argumentos al ejecutar `POST /ordenes-trabajo/regresar-incidencia/lote`.
 - catálogo estados ORD (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT`; script `sql/2026-03-22_dat_est_ord_esta_float.sql`.
-
+- cambio/merma CTD nueva ORD (2026-07-09): la nueva ORD derivada debe persistir `CTD = CTD_C_M`; backend lo refuerza tras autorizar y el script `sql/2026-07-09_ordenes_trabajo_cambio_merma_nueva_ord_ctdcm_fix.sql` actualiza SPs y repara derivadas ya creadas con cantidad distinta.
+- cambio/merma autorización final (2026-07-09): `sp_ordenes_trabajo_registrar_ctrl_ctas_diff` debe generar `NDOC` sin reutilizar `DAT_CTR_DOC.DOC`; usar lock global y loop de existencia. Script: `sql/2026-07-09_ordenes_trabajo_ctrl_ctas_ndoc_global_fix.sql`.
 

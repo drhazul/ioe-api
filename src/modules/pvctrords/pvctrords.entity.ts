@@ -5,6 +5,9 @@ export class PvCtrOrdsEntity {
   @PrimaryColumn({ name: 'IORD', type: 'nvarchar', length: 255 })
   IORD: string;
 
+  @Column({ name: 'ID_ENTREGA', type: 'bigint', nullable: true })
+  ID_ENTREGA: number | null;
+
   @Column({ name: 'IDFOL', type: 'nvarchar', length: 255, nullable: true })
   IDFOL: string | null;
 
@@ -34,6 +37,9 @@ export class PvCtrOrdsEntity {
 
   @Column({ name: 'COMAD', type: 'text', nullable: true })
   COMAD: string | null;
+
+  @Column({ name: 'FIRMA_CLIENTE', type: 'nvarchar', length: 'max', nullable: true })
+  FIRMA_CLIENTE: string | null;
 
   @Column({ name: 'ESTATUS', type: 'int', nullable: true })
   ESTATUS: number | null;
@@ -109,4 +115,7 @@ export class PvCtrOrdsEntity {
 
   @Column({ name: 'HR_ENT', type: 'datetime', nullable: true })
   HR_ENT: Date | null;
+
+  @Column({ name: 'TICKET_REL', type: 'nvarchar', length: 255, nullable: true })
+  TICKET_REL: string | null;
 }

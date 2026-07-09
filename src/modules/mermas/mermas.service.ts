@@ -1339,7 +1339,9 @@ export class MermasService {
   ): Promise<UserContext> {
     const raw = (user ?? {}) as Record<string, unknown>;
     const userId = Number(raw.sub ?? raw.idUsuario ?? 0);
-    const roleId = Number(raw.roleId ?? 0);
+    const roleId = Number(
+      raw.roleId ?? raw.idRol ?? raw.IDROL ?? raw.rolId ?? raw.role ?? -1,
+    );
     const username = this.normalizeText(raw.username);
     const suc = this.normalizeText(raw.suc);
     const isAdmin =

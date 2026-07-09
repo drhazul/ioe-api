@@ -58,6 +58,14 @@ export class FacturacionController {
     return this.service.validarIdFolsPendientes(dto.idFols, user);
   }
 
+  @Post('pendientes/idfols')
+  pendientesPorListado(
+    @Body() dto: FacturacionIdFolValidateDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.listarPendientesPorIdFols(dto.idFols, user);
+  }
+
   @Get('reqf/folios')
   foliosReqf(
     @Query() query: ListFacturacionReqfFoliosQueryDto,

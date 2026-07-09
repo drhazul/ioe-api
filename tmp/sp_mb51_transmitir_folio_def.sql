@@ -1,5 +1,5 @@
 
-CREATE PROCEDURE dbo.sp_mb51_transmitir_folio
+CREATE OR ALTER PROCEDURE dbo.sp_mb51_transmitir_folio
   @IDFOL NVARCHAR(255),
   @USER NVARCHAR(255) = NULL
 AS
@@ -95,6 +95,7 @@ BEGIN
             END, 510),
           t.ART,
           t.CTD,
+          TICKET_REL = LTRIM(RTRIM(ISNULL(t.TICKET_REL, ''))),
           h.FCNM,
           h.SUC,
           CTOP = ISNULL(a.CTOP, 0)
@@ -117,7 +118,13 @@ BEGIN
               AND ISNULL(LTRIM(RTRIM(ISNULL(m.DOCP,''))), '') <> @idfolNorm
           ),
           [USER] = COALESCE(@actor, 'SYSTEM'),
-          CLSM = @clsm,
+          CLSM = CASE
+            WHEN NULLIF(LTRIM(RTRIM(ISNULL(b.TICKET_REL, ''))), '') IS NOT NULL
+              AND ISNULL(b.CTD, 0) < 0 THEN 207
+            WHEN NULLIF(LTRIM(RTRIM(ISNULL(b.TICKET_REL, ''))), '') IS NOT NULL
+              THEN 206
+            ELSE @clsm
+          END,
           DOCP = @idfolNorm,
           ART = b.ART,
           CTDA = ISNULL(b.CTD, 0) * @sign,

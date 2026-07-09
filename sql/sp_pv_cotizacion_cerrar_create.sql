@@ -195,7 +195,7 @@ BEGIN
     IF ISNULL(@itemsCount, 0) <= 0
       THROW 51008, 'La cotizacion no tiene articulos para cierre', 1;
 
-    IF ISNULL(@totalBase, 0) <= 0
+    IF ISNULL(@totalBase, 0) < 0
       THROW 51009, 'La cotizacion tiene total base invalido', 1;
 
     SELECT TOP 1
@@ -250,7 +250,7 @@ BEGIN
       [aut] NVARCHAR(255) '$.aut'
     ) J;
 
-    IF NOT EXISTS (SELECT 1 FROM @FORMAS)
+    IF NOT EXISTS (SELECT 1 FROM @FORMAS) AND ISNULL(@totalFinal, 0) > @epsilon
       THROW 51011, 'Debe registrar al menos una forma de pago', 1;
 
     UPDATE F
@@ -269,7 +269,7 @@ BEGIN
     IF EXISTS (
       SELECT 1
       FROM @FORMAS
-      WHERE FORM NOT IN ('EFECTIVO', 'TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO', 'CREDITO', 'DEUDOR')
+      WHERE FORM NOT IN ('EFECTIVO', 'TARJETA', 'TARJETA CREDITO', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO', 'CREDITO', 'DEUDOR')
     )
       THROW 51012, 'Se detecto una forma de pago no permitida', 1;
 
@@ -288,30 +288,30 @@ BEGIN
         THROW 51015, 'Para cierre tipo CA solo se permite una forma de pago', 1;
     END
 
-    IF EXISTS (SELECT 1 FROM @FORMAS WHERE FORM = 'CREDITO')
+    IF EXISTS (SELECT 1 FROM @FORMAS WHERE FORM IN ('CREDITO', 'DEUDOR'))
       AND (SELECT COUNT(1) FROM @FORMAS) > 1
-      THROW 51034, 'La forma CREDITO no se puede combinar con otras formas de pago', 1;
+      THROW 51034, 'Las formas CREDITO y DEUDOR no se pueden combinar con otras formas de pago', 1;
 
     IF EXISTS (
       SELECT 1
       FROM @FORMAS
-      WHERE FORM IN ('TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
+      WHERE FORM IN ('TARJETA', 'TARJETA CREDITO', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
         AND NULLIF(LTRIM(RTRIM(ISNULL(AUT, ''))), '') IS NULL
     )
-      THROW 51016, 'TARJETA/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO requieren referencia', 1;
+      THROW 51016, 'TARJETA/TARJETA CREDITO/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO requieren referencia', 1;
 
     IF EXISTS (
       SELECT 1
       FROM @FORMAS
-      WHERE FORM NOT IN ('TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
+      WHERE FORM NOT IN ('TARJETA', 'TARJETA CREDITO', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
         AND NULLIF(LTRIM(RTRIM(ISNULL(AUT, ''))), '') IS NOT NULL
     )
-      THROW 51017, 'Solo TARJETA/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO permiten referencia manual', 1;
+      THROW 51017, 'Solo TARJETA/TARJETA CREDITO/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO permiten referencia manual', 1;
 
     IF EXISTS (
       SELECT 1
       FROM @FORMAS
-      WHERE FORM IN ('TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO', 'CREDITO', 'DEUDOR')
+      WHERE FORM IN ('TARJETA', 'TARJETA CREDITO', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO', 'CREDITO', 'DEUDOR')
     )
     AND TRY_CONVERT(INT, @clien) = 1
       THROW 51018, 'Para formas no efectivo el cliente no puede ser 1', 1;
@@ -322,7 +322,7 @@ BEGIN
     IF EXISTS (
       SELECT UPPER(LTRIM(RTRIM(AUT)))
       FROM @FORMAS
-      WHERE FORM IN ('TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
+      WHERE FORM IN ('TARJETA', 'TARJETA CREDITO', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
       GROUP BY UPPER(LTRIM(RTRIM(AUT)))
       HAVING COUNT(1) > 1
     )
@@ -331,12 +331,12 @@ BEGIN
     INSERT INTO @USED_REFS (IDREF)
     SELECT DISTINCT UPPER(LTRIM(RTRIM(AUT)))
     FROM @FORMAS
-    WHERE FORM IN ('TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO');
+    WHERE FORM IN ('TARJETA', 'TARJETA CREDITO', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO');
 
     IF EXISTS (
       SELECT 1
       FROM @FORMAS F
-      WHERE F.FORM IN ('TARJETA', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
+      WHERE F.FORM IN ('TARJETA', 'TARJETA CREDITO', 'CHEQUE', 'TRANSFERENCIA', 'DEPOSITO 3RO')
         AND NOT EXISTS (
           SELECT 1
           FROM dbo.REF_DETALLE R
@@ -351,7 +351,7 @@ BEGIN
             AND TRY_CONVERT(MONEY, R.IMPT) IS NOT NULL
         )
     )
-      THROW 51021, 'Debe asignar referencia valida para TARJETA/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO', 1;
+      THROW 51021, 'Debe asignar referencia valida para TARJETA/TARJETA CREDITO/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO', 1;
 
     IF EXISTS (
       SELECT 1
@@ -366,8 +366,40 @@ BEGIN
     )
       THROW 51022, 'Existen referencias ligadas al folio sin utilizar; elimine las referencias no usadas antes de finalizar', 1;
 
-    SELECT @sumPagos = ROUND(SUM(ISNULL(IMPP, 0)), 2)
+    SELECT @sumPagos = ISNULL(ROUND(SUM(ISNULL(IMPP, 0)), 2), 0)
     FROM @FORMAS;
+
+    DECLARE @acumuladoFormas MONEY = 0;
+    DECLARE @pendienteForma MONEY = 0;
+    DECLARE @formaValidacion NVARCHAR(40);
+    DECLARE @imppValidacion MONEY;
+
+    DECLARE forma_validacion_cursor CURSOR LOCAL FAST_FORWARD FOR
+      SELECT FORM, IMPP
+      FROM @FORMAS
+      ORDER BY ROW_ID;
+
+    OPEN forma_validacion_cursor;
+    FETCH NEXT FROM forma_validacion_cursor INTO @formaValidacion, @imppValidacion;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+      SET @pendienteForma = CASE
+        WHEN @totalFinal - @acumuladoFormas > 0
+          THEN ROUND(@totalFinal - @acumuladoFormas, 2)
+        ELSE 0
+      END;
+
+      IF @formaValidacion <> 'EFECTIVO'
+        AND ISNULL(@imppValidacion, 0) > @pendienteForma + @epsilon
+        THROW 51035, 'Las formas no efectivo no pueden exceder el pendiente por liquidar', 1;
+
+      SET @acumuladoFormas = ROUND(@acumuladoFormas + ISNULL(@imppValidacion, 0), 2);
+      FETCH NEXT FROM forma_validacion_cursor INTO @formaValidacion, @imppValidacion;
+    END
+
+    CLOSE forma_validacion_cursor;
+    DEALLOCATE forma_validacion_cursor;
 
     IF @sumPagos + @epsilon < @totalFinal
       THROW 51023, 'El total pagado es menor al total de la cotizacion', 1;
@@ -836,4 +868,6 @@ BEGIN
   END CATCH
 END;
 GO
+
+
 

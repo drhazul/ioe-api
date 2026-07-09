@@ -13,22 +13,23 @@ import { RefreshDto } from './dto/refresh.dto';
 export class AuthController {
   constructor(private readonly service: AuthService) {}
 
-  @Post('login')
-  login(@Body() dto: LoginDto, @Req() req: Request) {
+  private requestMeta(req: Request) {
     const ip =
       (req.headers['x-forwarded-for'] as string) ||
       req.socket.remoteAddress ||
       undefined;
     const userAgent = req.headers['user-agent'] || undefined;
-    return this.service.login(dto.username, dto.password, {
-      ip,
-      userAgent: String(userAgent),
-    });
+    return { ip, userAgent: String(userAgent) };
+  }
+
+  @Post('login')
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    return this.service.login(dto.username, dto.password, this.requestMeta(req));
   }
 
   @Post('refresh')
-  refresh(@Body() dto: RefreshDto) {
-    return this.service.refresh(dto.refreshToken);
+  refresh(@Body() dto: RefreshDto, @Req() req: Request) {
+    return this.service.refresh(dto.refreshToken, this.requestMeta(req));
   }
 
   @ApiBearerAuth()
@@ -39,17 +40,11 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
     @Req() req: Request,
   ) {
-    const ip =
-      (req.headers['x-forwarded-for'] as string) ||
-      req.socket.remoteAddress ||
-      undefined;
-    const userAgent = req.headers['user-agent'] || undefined;
-
     return this.service.changePassword(
       Number(user.sub),
       dto.currentPassword,
       dto.newPassword,
-      { ip, userAgent: String(userAgent) },
+      this.requestMeta(req),
     );
   }
 

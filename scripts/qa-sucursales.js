@@ -3,7 +3,7 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 
-const API_BASE_URL = process.env.QA_BASE_URL || 'http://127.0.0.1:3001';
+const API_BASE_URL = process.env.QA_BASE_URL || 'http://127.0.0.1:3000';
 const API_DIR = process.cwd();
 const STARTUP_TIMEOUT_MS = Number(process.env.QA_STARTUP_TIMEOUT_MS || 120000);
 const POLL_INTERVAL_MS = 2000;

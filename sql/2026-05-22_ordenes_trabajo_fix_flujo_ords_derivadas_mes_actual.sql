@@ -1,0 +1,99 @@
+/*
+  Corrección puntual de datos: ORDs derivadas cambio/merma con flujo incorrecto
+  Fecha: 2026-05-22
+
+  Alcance:
+  - Solo mes actual (desde primer día del mes hasta hoy).
+  - Solo ORDs derivadas (REEORD con valor).
+  - Solo ORDs en flujo 9.1 / 9.2.
+
+  Acción:
+  - Ajusta ESTSEGU -> 10 (REGRESADO A TIENDA / pendiente entregar cliente).
+*/
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+DECLARE @hoy DATE = CAST(GETDATE() AS DATE);
+DECLARE @inicioMes DATE = DATEFROMPARTS(YEAR(@hoy), MONTH(@hoy), 1);
+
+IF OBJECT_ID('tempdb..#FixRows') IS NOT NULL DROP TABLE #FixRows;
+CREATE TABLE #FixRows (
+  IORD NVARCHAR(255) NOT NULL,
+  IDFOL NVARCHAR(255) NULL,
+  ESTSEGU_ANT FLOAT NULL,
+  ESTSEGU_NUE FLOAT NULL,
+  TIPOM INT NULL,
+  REEORD NVARCHAR(255) NULL,
+  FCNRT DATETIME NULL,
+  FCNMOD_ANT DATETIME NULL,
+  FCNMOD_NUE DATETIME NULL
+);
+
+BEGIN TRY
+  BEGIN TRANSACTION;
+
+  UPDATE o
+  SET
+    o.ESTSEGU = 10,
+    o.ESTATUS = 2,
+    o.FCNMOD = GETDATE()
+  OUTPUT
+    inserted.IORD,
+    inserted.IDFOL,
+    deleted.ESTSEGU,
+    inserted.ESTSEGU,
+    inserted.TIPOM,
+    inserted.REEORD,
+    inserted.FCNRT,
+    deleted.FCNMOD,
+    inserted.FCNMOD
+  INTO #FixRows (
+    IORD,
+    IDFOL,
+    ESTSEGU_ANT,
+    ESTSEGU_NUE,
+    TIPOM,
+    REEORD,
+    FCNRT,
+    FCNMOD_ANT,
+    FCNMOD_NUE
+  )
+  FROM dbo.PV_CTR_ORDS o
+  WHERE TRY_CONVERT(FLOAT, o.ESTSEGU) IN (9.1, 9.2)
+    AND NULLIF(LTRIM(RTRIM(ISNULL(CAST(o.REEORD AS NVARCHAR(255)), ''))), '') IS NOT NULL
+    AND CAST(ISNULL(o.FCNRT, o.FCNMOD) AS DATE) BETWEEN @inicioMes AND @hoy;
+
+  COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+  IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+  THROW;
+END CATCH;
+
+SELECT
+  @inicioMes AS FECHA_INICIO,
+  @hoy AS FECHA_FIN,
+  COUNT(1) AS ORDS_CORREGIDAS
+FROM #FixRows;
+
+SELECT
+  IORD,
+  IDFOL,
+  ESTSEGU_ANT,
+  ESTSEGU_NUE,
+  TIPOM,
+  REEORD,
+  FCNRT,
+  FCNMOD_ANT,
+  FCNMOD_NUE
+FROM #FixRows
+ORDER BY FCNRT DESC, IORD;
+
+SELECT
+  COUNT(1) AS ORDS_PENDIENTES_CON_ERROR
+FROM dbo.PV_CTR_ORDS o
+WHERE TRY_CONVERT(FLOAT, o.ESTSEGU) IN (9.1, 9.2)
+  AND NULLIF(LTRIM(RTRIM(ISNULL(CAST(o.REEORD AS NVARCHAR(255)), ''))), '') IS NOT NULL
+  AND CAST(ISNULL(o.FCNRT, o.FCNMOD) AS DATE) BETWEEN @inicioMes AND @hoy;
+GO

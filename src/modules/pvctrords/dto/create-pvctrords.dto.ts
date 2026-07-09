@@ -200,4 +200,10 @@ export class CreatePvCtrOrdsDto {
   @IsOptional()
   @IsDateString()
   HR_ENT?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  TICKET_REL?: string;
 }

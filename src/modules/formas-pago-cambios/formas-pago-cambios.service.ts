@@ -3,7 +3,9 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { DataSource, QueryFailedError, QueryRunner } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -24,6 +26,7 @@ type CambioDetalleRow = {
   IDFOL: string | null;
   AUT_ASVR: string | null;
   AUT_FORM: string | null;
+  REQF: number | null;
   TRA: string | null;
   OPVM: string | null;
   IDF: string | null;
@@ -33,13 +36,24 @@ type CambioDetalleRow = {
   CLIEN: string | null;
 };
 
+type FacturacionSyncResult = {
+  idfol: string;
+  syncApplied: boolean;
+  estatus: string | null;
+  impt: number | null;
+  detailRows: number;
+  evento: string | null;
+};
+
 @Injectable()
 export class FormasPagoCambiosService {
   private static readonly AUT_ALLOWED: EligibleAut[] = ['AD', 'AP', 'CR', 'VF'];
+  private readonly logger = new Logger(FormasPagoCambiosService.name);
 
   constructor(
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
   ) {}
 
   async listCatalog() {
@@ -74,7 +88,41 @@ export class FormasPagoCambiosService {
 
   async listToday(user: JwtPayload, query?: ListFormaPagoCambioTodayQueryDto) {
     try {
-      const opv = this.resolveOpv(user);
+      const isAdmin = this.isAdmin(user);
+      const actorSuc = this.normalizeUpper(user?.suc ?? '');
+      const actorOpv = this.normalizeUpper(user?.username ?? '');
+      const requestedSuc = this.normalizeUpper(query?.suc ?? '');
+      const requestedOpv = this.normalizeUpper(query?.opv ?? '');
+      const effectiveSuc = isAdmin ? requestedSuc : actorSuc;
+      const effectiveOpv = isAdmin ? requestedOpv : actorOpv;
+
+      if (isAdmin) {
+        if (!effectiveSuc || !effectiveOpv) {
+          return [];
+        }
+      } else {
+        if (!actorSuc) {
+          throw new BadRequestException(
+            'No se pudo resolver sucursal para consultar cambios de forma de pago',
+          );
+        }
+        if (!actorOpv) {
+          throw new BadRequestException(
+            'No se pudo resolver OPV para consultar cambios de forma de pago',
+          );
+        }
+        if (requestedSuc && requestedSuc !== actorSuc) {
+          throw new ForbiddenException(
+            'No autorizado para consultar otra sucursal',
+          );
+        }
+        if (requestedOpv && requestedOpv !== actorOpv) {
+          throw new ForbiddenException(
+            'No autorizado para consultar otro OPV',
+          );
+        }
+      }
+
       const formTable = await this.resolveFormTable();
       const hasFormAut = await this.hasColumn(
         this.dataSource,
@@ -91,6 +139,23 @@ export class FormasPagoCambiosService {
         'dbo.PV_CTR_FOL_ASVR',
         'CLIEN',
       );
+      const hasReqf = await this.hasColumn(
+        this.dataSource,
+        'dbo.PV_CTR_FOL_ASVR',
+        'REQF',
+      );
+      const hasRqfac = !hasReqf
+        ? await this.hasColumn(
+            this.dataSource,
+            'dbo.PV_CTR_FOL_ASVR',
+            'RQFAC',
+          )
+        : false;
+      const reqfSelect = hasReqf
+        ? 'TRY_CONVERT(INT, A.REQF)'
+        : hasRqfac
+        ? 'TRY_CONVERT(INT, A.RQFAC)'
+        : 'CAST(NULL AS INT)';
       const formAutSelect = hasFormAut
         ? 'CAST(F.AUT AS nvarchar(255))'
         : 'CAST(NULL AS nvarchar(255))';
@@ -106,12 +171,22 @@ export class FormasPagoCambiosService {
 
       const idfolSearch = this.normalize(query?.idfol);
       const clienSearch = this.normalize(query?.clien);
-      const params: unknown[] = [opv];
+      const params: unknown[] = [];
       const where: string[] = [
         'CONVERT(date, A.FCN) = CONVERT(date, GETDATE())',
-        "UPPER(LTRIM(RTRIM(ISNULL(A.OPVM, '')))) = @0",
         "A.AUT IN ('AD', 'AP', 'CR', 'VF')",
       ];
+
+      if (effectiveSuc) {
+        params.push(effectiveSuc);
+        where.push(`UPPER(LTRIM(RTRIM(ISNULL(A.SUC, '')))) = @${params.length - 1}`);
+      }
+      if (effectiveOpv) {
+        params.push(effectiveOpv);
+        where.push(
+          `UPPER(LTRIM(RTRIM(ISNULL(A.OPVM, '')))) = @${params.length - 1}`,
+        );
+      }
 
       if (idfolSearch) {
         params.push(`%${idfolSearch}%`);
@@ -131,6 +206,7 @@ export class FormasPagoCambiosService {
           CAST(A.IDFOL AS nvarchar(255)) AS IDFOL,
           CAST(A.TRA AS nvarchar(255)) AS TRA,
           CAST(A.OPVM AS nvarchar(255)) AS OPVM,
+          ${reqfSelect} AS REQF,
           ${sucSelect} AS SUC,
           ${clienSelect} AS CLIEN,
           CAST(F.IDF AS nvarchar(255)) AS IDF,
@@ -201,6 +277,16 @@ export class FormasPagoCambiosService {
       }
       await this.ensureFormAllowed(qr, newForm);
 
+      const hasReqf = await this.hasColumn(qr, 'dbo.PV_CTR_FOL_ASVR', 'REQF');
+      const hasRqfac = !hasReqf
+        ? await this.hasColumn(qr, 'dbo.PV_CTR_FOL_ASVR', 'RQFAC')
+        : false;
+      const reqfSelect = hasReqf
+        ? 'TRY_CONVERT(INT, A.REQF)'
+        : hasRqfac
+        ? 'TRY_CONVERT(INT, A.RQFAC)'
+        : 'CAST(NULL AS INT)';
+
       const targetRows = await qr.query(
         `
         SELECT TOP 1
@@ -209,6 +295,7 @@ export class FormasPagoCambiosService {
           CAST(A.IDFOL AS nvarchar(255)) AS IDFOL,
           CAST(A.TRA AS nvarchar(255)) AS TRA,
           CAST(A.OPVM AS nvarchar(255)) AS OPVM,
+          ${reqfSelect} AS REQF,
           CAST(F.IDF AS nvarchar(255)) AS IDF,
           CAST(F.FORM AS nvarchar(255)) AS FORM,
           CAST(ISNULL(F.IMPD, 0) AS decimal(18,2)) AS IMPD,
@@ -230,7 +317,8 @@ export class FormasPagoCambiosService {
       }
 
       const target = this.mapCambioDetalleRow(targetRaw);
-      const opv = this.resolveOpv(user);
+      const isAdmin = this.isAdmin(user);
+      const opv = isAdmin ? '' : this.resolveOpv(user);
 
       if (!this.isToday(target.FCN)) {
         throw new ForbiddenException(
@@ -246,7 +334,7 @@ export class FormasPagoCambiosService {
           'La transacción no tiene AUT permitido para cambio de forma',
         );
       }
-      if (this.normalizeUpper(target.OPVM) !== opv) {
+      if (!isAdmin && this.normalizeUpper(target.OPVM) !== opv) {
         throw new ForbiddenException(
           'La transacción no pertenece al OPV autenticado',
         );
@@ -310,6 +398,18 @@ export class FormasPagoCambiosService {
         throw new NotFoundException(`No existe detalle actualizado IDF ${idf}`);
       }
 
+      const facturacionSync = await this.syncFacturacionIfRequired(
+        qr,
+        this.normalize(target.IDFOL) || idf,
+        this.normalizeUpper(target.AUT_ASVR),
+        this.toInt(target.REQF) ?? 0,
+      );
+      if (facturacionSync && !facturacionSync.syncApplied) {
+        throw new BadRequestException(
+          'No se pudo sincronizar la facturación del folio REQF',
+        );
+      }
+
       await qr.commitTransaction();
 
       await this.audit.log({
@@ -346,6 +446,7 @@ export class FormasPagoCambiosService {
         AFTER_FORM: this.normalizeUpper(afterRaw.FORM),
         BEFORE_AUT: beforeAut,
         AFTER_AUT: this.normalize(afterRaw.AUT),
+        facturacionSync,
       };
     } catch (error) {
       if (qr?.isTransactionActive) {
@@ -448,6 +549,73 @@ export class FormasPagoCambiosService {
     return null;
   }
 
+  private async syncFacturacionIfRequired(
+    qr: QueryRunner,
+    idFol: string,
+    aut: string,
+    reqf: number,
+  ): Promise<FacturacionSyncResult | null> {
+    if (this.normalizeUpper(aut) !== 'VF' || reqf !== 1) {
+      return null;
+    }
+
+    const procRows = await qr.query(`
+      SELECT CASE WHEN OBJECT_ID('dbo.sp_fact_sync_folio_vf', 'P') IS NULL THEN 0 ELSE 1 END AS HAS_PROC
+    `);
+    if (this.toInt((procRows?.[0] ?? {}).HAS_PROC) !== 1) {
+      throw new NotFoundException(
+        'No existe dbo.sp_fact_sync_folio_vf. Ejecute sql/sp_fact_sync_folio_vf_create.sql',
+      );
+    }
+
+    const runSync = async (force: boolean) => {
+      const rows = await qr.query(
+        `
+        EXEC dbo.sp_fact_sync_folio_vf
+          @IDFOL = @0,
+          @EVENTO = @1,
+          @FORCE = @2
+        `,
+        [idFol, 'CAMBIO_FORMA_PAGO', force ? 1 : 0],
+      );
+      const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+      if (!row) {
+        return {
+          idfol: idFol,
+          syncApplied: false,
+          estatus: null,
+          impt: null,
+          detailRows: 0,
+          evento: 'CAMBIO_FORMA_PAGO',
+        } satisfies FacturacionSyncResult;
+      }
+
+      return {
+        idfol: this.normalize(row.IDFOL) || idFol,
+        syncApplied: (this.toInt(row.SYNC_APPLIED) ?? 0) === 1,
+        estatus: this.normalize(row.ESTATUS) || null,
+        impt: this.toNumber(row.IMPT),
+        detailRows: Math.max(this.toInt(row.DETAIL_ROWS) ?? 0, 0),
+        evento: this.normalize(row.EVENTO) || null,
+      } satisfies FacturacionSyncResult;
+    };
+
+    const initial = await runSync(false);
+    if (initial.syncApplied) {
+      return initial;
+    }
+
+    const forced = await runSync(true);
+    if (forced.syncApplied) {
+      this.logger.warn(
+        `Facturacion sync requirio FORCE=1 para ${idFol} en cambio de forma de pago`,
+      );
+      return forced;
+    }
+
+    return forced;
+  }
+
   private mapCambioDetalleRow(row: Record<string, unknown>): CambioDetalleRow {
     const autAsvr = this.normalizeUpper(row.AUT_ASVR ?? row.AUT);
     return {
@@ -455,6 +623,7 @@ export class FormasPagoCambiosService {
       IDFOL: this.normalize(row.IDFOL) || null,
       AUT_ASVR: autAsvr || null,
       AUT_FORM: this.normalize(row.AUT_FORM) || null,
+      REQF: this.toInt(row.REQF),
       TRA: this.normalize(row.TRA) || null,
       OPVM: this.normalizeUpper(row.OPVM) || null,
       IDF: this.normalize(row.IDF) || null,
@@ -473,6 +642,47 @@ export class FormasPagoCambiosService {
       );
     }
     return opv;
+  }
+
+  private parseIds(...values: Array<string | undefined>) {
+    const out: number[] = [];
+    for (const value of values) {
+      if (!value) continue;
+      for (const part of value.split(',')) {
+        const n = Number(part.trim());
+        if (Number.isFinite(n)) out.push(n);
+      }
+    }
+    return out;
+  }
+
+  private isAdmin(user?: JwtPayload | null) {
+    const username = this.normalizeUpper(user?.username ?? '');
+    if (username === 'ADMIN') return true;
+
+    const roleId = Number(user?.roleId ?? 0);
+    const nivel = Number(user?.nivel ?? 0);
+
+    const adminRoleIds = this.parseIds(
+      this.config.get<string>('ADMIN_ROLE_IDS'),
+      this.config.get<string>('ADMIN_ROLE_ID'),
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const adminNiveles = this.parseIds(
+      this.config.get<string>('ADMIN_NIVELES'),
+      this.config.get<string>('ADMIN_NIVEL'),
+      process.env.ADMIN_NIVELES,
+      process.env.ADMIN_NIVEL,
+    );
+
+    const roleAllowed = (adminRoleIds.length ? adminRoleIds : [1]).includes(
+      roleId,
+    );
+    const nivelAllowed =
+      adminNiveles.length > 0 && adminNiveles.includes(nivel);
+
+    return roleAllowed || nivelAllowed;
   }
 
   private isToday(value: unknown) {

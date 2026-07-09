@@ -30,6 +30,17 @@ Enlaces relacionados:
 - `sql/2026-05-09_promociones_descuentos_base.sql` (altera `PROMO_CAB`, crea tablas `PROMO_REGLA_*`, `PROMO_TICKET_DESC_APLI`, `PROMO_TICKET_GRATIS_*`, e instala SPs `sp_promo_evaluar_folio` + `sp_promo_desc_aplicadas_folio`).
 - regla operativa:
 - al aplicar descuentos, backend recalcula `PV_TICKET_LOG.PVTAT` con neto y registra cada descuento de renglón en `PROMO_TICKET_DESC_APLI`.
+- compatibilidad JWT (2026-05-26):
+- en `GET/PUT /promociones/:idProm/configuracion`, backend acepta payload legacy (`idusuario/userid`) y, si falta `sub/idUsuario`, recupera `IDUSUARIO` por `username` antes de resolver sucursales autorizadas.
+- admin se reconoce por `roleId/IDROL/idRol` (default `0,1`) para no bloquear usuarios de acceso total.
+- con esto se evita el `403 Usuario inválido para resolver sucursales` durante guardar configuración.
+- catálogo clientes (2026-05-26):
+- `GET /promociones/catalogos/clientes` consulta `FACT_CLIENT_SHP` con base `SUC=@suc AND ESTATUS=0`, usa `IDC` como `CLIENTE`, devuelve listado completo por sucursal (sin `TOP 200`) y deduplicado por `CLIENTE` para evitar valores repetidos en selección UI.
+- ajuste cotizaciones precio manual (2026-05-23):
+- `PATCH /pvticketlog/:id/precio` ya no relanza `aplicarLinea`; conserva `PVTA` manual y limpia trazabilidad/marcadores promo de la línea para independizar cambio de precio.
+- script de optimización recomendado para evaluación por línea: `sql/2026-05-23_pv_promociones_linea_indexes.sql`.
+- ajuste cotizaciones ORD vs precio manual (2026-05-23):
+- `PATCH /pvticketlog/:id` reaplica promoción solo si cambian `IDFOL/ART/UPC/CTD`; cambios operativos de `ORD` no deben modificar `PVTA/PVTAT` manuales.
 
 ## Punto de venta: cierre transaccional de cotizacion (implementado)
 - Controller/Service:
@@ -48,16 +59,18 @@ Enlaces relacionados:
 - `PATCH /dat-form/:idform`
 - `PATCH /dat-form/:idform/estado`
 - `DELETE /dat-form/:idform`
+- `TARJETA CREDITO` usa `DAT_FORM.ASPEL=4`; en VF con factura se considera forma no efectivo, requiere referencia y termina en `FormaPagoSAT='04'`.
 - `GET /pv/refdetalle?idfol=:idfol&tipo=:tipo`
 - `POST /pv/refdetalle/crear`
 - `POST /pv/refdetalle/asignar`
 - `DELETE /pv/refdetalle/:idref`
 - Reglas e integracion UI:
 - app mueve UI a `lib/features/modulos/punto_venta/cotizaciones/pago/*` y oculta tarjeta de contexto.
-- `CA` lista `EFECTIVO`/`CREDITO`; `aut`+`Generar/Asignar referencia` solo para `TARJETA/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO`.
+- `CA` lista `EFECTIVO`/`CREDITO`; `aut`+`Generar/Asignar referencia` solo para `TARJETA/TARJETA CREDITO/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO`.
 - referencias se crean/asignan en `REF_DETALLE` y regresan `IDREF` al pago.
 - app bloquea cambio de `tipotran` cuando ya hay formas; `RQFAC` en AppBar; totales en card único; oculta `IVA integrado sucursal`; recalcula preview al reingresar.
 - app persiste `RQFAC` con `PATCH /pvctrfolasvr/:idfol`; habilita `Imprimir ticket` consumiendo `GET /pv/cotizaciones/:idfol/cierre/print-preview`.
+- si el folio vuelve desde panel en `PAGADO/MB51PROCES`, la UI reusa `GET /pv/cotizaciones/:idfol/cierre/print-preview` para rehidratar formas persistidas y mostrar `Pagos/Faltante/Cambio` correctos.
 - vouchers para formas no `EFECTIVO` en PDF (segundo PDF, línea de recorte, `GRACIAS POR SU CONFIANZA`).
 - prevalidacion de referencias sin usar en frontend con `GET /pv/refdetalle`; backend mantiene validacion.
 - cierre `CA` fuerza `rqfac=false` y `REQF=0` antes de preview.
@@ -71,15 +84,18 @@ Enlaces relacionados:
 - service no envuelve en transaccion TypeORM para evitar `EABORT`; atomicidad en SP.
 - errores de validacion SQL retornan `400/409` (mensaje negocio).
 - inserta formas en `PV_CTR_FOL_FORM_SVR` (fallback `PV_CTR_FOL_FORM`); `CREDITO/DEUDOR` guarda `AUT=IDFOL` y `IMPP>0`; `IMPD` = `IMPP-IMPC` (en no-efectivo coincide con `IMPP`).
-- `CREDITO` no se mezcla con otras formas; valida saldo neto `DAT_CTRL_CTAS` (`CTA='101001002'`) y registra cargo (`CMOV=602`, `CTA='101001002'`, `CLIENT`, `IDFOL`, `NDOC`, `IMPT` negativo).
+- `CREDITO` y `DEUDOR` no se mezclan con otras formas; `CREDITO` valida saldo neto `DAT_CTRL_CTAS` (`CTA='101001002'`) y registra cargo (`CMOV=602`, `CTA='101001002'`, `CLIENT`, `IDFOL`, `NDOC`, `IMPT` negativo).
+- validación secuencial de formas: cada forma no `EFECTIVO` se valida contra pendiente acumulado en orden de captura; solo `EFECTIVO` puede exceder total para generar cambio.
 - compatibilidad columnas: usa `CMOV` o `CLSD`; llena `FCND/RTXT` si existen.
 - genera `NDOC` en transacción (lock + max), base `N6000001+`, usando `COL_LENGTH` para evitar errores cuando la columna falta.
 - valida suma de formas (`sum(impp)` <= total salvo efectivo con cambio) y referencias `REF_DETALLE.ESTATUS='PROCESADO'` usadas.
 - actualiza `PV_CTR_FOL_ASVR` (`ESTA='PAGADO'`, `IMPT`, `AUT='CA'|'VF'`), `PV_CTR_ORDS.ESTATUS=2`, sincroniza `PV_CTR_ORDS.RQFAC` con `REQF/RQFAC` del folio y ejecuta `dbo.sp_mb51_transmitir_folio` para stock MB51.
+- cambio de forma de pago (2026-06-26): `GET /formas-pago/cambios/today` acepta `suc/opv` para admin; la UI muestra filtros en cascada `Sucursal` -> `OPV`, y `PUT /formas-pago/cambios/:idf` permite operar filas de otro OPV solo cuando la sesión es admin + supervisor `SUPERPV`.
 - compatibilidad de homologación MB51 (2026-04): si existe trigger legacy que transforma `MB51PROCES` a `TRANSMITIR`, aplicar `sql/2026-04-03_mb51proceso_homologacion.sql` para conservar `MB51PROCES` en salida operativa.
-- sincronización VF: `sp_fact_sync_folio_vf` en transacción cuando `tipotran='VF'` y `REQF=1`; si no cumple, limpia cabecera/detalle en `FAC_SVR_SHAP/FACT_TICKET_SHP`.
+- sincronización VF: `sp_fact_sync_folio_vf` en transacción cuando `tipotran='VF'` y `REQF=1`; si no cumple, limpia cabecera/detalle en `FAC_SVR_SHAP/FACT_TICKET_SHP`. En cambio de forma de pago, si la primera sincronización no aplica, el backend reintenta con `FORCE=1` antes de reportar error.
 - `Tipofact='CREDITO'` si alguna forma `CREDITO`; de lo contrario `INDIVIDUAL`.
 - fecha de proceso actual para `PV_CTR_FOL_FORM(_SVR).FCN`, `PV_CTR_FOL_ASVR.FCNM`, cargos `DAT_CTRL_CTAS`.
+- Cotizaciones con ORD relacionada (2026-06-26): `resolveContext`, `print-preview` y `sp_pv_cotizacion_cerrar` suman todos los renglones de `PV_TICKET_LOG`; contramovimientos tecnicos (`CTD < 0` con `TICKET_REL`) cancelan importes y el cierre permite total cero sin formas de pago.
 - Reimpresión: payload `print-preview` incluye cabecera (`DAT_SUC`), ticket (`PV_TICKET_LOG`), formas (`PV_CTR_FOL_FORM`), pie (`PV_CTR_FOL_ASVR` + `PV_OPV` + `FACT_CLIENT_SHP`) y ORDs (`PV_CTR_ORDS` + `PV_CTR_ORDS_DET`).
 
 ## Punto de venta: devoluciones de cotizacion/venta/apartado (implementado 2026-02)
@@ -98,6 +114,12 @@ Enlaces relacionados:
 - `POST /pv/devoluciones/:idfolDev/pago/preview`
 - `POST /pv/devoluciones/:idfolDev/pago/finalizar`
 - `GET /pv/devoluciones/:idfolDev/print-preview`
+- Reglas devolución simplificada (2026-05-22):
+- devolución parcial solo cuando el ticket origen tiene una sola forma y es `EFECTIVO`.
+- si ticket origen tiene forma mixta o no-efectivo, devolución debe ser total y respetar cada forma/referencia de origen.
+- finalización valida que payload de `formas` coincida con forma(s) esperada(s) del origen; si no coincide responde `409`.
+- forma original (2026-07-06): `TARJETA CREDITO` se conserva como forma de devolución válida con importe negativo y referencia `AUT` del origen; si no existen formas origen disponibles, el backend responde `409` en vez de usar `EFECTIVO`.
+- soporte SQL sugerido: `sql/2026-05-14_pv_devoluciones_formas_mixtas_prorrata_indexes.sql` (índices para `IDFOLORIG` y tabla de formas).
 
 ## Pago de Servicios PS (implementado 2026-03)
 - Modulo backend:
@@ -137,8 +159,13 @@ Enlaces relacionados:
 - formas no `EFECTIVO` requieren referencia/aut y no pueden exceder faltante; candado al quedar `PAGADO` lleva a `CERRADO_PS` vía `PATCH /pvctrfolasvr/:idfol`.
 - compatibilidad PS (2026-04): backend/UI aceptan `TRANSMITIR` como estado cerrado legacy para folios históricos, pero el cierre operativo vigente de PS usa `CERRADO_PS`.
 - impresión PS: vouchers por forma no `EFECTIVO`, segundo PDF, línea de recorte `RESUMEN DE ORDS` / `ORDS`.
+- PS comprobantes múltiples (2026-05-22): al finalizar pago, `sp_ps_pago_finalize` persiste `IMPD` por forma (`IMPP-IMPC`) para evitar duplicados cuando hay más de un comprobante no-efectivo en la misma transacción.
+- PS reparación incidente (2026-05-22): script `sql/2026-05-22_ps_fix_comprobantes_duplicados_df01_20260520_vf_0061.sql` corrige formas del caso `DF01-20260520-VF-0061` y re-sincroniza entrega OPV del día.
 - Panel PS: folios `PAGADO` abren directo pago.
-- Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen, pago reutiliza formas origen y exige misma forma para no `CREDITO/DEUDOR`, sincroniza facturación con `sp_fact_sync_folio_vf`, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.
+- Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen y aplica regla parcial solo-efectivo, pago valida forma(s) origen, sincroniza facturación con `sp_fact_sync_folio_vf` con reintento `FORCE=1` cuando aplica, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.
+
+## Caja General: entrega OPV (2026-06-18)
+- `sp_cg_sync_entrega_opv_abierta`, `sp_cg_cerrar_entrega_opv` y `sp_cg_reactivar_entrega_opv` usan `sp_getapplock` por sucursal/fecha/OPV y borrado por `IDE` + contexto antes de reinsertar en `DAT_FORM_ENTR_OPV_SVR`, para evitar duplicados de la PK `PK_DATFORMENTROPVSVR`.
 
 ## Punto de venta: alta de cotizacion desde panel (trazabilidad app)
 - Flujo frontend: confirmacion de alta -> modal de cliente filtrado por SUC.

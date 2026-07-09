@@ -134,11 +134,13 @@ export class PvCotizacionesCierreService {
     'DEUDOR',
   ]);
   private static readonly FORMA_CREDITO = 'CREDITO';
+  private static readonly FORMAS_NO_MEZCLABLES = new Set(['CREDITO', 'DEUDOR']);
   private static readonly NDOC_LOCK_RESOURCE = 'PV_CIERRE_NDOC_602';
 
   private static readonly FORMAS_PERMITIDAS = new Set([
     'EFECTIVO',
     'TARJETA',
+    'TARJETA CREDITO',
     'CHEQUE',
     'TRANSFERENCIA',
     'DEPOSITO 3RO',
@@ -148,6 +150,7 @@ export class PvCotizacionesCierreService {
 
   private static readonly FORMAS_AUT_REQUERIDA = new Set([
     'TARJETA',
+    'TARJETA CREDITO',
     'CHEQUE',
     'TRANSFERENCIA',
     'DEPOSITO 3RO',
@@ -155,6 +158,7 @@ export class PvCotizacionesCierreService {
 
   private static readonly FORMAS_NO_EFECTIVO = new Set([
     'TARJETA',
+    'TARJETA CREDITO',
     'CHEQUE',
     'TRANSFERENCIA',
     'DEPOSITO 3RO',
@@ -317,19 +321,35 @@ export class PvCotizacionesCierreService {
       this.normalizeText(user?.username) ||
       null;
     const formas = this.normalizeFormas(dto.formas ?? []);
-    if (!formas.length) {
-      throw new BadRequestException(
-        'Debe registrar al menos una forma de pago',
-      );
-    }
-    this.assertCreditoNoCombinado(formas);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
 
     try {
       // El SP realiza el cierre transaccional; aqui solo prevalidamos acceso/contexto.
-      await this.resolveContext(queryRunner, idfol, user, dto.suc, false);
+      const context = await this.resolveContext(
+        queryRunner,
+        idfol,
+        user,
+        dto.suc,
+        false,
+      );
+      const totals = this.calculateTotals({
+        totalBase: context.totalBase,
+        ivaIntegrado: context.ivaIntegrado,
+        tipotran,
+        rqfac,
+      });
+      if (totals.total > 0 && !formas.length) {
+        throw new BadRequestException(
+          'Debe registrar al menos una forma de pago',
+        );
+      }
+      this.assertCreditoDeudorNoCombinado(formas);
+      this.validateSecuenciaFormasContraPendiente({
+        formas,
+        total: totals.total,
+      });
       const procedureName = 'dbo.sp_pv_cotizacion_cerrar';
       const hasProcedure = await this.procedureExists(
         queryRunner,
@@ -838,7 +858,7 @@ export class PvCotizacionesCierreService {
       `
       SELECT
         COUNT(1) AS ITEMS_COUNT,
-        SUM(ISNULL(CTD, 0) * ISNULL(PVTA, 0)) AS TOTAL_BASE
+        ROUND(SUM(ISNULL(CTD, 0) * ISNULL(PVTA, 0)), 2) AS TOTAL_BASE
       FROM dbo.PV_TICKET_LOG
       WHERE IDFOL = @0
       `,
@@ -853,7 +873,7 @@ export class PvCotizacionesCierreService {
     }
 
     const totalBase = this.round2(this.toNumber(ticketStats.TOTAL_BASE) ?? 0);
-    if (totalBase <= 0) {
+    if (totalBase < 0) {
       throw new BadRequestException(
         `La cotizacion ${currentIdfol} tiene total base invalido`,
       );
@@ -947,6 +967,8 @@ export class PvCotizacionesCierreService {
       CASH: 'EFECTIVO',
       TARJETA: 'TARJETA',
       CARD: 'TARJETA',
+      TARJETACREDITO: 'TARJETA CREDITO',
+      TARJETADECREDITO: 'TARJETA CREDITO',
       CHEQUE: 'CHEQUE',
       TRANSFERENCIA: 'TRANSFERENCIA',
       TRANSFER: 'TRANSFERENCIA',
@@ -985,16 +1007,37 @@ export class PvCotizacionesCierreService {
     });
   }
 
-  private assertCreditoNoCombinado(formas: FormaNormalizada[]) {
-    const creditoCount = formas.filter(
-      (item) => item.form === PvCotizacionesCierreService.FORMA_CREDITO,
+  private assertCreditoDeudorNoCombinado(formas: FormaNormalizada[]) {
+    const noMezclablesCount = formas.filter((item) =>
+      PvCotizacionesCierreService.FORMAS_NO_MEZCLABLES.has(item.form),
     ).length;
-    if (!creditoCount) return;
+    if (!noMezclablesCount) return;
 
-    if (formas.length > 1 || creditoCount > 1) {
+    if (formas.length > 1 || noMezclablesCount > 1) {
       throw new BadRequestException(
-        'La forma CREDITO no se puede combinar con otras formas de pago',
+        'Las formas CREDITO y DEUDOR no se pueden combinar con otras formas de pago',
       );
+    }
+  }
+
+  private validateSecuenciaFormasContraPendiente(input: {
+    formas: FormaNormalizada[];
+    total: number;
+  }) {
+    const total = this.round2(input.total);
+    let acumulado = 0;
+    const epsilon = 0.0001;
+
+    for (const item of input.formas) {
+      const impp = this.round2(item.impp);
+      const pendiente = this.round2(Math.max(total - acumulado, 0));
+      const isEfectivo = item.form === 'EFECTIVO';
+      if (!isEfectivo && impp - pendiente > epsilon) {
+        throw new BadRequestException(
+          `La forma ${item.form} no puede exceder el pendiente por pagar (${pendiente.toFixed(2)})`,
+        );
+      }
+      acumulado = this.round2(acumulado + impp);
     }
   }
 
@@ -1027,10 +1070,16 @@ export class PvCotizacionesCierreService {
     existingForms: string[];
   }) {
     const formas = input.formas;
-    if (!formas.length) {
+    const total = this.round2(input.total);
+    const epsilon = 0.0001;
+
+    if (!formas.length && total > epsilon) {
       throw new BadRequestException(
         'Debe registrar al menos una forma de pago',
       );
+    }
+    if (!formas.length) {
+      return { sumPagos: 0, cambio: 0 };
     }
 
     const normalizedExisting = input.existingForms
@@ -1069,7 +1118,11 @@ export class PvCotizacionesCierreService {
         }
       }
     }
-    this.assertCreditoNoCombinado(formas);
+    this.assertCreditoDeudorNoCombinado(formas);
+    this.validateSecuenciaFormasContraPendiente({
+      formas,
+      total: input.total,
+    });
 
     if (PvCotizacionesCierreService.FORMAS_NO_EFECTIVO.size > 0) {
       const hasNoEfectivo = formas.some((item) =>
@@ -1110,8 +1163,6 @@ export class PvCotizacionesCierreService {
     const sumPagos = this.round2(
       formas.reduce((acc, item) => acc + (this.toNumber(item.impp) ?? 0), 0),
     );
-    const total = this.round2(input.total);
-    const epsilon = 0.0001;
 
     if (sumPagos + epsilon < total) {
       throw new BadRequestException(
@@ -1878,7 +1929,7 @@ export class PvCotizacionesCierreService {
     }
 
     const before = await executor.query(
-      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202)`,
+      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202,206,207)`,
       [input.idfol],
     );
 
@@ -1897,7 +1948,7 @@ export class PvCotizacionesCierreService {
     }
 
     const after = await executor.query(
-      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202)`,
+      `SELECT COUNT(1) AS c FROM dbo.DAT_MB51 WHERE DOCP=@0 AND CLSM IN (201,202,206,207)`,
       [input.idfol],
     );
 

@@ -17,4 +17,4 @@
 - Many endpoints use `@ApiTags` and `@ApiBearerAuth` to show up in Swagger; check `Auth`, `Admin`, `Access` modules for patterns.
 
 ## Useful local assets
-- [access.http](access.http) contains sample HTTP calls for Access/Admin flows. Update `@baseUrl` to match the server port (default is 3001 per [src/main.ts](src/main.ts)).
+- [access.http](access.http) contains sample HTTP calls for Access/Admin flows. Update `@baseUrl` to match the server port (default is 3000 per [src/main.ts](src/main.ts)).

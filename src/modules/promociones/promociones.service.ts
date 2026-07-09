@@ -82,6 +82,18 @@ export class PromocionesService {
     'SUPERVP',
   ]);
 
+  private parseIds(...values: Array<string | undefined>) {
+    const out: number[] = [];
+    for (const value of values) {
+      if (!value) continue;
+      for (const part of value.split(',')) {
+        const n = Number(part.trim());
+        if (Number.isFinite(n)) out.push(n);
+      }
+    }
+    return out;
+  }
+
   constructor(private readonly dataSource: DataSource) {}
 
   async findAll(query?: PromoQuery, user?: JwtPayload) {
@@ -253,8 +265,9 @@ export class PromocionesService {
     this.assertRequestedSucWithinAllowed(suc, allowedSucs);
     const search = this.normalizeText(searchRaw);
     const where: string[] = [
-      'TRY_CONVERT(INT, ISNULL(ESTATUS, 1)) <> 0',
-      'TRY_CONVERT(FLOAT, CLIEN_UNI) IS NOT NULL',
+      "TRY_CONVERT(INT, ISNULL(ESTATUS, 0)) = 0",
+      'TRY_CONVERT(BIGINT, IDC) IS NOT NULL',
+      'TRY_CONVERT(BIGINT, IDC) > 0',
     ];
     const params: unknown[] = [];
     if (suc) {
@@ -263,20 +276,40 @@ export class PromocionesService {
     }
     if (search) {
       where.push(
-        `(UPPER(LTRIM(RTRIM(ISNULL(RazonSocialReceptor, '')))) LIKE @${params.length} OR LTRIM(RTRIM(CONVERT(NVARCHAR(40), CLIEN_UNI))) LIKE @${params.length})`,
+        `(UPPER(LTRIM(RTRIM(ISNULL(RazonSocialReceptor, '')))) LIKE @${params.length} OR LTRIM(RTRIM(CONVERT(NVARCHAR(40), IDC))) LIKE @${params.length})`,
       );
       params.push(`%${search.toUpperCase()}%`);
     }
 
     const rows = await this.dataSource.query(
       `
-      SELECT TOP 200
-        TRY_CONVERT(INT, CLIEN_UNI) AS CLIENTE,
-        LTRIM(RTRIM(ISNULL(RazonSocialReceptor, ''))) AS NOMBRE,
-        LTRIM(RTRIM(ISNULL(SUC, ''))) AS SUC
-      FROM dbo.FACT_CLIENT_SHP
-      WHERE ${where.join(' AND ')}
-      ORDER BY NOMBRE ASC
+      ;WITH base AS (
+        SELECT
+          TRY_CONVERT(BIGINT, IDC) AS CLIENTE,
+          LTRIM(RTRIM(ISNULL(RazonSocialReceptor, ''))) AS NOMBRE,
+          LTRIM(RTRIM(ISNULL(SUC, ''))) AS SUC
+        FROM dbo.FACT_CLIENT_SHP
+        WHERE ${where.join(' AND ')}
+      ),
+      dedup AS (
+        SELECT
+          CLIENTE,
+          NOMBRE,
+          SUC,
+          ROW_NUMBER() OVER (
+            PARTITION BY CLIENTE
+            ORDER BY NOMBRE ASC, SUC ASC
+          ) AS RN
+        FROM base
+        WHERE CLIENTE IS NOT NULL AND CLIENTE > 0
+      )
+      SELECT
+        CLIENTE,
+        NOMBRE,
+        SUC
+      FROM dedup
+      WHERE RN = 1
+      ORDER BY NOMBRE ASC, CLIENTE ASC
       `,
       params,
     );
@@ -533,6 +566,7 @@ export class PromocionesService {
     }
 
     const search = this.normalizeText(query.search);
+    const topLimit = search ? 3000 : 300;
     if (search) {
       where.push(
         `(UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) LIKE @${params.length} OR UPPER(LTRIM(RTRIM(ISNULL(a.UPC, '')))) LIKE @${params.length} OR UPPER(LTRIM(RTRIM(ISNULL(a.DES, '')))) LIKE @${params.length})`,
@@ -570,7 +604,7 @@ export class PromocionesService {
         ) j
         WHERE ${where.join(' AND ')}
       )
-      SELECT TOP 300
+      SELECT TOP ${topLimit}
         ART, UPC, DESCRIPCION, DEPA, SUBD, CLAS, SCLA, SCLA2, GUIA
       FROM base
       WHERE RN = 1
@@ -780,7 +814,7 @@ export class PromocionesService {
   ) {
     await this.assertGestionAccess(user);
     await this.ensureConfigTables();
-    const userId = this.resolveAccessUserId(user) || null;
+    const userId = (await this.resolveAccessUserIdWithFallback(user)) || null;
     const idProm = this.parseIntStrict(idPromRaw, 'idProm');
     await this.assertPromoScopeAccess(idProm, user);
     await this.ensurePromoExists(idProm);
@@ -2051,6 +2085,52 @@ export class PromocionesService {
     }
   }
 
+  async clearPromoStateForLine(lineIdRaw: string) {
+    const lineId = this.normalizeText(lineIdRaw);
+    if (!lineId) throw new BadRequestException('ID de linea es requerido');
+
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    try {
+      const ticketLogCols = await this.loadTableColumns('dbo.PV_TICKET_LOG');
+      const setParts: string[] = [];
+      if (ticketLogCols.has('IDPROMO')) setParts.push('IDPROMO = NULL');
+      if (ticketLogCols.has('TIPOPROMO')) setParts.push('TIPOPROMO = NULL');
+      if (setParts.length) {
+        setParts.push('UPDATED_AT = GETDATE()');
+        await qr.query(
+          `
+          UPDATE dbo.PV_TICKET_LOG
+          SET ${setParts.join(', ')}
+          WHERE ID = @0
+          `,
+          [lineId],
+        );
+      }
+
+      const hasDescApli = await this.tableExists('dbo.PROMO_TICKET_DESC_APLI');
+      if (hasDescApli) {
+        await qr.query(
+          `
+          DELETE FROM dbo.PROMO_TICKET_DESC_APLI
+          WHERE ID = @0
+          `,
+          [lineId],
+        );
+      }
+
+      await qr.commitTransaction();
+      return { ok: true, lineId };
+    } catch (error) {
+      await qr.rollbackTransaction();
+      throw error;
+    } finally {
+      await qr.release();
+    }
+  }
+
   async aplicadasPorFolio(idfolRaw: string) {
     const idfol = this.normalizeText(idfolRaw);
     if (!idfol) throw new BadRequestException('IDFOL es requerido');
@@ -2189,7 +2269,7 @@ export class PromocionesService {
   private async resolvePromoGestionAllowedSucs(user?: JwtPayload | null) {
     if (this.isAdmin(user)) return [] as string[];
 
-    const userId = this.resolveAccessUserId(user);
+    const userId = await this.resolveAccessUserIdWithFallback(user);
     if (!userId) {
       throw new ForbiddenException('Usuario inválido para resolver sucursales');
     }
@@ -2231,7 +2311,7 @@ export class PromocionesService {
   ) {
     const allowedSucs = await this.resolvePromoGestionAllowedSucs(user);
     if (!allowedSucs.length) return;
-    const userId = this.resolveAccessUserId(user);
+    const userId = await this.resolveAccessUserIdWithFallback(user);
 
     const rows = await this.dataSource.query(
       `SELECT TOP 1 SUC, CREADO_POR FROM dbo.PROMO_CAB WHERE ID_PROM = @0`,
@@ -2903,7 +2983,7 @@ export class PromocionesService {
   private async assertGestionAccess(user: JwtPayload) {
     if (this.isAdmin(user)) return;
 
-    const userId = this.resolveAccessUserId(user);
+    const userId = await this.resolveAccessUserIdWithFallback(user);
     if (!Number.isFinite(userId) || userId <= 0) {
       throw new ForbiddenException(
         'Usuario inválido para gestionar promociones',
@@ -2937,12 +3017,20 @@ export class PromocionesService {
 
   private isAdmin(user?: JwtPayload | null) {
     const raw = (user ?? {}) as Record<string, unknown>;
-    const roleId = Number(raw.roleId ?? raw.IDROL ?? 0);
-    if (Number.isFinite(roleId) && roleId === 1) return true;
     const username = this.normalizeUpper(
-      raw.username ?? raw.USERNAME ?? raw.usuario ?? '',
+      raw.username ?? raw.USERNAME ?? raw.usuario ?? raw.user ?? '',
     );
-    return username === 'ADMIN';
+    if (username === 'ADMIN') return true;
+
+    const roleId = Number(raw.roleId ?? raw.IDROL ?? raw.idRol ?? raw.id_rol ?? 0);
+    const adminRoleIds = this.parseIds(
+      process.env.ADMIN_ROLE_IDS,
+      process.env.ADMIN_ROLE_ID,
+    );
+    const allowedRoleIds = adminRoleIds.length ? adminRoleIds : [0, 1];
+    if (Number.isFinite(roleId) && allowedRoleIds.includes(roleId)) return true;
+
+    return false;
   }
 
   private resolveAccessUserId(user?: JwtPayload | null) {
@@ -2950,10 +3038,46 @@ export class PromocionesService {
     const sub = Number(raw.sub ?? raw.SUB ?? 0);
     if (Number.isFinite(sub) && sub > 0) return sub;
     const idUsuario = Number(
-      raw.idUsuario ?? raw.IDUSUARIO ?? raw.userId ?? raw.USER_ID ?? 0,
+      raw.idUsuario ??
+        raw.idusuario ??
+        raw.IDUSUARIO ??
+        raw.userId ??
+        raw.userid ??
+        raw.USER_ID ??
+        raw.id ??
+        raw.ID ??
+        raw.uid ??
+        raw.UID ??
+        0,
     );
     if (Number.isFinite(idUsuario) && idUsuario > 0) return idUsuario;
     return 0;
+  }
+
+  private async resolveAccessUserIdWithFallback(
+    user?: JwtPayload | null,
+  ): Promise<number> {
+    const directUserId = this.resolveAccessUserId(user);
+    if (directUserId > 0) return directUserId;
+
+    const raw = (user ?? {}) as Record<string, unknown>;
+    const username = this.normalizeUpper(
+      raw.username ?? raw.USERNAME ?? raw.usuario ?? raw.user ?? '',
+    );
+    if (!username) return 0;
+
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 u.IDUSUARIO
+      FROM dbo.USUARIO u
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(u.USERNAME, '')))) = @0
+      `,
+      [username],
+    );
+
+    const fallbackUserId =
+      this.toInt((rows?.[0] as Record<string, unknown>)?.IDUSUARIO) ?? 0;
+    return fallbackUserId > 0 ? fallbackUserId : 0;
   }
 
   private async resolveAccessUsername(user?: JwtPayload | null) {

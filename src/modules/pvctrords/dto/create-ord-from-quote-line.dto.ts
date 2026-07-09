@@ -98,4 +98,23 @@ export class CreateOrdFromQuoteLineDto {
   @IsString()
   @Length(1, 255)
   ordExistente?: string;
+
+  @ApiPropertyOptional({
+    description: 'Folio relacionado de venta anterior',
+  })
+  @Transform(({ value }) => toOptionalTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  ticketRel?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Token temporal de autorización supervisor para ticket relacionado',
+  })
+  @Transform(({ value }) => toOptionalTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  relationAuthorizationToken?: string;
 }

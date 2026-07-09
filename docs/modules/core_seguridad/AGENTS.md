@@ -14,6 +14,11 @@ Enlaces relacionados:
 - Acceso a datos: repositorios/QueryBuilder TypeORM para CRUD/catalogos; SQL directo con `dataSource.query` para reportes y compatibilidad legacy.
 - Transacciones: `QueryRunner` en inventarios, cargas masivas y operaciones compuestas; SPs para procesos críticos.
 
+## Autenticacion y auditoria
+- Mantener bloqueo backend para usuarios con `ESTATUS <> 'ACTIVO'` en login, refresh y validacion JWT.
+- Todo intento de ingreso/refresh/JWT de usuario inactivo debe registrar `AUDIT_LOG` sin guardar passwords ni tokens.
+- Acciones actuales: `LOGIN_DENIED_INACTIVO`, `REFRESH_DENIED_INACTIVO` y `JWT_DENIED_INACTIVO`.
+
 ## Regla transversal: autorizacion por sucursal con USR_MOD_SUC
 - Si existen filas activas en `USR_MOD_SUC` para `USUARIO+MODULO`, esas son las sucursales permitidas para no-admin.
 - Admin (roleId `1`) mantiene bypass.

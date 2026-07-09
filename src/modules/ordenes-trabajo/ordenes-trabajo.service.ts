@@ -17,6 +17,7 @@ import {
   CambioMaterialDto,
   CambioMermaContextDto,
   CrearCambioMermaDto,
+  EntregarOrdBatchDto,
   EntregarOrdDto,
   GarantiaOrdDto,
   MermaOrdDto,
@@ -73,6 +74,7 @@ export class OrdenesTrabajoService {
     'DAT_JAO_BISEL',
     'PV_ORDS',
   ] as const;
+  private static readonly MODULE_CODES_INV_SCOPE = ['DAT_JAA_ALM'] as const;
   private flowVisibilityTableExists: boolean | null = null;
   private readonly flowVisibilityPanelConfigCache = new Map<string, boolean>();
 
@@ -91,11 +93,12 @@ export class OrdenesTrabajoService {
 
   private buildOrdAllowedSucSql(
     ordAlias: string,
-    labAlias: string,
+    _labAlias: string,
     isAdminParam: string,
     allowedSucsParam: string,
-    roleCodeParam: string,
-    homeSucParam: string,
+    _roleCodeParam: string,
+    _homeSucParam: string,
+    requestedSucParam = 'NULL',
   ) {
     return `
       (
@@ -110,14 +113,8 @@ export class OrdenesTrabajoService {
             )
           )
           AND (
-            UPPER(LTRIM(RTRIM(ISNULL(${roleCodeParam}, '')))) NOT IN (
-              'ANALISTA_ORD',
-              'ENC_MAQUILA',
-              'ENC_BISEL'
-            )
-            OR ${homeSucParam} IS NULL
-            OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${homeSucParam})
-            OR UPPER(LTRIM(RTRIM(ISNULL(${labAlias}.SUC, '')))) = UPPER(${homeSucParam})
+            ${requestedSucParam} IS NULL
+            OR UPPER(LTRIM(RTRIM(ISNULL(${ordAlias}.SUC, '')))) = UPPER(${requestedSucParam})
           )
         )
       )
@@ -133,12 +130,26 @@ export class OrdenesTrabajoService {
     `;
   }
 
+  private extractSucFromOrdCode(codeRaw: string) {
+    const code = this.normalizeUpper(codeRaw).replace(/\s+/g, '');
+    if (code.length < 4) return null;
+    const prefix = code.slice(0, 4);
+    return /^[A-Z]{2}\d{2}$/.test(prefix) ? prefix : null;
+  }
+
+  private resolveRequestedSucForCodeLookup(scope: SucScope, codeRaw: string) {
+    const ordSuc = this.extractSucFromOrdCode(codeRaw);
+    if (!ordSuc) return scope.requestedSuc;
+    if (scope.isAdmin) return ordSuc;
+    return scope.allowedSucs.includes(ordSuc) ? ordSuc : scope.requestedSuc;
+  }
+
   async list(query: ListOrdenesTrabajoQueryDto, user: JwtPayload) {
-    const scope = await this.resolveSucScope(user, query.suc ?? null);
+    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
+    const scope = await this.resolveSucScope(user, query.suc ?? null, roleCode);
     const page = this.normalizePage(query.page);
     const pageSize = this.normalizePageSize(query.pageSize);
     const panelMode = this.normalizePanelMode(query.panelMode);
-    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
     const allowedActions = this.resolveAllowedActions(
       user,
       roleCode,
@@ -484,6 +495,11 @@ export class OrdenesTrabajoService {
       iord,
       original.row,
     );
+    const pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      this.normalizeText(original.row.SUC) ?? '',
+      this.normalizeText(original.row.ART) ?? '',
+      pvtaOriginal,
+    );
     const nvaIord = await this.resolveCambioMermaReservedIord(
       this.normalizeText(original.row.SUC) ?? '',
       stagingBefore,
@@ -505,7 +521,7 @@ export class OrdenesTrabajoService {
         docDif: this.normalizeText(original.row.DOCDIF),
         ctdCM,
         crearNuevaOrd: true,
-        pvtaNuevo: pvtaOriginal,
+        pvtaNuevo,
         diferenciaEconomica: null,
         nvaIord,
       },
@@ -597,16 +613,11 @@ export class OrdenesTrabajoService {
 
     const suc = this.normalizeText(original.row.SUC) ?? '';
     let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
-    if (pvtaNuevo == null) {
-      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
-      pvtaNuevo = this.toFloat(artInfo?.pvta);
-    }
-    if (pvtaNuevo == null) {
-      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(
-        iord,
-        original.row,
-      );
-    }
+    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      pvtaNuevo,
+    );
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -740,16 +751,11 @@ export class OrdenesTrabajoService {
     const crearNuevaOrd = true;
     const suc = this.normalizeText(original.row.SUC) ?? '';
     let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
-    if (pvtaNuevo == null && tipo === 1 && artNuevo) {
-      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
-      pvtaNuevo = this.toFloat(artInfo?.pvta);
-    }
-    if (pvtaNuevo == null) {
-      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(
-        iord,
-        original.row,
-      );
-    }
+    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      pvtaNuevo,
+    );
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -958,7 +964,7 @@ export class OrdenesTrabajoService {
     ip: string | null,
   ) {
     const iord = this.requireIord(iordRaw);
-    const scope = await this.resolveSucScope(user, null);
+    const scope = await this.resolveSucScope(user, dto.suc ?? null);
     const roleCode = await this.resolveRoleCode(user);
     if (!this.canEditOrdDetail(user, roleCode)) {
       throw new ForbiddenException(
@@ -1002,7 +1008,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE o.IORD = @0
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -1154,12 +1160,17 @@ export class OrdenesTrabajoService {
 
   async validarEnviarOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('ENVIAR', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 3,
-      requiredFlowLabel: 'NUEVA AUTORIZADA',
-      okMessage: 'ORD válida para envío',
-      requireLaboratorio: true,
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 3,
+        requiredFlowLabel: 'NUEVA AUTORIZADA',
+        okMessage: 'ORD válida para envío',
+        requireLaboratorio: true,
+      },
+      dto.suc ?? null,
+    );
   }
 
   async enviarLote(dto: SendOrdBatchDto, user: JwtPayload, ip: string | null) {
@@ -1183,7 +1194,7 @@ export class OrdenesTrabajoService {
   }
 
   async listarColaboradoresAsignar(sucRaw: string, user: JwtPayload) {
-    const suc = this.normalizeText(sucRaw);
+    const suc = this.normalizeUpper(sucRaw);
     if (!suc) {
       throw new BadRequestException('suc es requerida');
     }
@@ -1194,16 +1205,27 @@ export class OrdenesTrabajoService {
       );
     }
     const scope = await this.resolveSucScope(user, suc);
+    if (!scope.isAdmin && !scope.allowedSucs.includes(suc)) {
+      return {
+        ok: true,
+        suc,
+        items: [],
+      };
+    }
     const allowedDeptos = this.resolveAsignadoDeptos(user, roleCode);
     if (!allowedDeptos.length) {
       return {
         ok: true,
-        suc: this.normalizeUpper(suc),
+        suc,
         items: [],
       };
     }
+    const sharedSucs = await this.resolveAsignadoSharedSucs(suc);
+    const sucs = this.normalizeUnique([suc, ...sharedSucs]);
+    const sucPlaceholders = sucs.map((_, idx) => `@${idx}`).join(',');
+    const deptParamOffset = sucs.length;
     const deptPlaceholders = allowedDeptos
-      .map((_, idx) => `@${3 + idx}`)
+      .map((_, idx) => `@${deptParamOffset + idx}`)
       .join(',');
     const rows = await this.dataSource.query(
       `
@@ -1215,20 +1237,11 @@ export class OrdenesTrabajoService {
         UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) AS SUC
       FROM dbo.PV_OPV o
       WHERE TRY_CONVERT(INT, o.NIVEL) = 41
-        AND UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@0)
+        AND UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (${sucPlaceholders})
         AND UPPER(LTRIM(RTRIM(ISNULL(o.DEPTO, '')))) IN (${deptPlaceholders})
-        AND (
-          @1 = 1
-          OR @2 IS NULL
-          OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (
-            SELECT UPPER(LTRIM(RTRIM(value)))
-            FROM STRING_SPLIT(ISNULL(@2, ''), ',')
-            WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> ''
-          )
-        )
       ORDER BY NOMB, APELP, APELM, IDOPV
       `,
-      [suc, scope.isAdmin ? 1 : 0, scope.allowedSucsCsv, ...allowedDeptos],
+      [...sucs, ...allowedDeptos],
     );
 
     const items = (Array.isArray(rows) ? rows : [])
@@ -1264,18 +1277,23 @@ export class OrdenesTrabajoService {
 
     return {
       ok: true,
-      suc: this.normalizeUpper(suc),
+      suc,
       items,
     };
   }
 
   async validarAsignarOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('ASIGNAR', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 7,
-      requiredFlowLabel: 'RECIBIDA A TALLER',
-      okMessage: 'ORD válida para asignación',
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 7,
+        requiredFlowLabel: 'RECIBIDA A TALLER',
+        okMessage: 'ORD válida para asignación',
+      },
+      dto.suc ?? null,
+    );
   }
 
   async asignarLote(
@@ -1307,11 +1325,16 @@ export class OrdenesTrabajoService {
     user: JwtPayload,
   ) {
     await this.assertActionPermission('TRABAJO_TERMINADO', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 8,
-      requiredFlowLabel: 'ASIGNADA',
-      okMessage: 'ORD válida para trabajo terminado',
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 8,
+        requiredFlowLabel: 'ASIGNADA',
+        okMessage: 'ORD válida para trabajo terminado',
+      },
+      dto.suc ?? null,
+    );
   }
 
   async trabajoTerminadoLote(
@@ -1337,12 +1360,17 @@ export class OrdenesTrabajoService {
     user: JwtPayload,
   ) {
     await this.assertActionPermission('REGRESAR_INCIDENCIA', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 8,
-      requiredFlowLabel: 'ASIGNADA',
-      okMessage: 'ORD válida para regresar por incidencia',
-      requireAsignado: true,
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 8,
+        requiredFlowLabel: 'ASIGNADA',
+        okMessage: 'ORD válida para regresar por incidencia',
+        requireAsignado: true,
+      },
+      dto.suc ?? null,
+    );
   }
 
   async regresarIncidenciaLote(
@@ -1380,11 +1408,16 @@ export class OrdenesTrabajoService {
 
   async validarRegresarTiendaOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('REGRESAR_TIENDA', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 9,
-      requiredFlowLabel: 'TRABAJO TERMINADO',
-      okMessage: 'ORD válida para regresar a tienda',
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 9,
+        requiredFlowLabel: 'TRABAJO TERMINADO',
+        okMessage: 'ORD válida para regresar a tienda',
+      },
+      dto.suc ?? null,
+    );
   }
 
   async regresarTiendaLote(
@@ -1399,9 +1432,9 @@ export class OrdenesTrabajoService {
       fallbackError:
         'No se pudo regresar a tienda. Verifique estado y permisos.',
       singleMessage:
-        '1 ORD recibida en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2, o 10 sin incidencia)',
+        '1 ORD recibida en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2; ORDs derivadas o sin incidencia -> 10)',
       pluralMessagePrefix:
-        'ORDs recibidas en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2, o 10 sin incidencia)',
+        'ORDs recibidas en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2; ORDs derivadas o sin incidencia -> 10)',
       notFoundMessage:
         'No fue posible procesar las ORDs para regresar a tienda',
     });
@@ -1448,14 +1481,19 @@ export class OrdenesTrabajoService {
     await this.assertActionPermission('SCAN_RECIBIR', user);
     const roleCode = await this.resolveRoleCode(user);
     const isAnalista = this.isAnalistaRoleForRecepcionExterna(roleCode);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: isAnalista ? 9 : 5,
-      requiredFlowLabel: isAnalista
-        ? 'PENDIENTE RECIBIR EN ANALISTA'
-        : 'ENTREGADA A MAQ O BISEL',
-      okMessage: 'ORD válida para recepción',
-      requireExternalLaboratorioForAnalyst: isAnalista,
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: isAnalista ? 9 : 5,
+        requiredFlowLabel: isAnalista
+          ? 'PENDIENTE RECIBIR EN ANALISTA'
+          : 'ENTREGADA A MAQ O BISEL',
+        okMessage: 'ORD válida para recepción',
+        requireExternalLaboratorioForAnalyst: isAnalista,
+      },
+      dto.suc ?? null,
+    );
   }
 
   async recibirLote(dto: SendOrdBatchDto, user: JwtPayload, ip: string | null) {
@@ -1480,20 +1518,25 @@ export class OrdenesTrabajoService {
 
   async validarEntregarOrd(dto: ValidateEnviarOrdDto, user: JwtPayload) {
     await this.assertActionPermission('SCAN_ENTREGAR', user);
-    return this.validateOrdByRequiredFlow(dto.code, user, {
-      requiredFlow: 10,
-      requiredFlowLabel: 'REGRESADO A TIENDA',
-      okMessage: 'ORD válida para entrega a cliente',
-    });
+    return this.validateOrdByRequiredFlow(
+      dto.code,
+      user,
+      {
+        requiredFlow: 10,
+        requiredFlowLabel: 'REGRESADO A TIENDA',
+        okMessage: 'ORD válida para entrega a cliente',
+      },
+      dto.suc ?? null,
+    );
   }
 
   async entregarLote(
-    dto: SendOrdBatchDto,
+    dto: EntregarOrdBatchDto,
     user: JwtPayload,
     ip: string | null,
   ) {
     await this.assertActionPermission('SCAN_ENTREGAR', user);
-    return this.executeLoteAction(dto, user, ip, {
+    return this.executeLoteActionWithParams(dto, user, ip, {
       spName: 'sp_ordenes_trabajo_entregar_lote',
       auditAction: 'ORD_ENTREGAR_LOTE',
       fallbackError:
@@ -1501,6 +1544,11 @@ export class OrdenesTrabajoService {
       singleMessage: '1 ORD entregada a cliente (estatus 11)',
       pluralMessagePrefix: 'ORDs entregadas a cliente (estatus 11)',
       notFoundMessage: 'No fue posible procesar las ORDs para entrega',
+      extraSqlParams: '@OBS=@1,@FIRMA_CLIENTE=@2,',
+      extraParams: [
+        this.normalizeText(dto.observaciones),
+        this.normalizeText(dto.firmaCliente),
+      ],
     });
   }
 
@@ -1696,7 +1744,7 @@ export class OrdenesTrabajoService {
 
   async scanRecibir(dto: ScanOrdDto, user: JwtPayload, ip: string | null) {
     await this.assertActionPermission('SCAN_RECIBIR', user);
-    const scope = await this.resolveSucScope(user, null);
+    const scope = await this.resolveSucScope(user, dto.suc ?? null);
     const actor = this.auditActor(user);
     const code = this.normalizeText(dto.code);
     if (!code) throw new BadRequestException('code es requerido');
@@ -1750,7 +1798,7 @@ export class OrdenesTrabajoService {
 
   async scanEntregar(dto: ScanOrdDto, user: JwtPayload, ip: string | null) {
     await this.assertActionPermission('SCAN_ENTREGAR', user);
-    const scope = await this.resolveSucScope(user, null);
+    const scope = await this.resolveSucScope(user, dto.suc ?? null);
     const actor = this.auditActor(user);
     const code = this.normalizeText(dto.code);
     if (!code) throw new BadRequestException('code es requerido');
@@ -1813,13 +1861,18 @@ export class OrdenesTrabajoService {
       requireAsignado?: boolean;
       requireExternalLaboratorioForAnalyst?: boolean;
     },
+    requestedSucRaw?: string | null,
   ) {
     const code = this.normalizeText(codeRaw);
     if (!code) {
       throw new BadRequestException('code es requerido');
     }
 
-    const scope = await this.resolveSucScope(user, null);
+    const scope = await this.resolveSucScope(user, requestedSucRaw ?? null);
+    const lookupRequestedSuc = this.resolveRequestedSucForCodeLookup(
+      scope,
+      code,
+    );
     const roleCode = await this.resolveRoleCode(user);
     const rows = await this.dataSource.query(
       `
@@ -1849,7 +1902,7 @@ export class OrdenesTrabajoService {
           UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
           OR UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) = UPPER(@0)
         )
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       ORDER BY
         CASE
@@ -1865,7 +1918,7 @@ export class OrdenesTrabajoService {
         scope.allowedSucsCsv,
         this.normalizeUpper(roleCode),
         scope.homeSuc,
-        scope.requestedSuc,
+        lookupRequestedSuc,
       ],
     );
 
@@ -2111,15 +2164,20 @@ export class OrdenesTrabajoService {
         @SUC=@${5 + extraParams.length}
     `;
 
-    const rows = await this.dataSource.query(sql, [
-      iord,
-      ...extraParams,
-      actor,
-      ip,
-      scope.isAdmin ? 1 : 0,
-      scope.allowedSucsCsv,
-      scope.requestedSuc,
-    ]);
+    let rows: unknown[];
+    try {
+      rows = await this.dataSource.query(sql, [
+        iord,
+        ...extraParams,
+        actor,
+        ip,
+        scope.isAdmin ? 1 : 0,
+        scope.allowedSucsCsv,
+        scope.requestedSuc,
+      ]);
+    } catch (error) {
+      throw this.mapError(error, `No fue posible procesar la ORD ${iord}`);
+    }
 
     const result = this.firstRow(rows);
     if (!result) {
@@ -2173,6 +2231,7 @@ export class OrdenesTrabajoService {
   private async resolveSucScope(
     user: JwtPayload,
     requestedSucRaw: string | null,
+    roleCodeHint?: string | null,
   ): Promise<SucScope> {
     const isAdmin = this.isAdmin(user);
     const requestedSuc = this.normalizeText(requestedSucRaw);
@@ -2194,15 +2253,20 @@ export class OrdenesTrabajoService {
       );
     }
 
+    const roleCode =
+      this.normalizeUpper(roleCodeHint) ||
+      this.normalizeUpper(await this.resolveRoleCode(user));
+    const moduleCodes = this.resolveScopeModuleCodes(roleCode);
+
     const rows = await this.dataSource.query(
       `
       SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) AS SUC
       FROM dbo.USR_MOD_SUC
       WHERE UPPER(LTRIM(RTRIM(ISNULL(USUARIO, '')))) = UPPER(@0)
         AND ACTIVO = 1
-        AND UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) IN (${OrdenesTrabajoService.MODULE_CODES.map((_, idx) => `@${idx + 1}`).join(',')})
+        AND UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) IN (${moduleCodes.map((_, idx) => `@${idx + 1}`).join(',')})
       `,
-      [username, ...OrdenesTrabajoService.MODULE_CODES],
+      [username, ...moduleCodes],
     );
 
     const ownSuc = this.normalizeUpper(user?.suc);
@@ -2291,6 +2355,17 @@ export class OrdenesTrabajoService {
     return this.normalizeUpper(this.firstRow(rows)?.CODIGO);
   }
 
+  private resolveScopeModuleCodes(roleCodeRaw: string) {
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    if (roleCode === 'INVJEF' || roleCode === 'ANALISTA_INV') {
+      return [
+        ...OrdenesTrabajoService.MODULE_CODES,
+        ...OrdenesTrabajoService.MODULE_CODES_INV_SCOPE,
+      ];
+    }
+    return [...OrdenesTrabajoService.MODULE_CODES];
+  }
+
   private resolveAsignadoDeptos(user: JwtPayload, roleCodeRaw: string) {
     if (this.isAdmin(user)) {
       return ['TALLER', 'BISELADO'];
@@ -2303,6 +2378,26 @@ export class OrdenesTrabajoService {
       return ['BISELADO'];
     }
     return ['TALLER', 'BISELADO'];
+  }
+
+  private async resolveAsignadoSharedSucs(sucRaw: string) {
+    const suc = this.normalizeUpper(sucRaw);
+    if (!suc) return [] as string[];
+    if (!(await this.hasTable('DAT_SUC_COLAB_ACCESO'))) return [];
+    const rows = await this.dataSource.query(
+      `
+      SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(SUC_ORIGEN, '')))) AS SUC
+      FROM dbo.DAT_SUC_COLAB_ACCESO
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(SUC_DESTINO, '')))) = UPPER(@0)
+        AND ISNULL(TRY_CONVERT(INT, ACTIVO), 1) = 1
+      `,
+      [suc],
+    );
+    return this.normalizeUnique(
+      (Array.isArray(rows) ? rows : []).map(
+        (row: Record<string, unknown>) => row.SUC,
+      ),
+    );
   }
 
   private canAccessAsignadoOptions(user: JwtPayload, roleCodeRaw: string) {
@@ -2937,7 +3032,7 @@ export class OrdenesTrabajoService {
         ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, o.ESTSEGU)
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -3023,7 +3118,7 @@ export class OrdenesTrabajoService {
         ON UPPER(LTRIM(RTRIM(ISNULL(ds.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.SUC, ''))))
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -3140,16 +3235,25 @@ export class OrdenesTrabajoService {
 
     const originalArtInfo = await this.resolveArticuloDatArt(suc, artOriginal);
     const nuevoArtInfo = await this.resolveArticuloDatArt(suc, artNuevo);
+    const sameArticulo =
+      this.normalizeUpper(artNuevo) === this.normalizeUpper(artOriginal);
+    const draftDesc = sameArticulo
+      ? (nuevoArtInfo?.des ??
+        this.normalizeText(originalRow.DESCART) ??
+        this.normalizeText(originalRow.DESCRT) ??
+        '')
+      : (nuevoArtInfo?.des ?? '');
 
-    const precioOriginal = await this.resolveTicketLogUnitPrice(
+    const precioOriginal = await this.resolveTicketLogBaseUnitPrice(
       iord,
       idfol,
       artOriginal,
       originalArtInfo?.pvta ?? 0,
     );
-    const precioNuevoDefault = nuevoArtInfo?.pvta ?? precioOriginal;
-    const precioNuevo = this.roundMoney(
-      this.toFloat(stagingRow?.PVTA_NUEVO) ?? precioNuevoDefault,
+    const precioNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      this.toFloat(stagingRow?.PVTA_NUEVO) ?? precioOriginal,
     );
 
     const tipoTran = this.resolveCambioMermaTipoTran(
@@ -3163,14 +3267,13 @@ export class OrdenesTrabajoService {
     );
     const rqfac = this.resolveCambioMermaRqfac(originalRow);
     const ivaIntegrado = this.toInt(originalRow.IVA_INTEGRADO);
-    const ctdCalculoOrd = ctdOriginal > 0 ? ctdOriginal : ctdCM;
-    const ctdCalculoContable = ctdCM > 0 ? ctdCM : ctdCalculoOrd;
-    const originalBase = this.roundMoney(precioOriginal * ctdCalculoOrd);
-    const nuevoBase = this.roundMoney(precioNuevo * ctdCalculoOrd);
-    const originalBaseContable = this.roundMoney(
-      precioOriginal * ctdCalculoContable,
-    );
-    const nuevoBaseContable = this.roundMoney(precioNuevo * ctdCalculoContable);
+    const originalBase = this.roundMoney(precioOriginal);
+    const nuevoBase = this.roundMoney(precioNuevo * ctdCM);
+    const originalBaseContable =
+      ctdOriginal > 0
+        ? this.roundMoney(originalBase * (ctdCM / ctdOriginal))
+        : 0;
+    const nuevoBaseContable = this.roundMoney(precioNuevo * ctdCM);
 
     const montosOriginal = this.calculateFinanceByIva(originalBase, {
       tipoTran,
@@ -3195,12 +3298,8 @@ export class OrdenesTrabajoService {
       ivaIntegrado,
       rqfac,
     });
-    const diferenciaEconomicaCalculada = this.roundMoney(
-      montosNuevoContable.total - montosOriginalContable.total,
-    );
     const diferenciaEconomica = this.roundMoney(
-      this.toFloat(stagingRow?.DIFERENCIA_ECONOMICA) ??
-        diferenciaEconomicaCalculada,
+      montosNuevoContable.total - montosOriginalContable.total,
     );
     const generaAfectacionContable = Math.abs(diferenciaEconomica) >= 0.009;
 
@@ -3281,12 +3380,8 @@ export class OrdenesTrabajoService {
           '',
         ART: artNuevo,
         UPC: nuevoArtInfo?.upc ?? '',
-        DES:
-          nuevoArtInfo?.des ??
-          this.normalizeText(originalRow.DESCART) ??
-          this.normalizeText(originalRow.DESCRT) ??
-          '',
-        CTD: ctdCalculoOrd,
+        DES: draftDesc,
+        CTD: ctdCM,
         PVTA: precioNuevo,
         PVTAR: precioNuevo,
         TIPO: this.normalizeText(originalRow.TIPO) ?? '',
@@ -3401,16 +3496,11 @@ export class OrdenesTrabajoService {
     }
 
     let pvtaNuevo = this.toFloat(staging.PVTA_NUEVO);
-    if (pvtaNuevo == null && tipo === 1 && artNuevo) {
-      const artInfo = await this.resolveArticuloDatArt(suc, artNuevo);
-      pvtaNuevo = this.toFloat(artInfo?.pvta);
-    }
-    if (pvtaNuevo == null) {
-      pvtaNuevo = await this.resolveCambioMermaOriginalUnitPrice(
-        iord,
-        original.row,
-      );
-    }
+    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      pvtaNuevo,
+    );
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -3513,6 +3603,7 @@ export class OrdenesTrabajoService {
     const finalDiff =
       this.toFloat(result.data.DIFERENCIA_ECONOMICA) ?? sealedDiff ?? 0;
 
+    await this.normalizeCambioMermaNewOrdRecord(finalNewIord, artNuevo, ctdCM);
     await this.forceEstatus2FromActionData(result.data);
     await this.finalizeCambioMermaOriginalAfterAuthorize(
       iord,
@@ -3596,7 +3687,7 @@ export class OrdenesTrabajoService {
     };
   }
 
-  private async resolveTicketLogUnitPrice(
+  private async resolveTicketLogBaseUnitPrice(
     iordRaw: string,
     idfolRaw: string,
     artRaw: string,
@@ -3611,8 +3702,7 @@ export class OrdenesTrabajoService {
     const rows = await this.dataSource.query(
       `
       SELECT TOP 1
-        TRY_CONVERT(FLOAT, t.PVTAT) AS PVTAT,
-        TRY_CONVERT(FLOAT, t.PVTA) AS PVTA
+        TRY_CONVERT(FLOAT, t.PVTAT) AS PVTAT_BASE
       FROM dbo.PV_TICKET_LOG t
       WHERE (
           UPPER(LTRIM(RTRIM(ISNULL(t.ORD, '')))) = UPPER(@0)
@@ -3636,9 +3726,31 @@ export class OrdenesTrabajoService {
       [iord, idfol, art],
     );
     const row = this.firstRow(rows);
-    const value =
-      this.toFloat(row?.PVTAT) ?? this.toFloat(row?.PVTA) ?? fallback;
+    const value = this.toFloat(row?.PVTAT_BASE) ?? fallback;
     return this.roundMoney(value);
+  }
+
+  private async resolveCambioMermaNewUnitPrice(
+    sucRaw: string,
+    artRaw: string,
+    fallback: number | null,
+  ) {
+    const suc = this.normalizeText(sucRaw) ?? '';
+    const art = this.normalizeText(artRaw) ?? '';
+    const artInfo = await this.resolveArticuloDatArt(suc, art);
+    const value = this.toFloat(artInfo?.pvta);
+    if (value != null && Number.isFinite(value) && value >= 0) {
+      return this.roundMoney(value);
+    }
+    const fallbackValue = this.toFloat(fallback);
+    if (
+      fallbackValue != null &&
+      Number.isFinite(fallbackValue) &&
+      fallbackValue >= 0
+    ) {
+      return this.roundMoney(fallbackValue);
+    }
+    return 0;
   }
 
   private async resolveCambioMermaOriginalUnitPrice(
@@ -3649,7 +3761,7 @@ export class OrdenesTrabajoService {
     const idfol = this.normalizeText(originalRow.IDFOL) ?? '';
     const artOriginal = this.normalizeText(originalRow.ART) ?? '';
     const originalArtInfo = await this.resolveArticuloDatArt(suc, artOriginal);
-    return this.resolveTicketLogUnitPrice(
+    return this.resolveTicketLogBaseUnitPrice(
       iord,
       idfol,
       artOriginal,
@@ -3815,17 +3927,32 @@ export class OrdenesTrabajoService {
     secondary: unknown,
     ctdOriginal: number,
   ) {
+    const allowed = this.resolveAllowedCtdCM(ctdOriginal);
     const fromPrimary = this.toFloat(primary);
     if (fromPrimary != null) {
-      if (Math.abs(fromPrimary - 1) <= 0.0001) return 1;
-      if (Math.abs(fromPrimary - 0.5) <= 0.0001) return 0.5;
+      for (const value of allowed) {
+        if (Math.abs(fromPrimary - value) <= 0.0001) return value;
+      }
     }
     const fromSecondary = this.toFloat(secondary);
     if (fromSecondary != null) {
-      if (Math.abs(fromSecondary - 1) <= 0.0001) return 1;
-      if (Math.abs(fromSecondary - 0.5) <= 0.0001) return 0.5;
+      for (const value of allowed) {
+        if (Math.abs(fromSecondary - value) <= 0.0001) return value;
+      }
     }
-    return ctdOriginal >= 1 ? 1 : 0.5;
+    return allowed[0];
+  }
+
+  private resolveAllowedCtdCM(ctdOriginal: number) {
+    if (Math.abs(ctdOriginal - 1) <= 0.0001) {
+      return [1, 0.5];
+    }
+    if (Math.abs(ctdOriginal - 0.5) <= 0.0001) {
+      return [0.5];
+    }
+    throw new BadRequestException(
+      'La ORD origen debe tener cantidad 1 o 0.5 para procesar cambio/merma.',
+    );
   }
 
   private normalizeStrictCtdCM(value: unknown, fallback?: number) {
@@ -3843,6 +3970,14 @@ export class OrdenesTrabajoService {
   }
 
   private assertCtdCMCompatible(ctdCM: number, ctdOriginal: number) {
+    const allowed = this.resolveAllowedCtdCM(ctdOriginal);
+    if (!allowed.some((value) => Math.abs(ctdCM - value) <= 0.0001)) {
+      throw new BadRequestException(
+        allowed.length === 1
+          ? 'CTD_C_M solo permite 0.5 cuando la ORD origen fue creada con 0.5.'
+          : 'CTD_C_M solo permite 1 o 0.5 cuando la ORD origen fue creada con 1.',
+      );
+    }
     if (ctdOriginal <= 0) {
       throw new BadRequestException(
         'La ORD no tiene cantidad válida para procesar cambio/merma.',
@@ -4048,6 +4183,40 @@ export class OrdenesTrabajoService {
         AND TRY_CONVERT(INT, TIPOM) = @1
       `,
       [iord, tipo],
+    );
+  }
+
+  private async normalizeCambioMermaNewOrdRecord(
+    iordRaw: string,
+    artNuevoRaw: string | null,
+    ctdCMRaw?: number | null,
+  ) {
+    const iord = this.normalizeText(iordRaw);
+    if (!iord) return;
+    const artNuevo = this.normalizeText(artNuevoRaw);
+    const ctdCM = this.toFloat(ctdCMRaw);
+    await this.dataSource.query(
+      `
+      UPDATE o
+      SET
+        ART = COALESCE(NULLIF(@1, ''), o.ART),
+        MAT = COALESCE(NULLIF(@1, ''), o.MAT),
+        CTD = COALESCE(@2, TRY_CONVERT(FLOAT, o.CTD)),
+        CTD_C_M = COALESCE(@2, TRY_CONVERT(FLOAT, o.CTD_C_M)),
+        TIPOM = 0,
+        MOTR = NULL,
+        DESCART = COALESCE(
+          NULLIF(LTRIM(RTRIM(ISNULL(a.DES, ''))), ''),
+          o.DESCART
+        ),
+        FCNMOD = GETDATE()
+      FROM dbo.PV_CTR_ORDS o
+      LEFT JOIN dbo.DAT_ART a
+        ON UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.SUC, ''))))
+       AND UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(COALESCE(NULLIF(@1, ''), o.ART), ''))))
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
+      `,
+      [iord, artNuevo ?? '', ctdCM],
     );
   }
 
@@ -4450,7 +4619,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -4491,7 +4660,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) IN (${placeholders})
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`)}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`, `@${iords.length + 4}`)}
         AND ${this.buildOrdRequestedSucSql('o', `@${iords.length + 4}`)}
       `,
       [
@@ -4692,7 +4861,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       `,
       [
@@ -4726,6 +4895,10 @@ export class OrdenesTrabajoService {
   ) {
     if (scope.isAdmin) return;
     const roleCode = await this.resolveRoleCode(user);
+    const lookupRequestedSuc = this.resolveRequestedSucForCodeLookup(
+      scope,
+      code,
+    );
     const requiredTipo = this.resolveOrdTipoScope(roleCode);
     if (!requiredTipo) return;
 
@@ -4740,7 +4913,7 @@ export class OrdenesTrabajoService {
           UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
           OR UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) = UPPER(@0)
         )
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4')}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', '@1', '@2', '@3', '@4', '@5')}
         AND ${this.buildOrdRequestedSucSql('o', '@5')}
       ORDER BY
         CASE
@@ -4756,7 +4929,7 @@ export class OrdenesTrabajoService {
         scope.allowedSucsCsv,
         this.normalizeUpper(roleCode),
         scope.homeSuc,
-        scope.requestedSuc,
+        lookupRequestedSuc,
       ],
     );
 
@@ -4807,7 +4980,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) IN (${placeholders})
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`)}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`, `@${iords.length + 4}`)}
         AND ${this.buildOrdRequestedSucSql('o', `@${iords.length + 4}`)}
       `,
       [
@@ -5128,7 +5301,7 @@ export class OrdenesTrabajoService {
       FROM dbo.PV_CTR_ORDS o
       ${this.buildOrdLaboratorioJoinSql('o', 'lab')}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) IN (${placeholders})
-        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`)}
+        AND ${this.buildOrdAllowedSucSql('o', 'lab', `@${iords.length}`, `@${iords.length + 1}`, `@${iords.length + 2}`, `@${iords.length + 3}`, `@${iords.length + 4}`)}
         AND ${this.buildOrdRequestedSucSql('o', `@${iords.length + 4}`)}
       `,
       [

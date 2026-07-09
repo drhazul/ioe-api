@@ -50,7 +50,7 @@ export class PvRefDetalleCrearDto {
 
   @ApiProperty({
     description:
-      'Forma de pago de referencia: TARJETA, CHEQUE, TRANSFERENCIA, DEPOSITO 3RO',
+      'Forma de pago de referencia: TARJETA, TARJETA CREDITO, CHEQUE, TRANSFERENCIA, DEPOSITO 3RO',
   })
   @Transform(({ value }) => toTrimmed(value))
   @IsString()

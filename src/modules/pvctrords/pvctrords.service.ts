@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -8,12 +9,22 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
+import { AuditService } from '../audit/audit.service';
+import type { JwtPayload } from '../auth/jwt.strategy';
+import { AuthorizeOrdRelationDto } from './dto/authorize-ord-relation.dto';
 import { PvCtrOrdsEntity } from './pvctrords.entity';
+import { PvCtrOrdsRelationAuthStore } from './pvctrords-relation-auth.store';
 import { CreateOrdFromQuoteLineDto } from './dto/create-ord-from-quote-line.dto';
 import { DeleteOrdFromQuoteLineDto } from './dto/delete-ord-from-quote-line.dto';
 import { CreatePvCtrOrdsDto } from './dto/create-pvctrords.dto';
 import { UpdatePvCtrOrdsDto } from './dto/update-pvctrords.dto';
+
+type SqlExecutor = {
+  query: (sql: string, params?: unknown[]) => Promise<any[]>;
+};
 
 type OrdBusinessErrorCode =
   | 'CLIENT_REQUIRED'
@@ -22,6 +33,11 @@ type OrdBusinessErrorCode =
   | 'FCNM_REQUIRED'
   | 'COMAD_REQUIRED'
   | 'TICKET_LINE_NOT_FOUND'
+  | 'RELATION_AUTH_REQUIRED'
+  | 'RELATION_TICKET_REQUIRED'
+  | 'RELATED_TICKET_MISMATCH'
+  | 'RELATED_TICKET_CLIENT_MISMATCH'
+  | 'RELATION_CREATE_ONLY'
   | 'ORD_EXISTS'
   | 'ORD_NOT_FOUND'
   | 'DB_ERROR';
@@ -42,12 +58,37 @@ export interface DeleteOrdFromQuoteLineResponse {
   message: string;
 }
 
+type RelationAuthorizer = {
+  idUsuario: number;
+  username: string;
+  suc: string | null;
+  roleCode: string;
+};
+
+type TicketLineRow = {
+  id: string;
+  idfol: string;
+  upc: string | null;
+  art: string;
+  des: string | null;
+  ctd: number;
+  pvta: number | null;
+  pvtat: number | null;
+  ord: string | null;
+  iddev: string | null;
+  ctdd: number | null;
+  ctddf: number | null;
+  ticketRel: string | null;
+};
+
 @Injectable()
 export class PvCtrOrdsService {
   constructor(
     @InjectRepository(PvCtrOrdsEntity)
     private readonly repo: Repository<PvCtrOrdsEntity>,
     private readonly dataSource: DataSource,
+    private readonly audit: AuditService,
+    private readonly relationAuthStore: PvCtrOrdsRelationAuthStore,
   ) {}
 
   async findAll() {
@@ -79,8 +120,72 @@ export class PvCtrOrdsService {
     );
   }
 
+  async authorizeRelationTicket(
+    dto: AuthorizeOrdRelationDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
+    const passwordSupervisor = this.normalizeText(dto.passwordSupervisor);
+    if (!passwordSupervisor) {
+      throw new BadRequestException('passwordSupervisor es obligatorio');
+    }
+
+    const requestedByUserId = this.resolveUserId(user);
+    const requester = await this.loadUserWithRole(requestedByUserId);
+    const supervisor =
+      await this.findRelationAuthorizerByPassword(passwordSupervisor);
+    if (!supervisor) {
+      throw new ForbiddenException('Autorización SUPERPV inválida');
+    }
+
+    const session = this.relationAuthStore.issue({
+      scope: 'RELACION_VENTA_ANTERIOR',
+      supervisorUserId: supervisor.idUsuario,
+      requestedByUserId,
+    });
+
+    await this.audit.log({
+      IDUSUARIO: requestedByUserId,
+      ACTION: 'ORD_RELATION_AUTHORIZE',
+      MODULO: 'punto-venta',
+      ENTIDAD: 'PV_CTR_ORDS',
+      ENTIDAD_ID:
+        this.normalizeText(dto.ticketId) ||
+        this.normalizeText(dto.idfol) ||
+        null,
+      SUC: user.suc ?? requester?.suc ?? null,
+      METADATA_JSON: JSON.stringify({
+        idfol: this.normalizeText(dto.idfol) || null,
+        ticketId: this.normalizeText(dto.ticketId) || null,
+        art: this.normalizeText(dto.art) || null,
+        ctd: dto.ctd ?? null,
+        requestedBy: {
+          idUsuario: requestedByUserId,
+          username: requester?.username ?? user.username ?? null,
+          roleCode: requester?.roleCode ?? null,
+        },
+        supervisor: {
+          idUsuario: supervisor.idUsuario,
+          username: supervisor.username,
+          roleCode: supervisor.roleCode,
+        },
+      }),
+      IP: ip,
+    });
+
+    return {
+      authorized: true,
+      authorizationToken: session.token,
+      supervisorUserId: String(supervisor.idUsuario),
+      username: supervisor.username,
+      roleCode: supervisor.roleCode,
+    };
+  }
+
   async createFromQuoteLine(
     dto: CreateOrdFromQuoteLineDto,
+    user: JwtPayload,
+    ip: string | null,
   ): Promise<CreateOrdFromQuoteLineResponse> {
     const idfol = dto.idfol.trim();
     const ticketId = dto.ticketId.trim();
@@ -88,7 +193,7 @@ export class PvCtrOrdsService {
     const estado = this.normalizeEstadoOperativo(dto.estado);
     const tipo = dto.tipo.trim();
     const suc = dto.suc.trim().toUpperCase();
-    const opv = await this.normalizeOpvToUsername(dto.opv.trim());
+    const opvInput = dto.opv.trim();
     const fechaEntregaRaw = String(dto.fechaEntrega ?? '').trim();
     const fechaEntregaDate = fechaEntregaRaw ? new Date(fechaEntregaRaw) : null;
     const fechaEntrega =
@@ -97,6 +202,12 @@ export class PvCtrOrdsService {
         : null;
     const comad = (dto.comad ?? '').trim();
     const clien = Number(dto.clien);
+    const clienKey = this.normalizeClientKey(dto.clien);
+    const ticketRel = this.normalizeOrdValue(dto.ticketRel);
+    const relationAuthorizationToken = this.normalizeOrdValue(
+      dto.relationAuthorizationToken,
+    );
+    const requestedByUserId = this.resolveUserId(user);
 
     if (!Number.isFinite(clien) || clien <= 0 || clien === 1) {
       this.throwBusinessError(
@@ -113,7 +224,11 @@ export class PvCtrOrdsService {
       );
     }
 
-    const ticketLine = await this.findTicketLineById(ticketId, idfol);
+    const ticketLine = await this.findTicketLineById(
+      this.dataSource,
+      ticketId,
+      idfol,
+    );
     const art = ticketLine.art;
     const ctd = ticketLine.ctd;
 
@@ -138,49 +253,88 @@ export class PvCtrOrdsService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    const opv = await this.normalizeOpvToUsername(opvInput);
 
     const ordByPayload = this.normalizeOrdValue(dto.ordExistente);
     const ordByTicket = ordByPayload ? null : ticketLine.ord;
     const existingOrd = ordByPayload ?? ordByTicket;
-    if (existingOrd) {
-      await this.updateOrdHeaderFromQuoteLine({
-        iord: existingOrd,
-        tipo,
-        opv,
-        fechaEntrega: fechaEntrega,
-        comad,
-        descArt,
-      });
-      const existingBundle = await this.findOrdBundle(existingOrd);
-      return {
-        created: false,
-        updated: true,
-        iord: existingOrd,
-        header: existingBundle.header,
-        details: existingBundle.details,
-        message: 'ORD existente actualizada correctamente',
-      };
+    if (ticketRel && existingOrd) {
+      this.throwBusinessError(
+        'RELATION_CREATE_ONLY',
+        'La relacion de venta anterior solo aplica al crear una nueva ORD.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (relationAuthorizationToken && !ticketRel) {
+      this.throwBusinessError(
+        'RELATION_TICKET_REQUIRED',
+        'Debe capturar TICKET_REL para crear ORD relacionada.',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
+    const relationSession = ticketRel
+      ? this.validateRelationAuthorizationToken(
+          relationAuthorizationToken,
+          requestedByUserId,
+        )
+      : null;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
     try {
-      const rows = await this.dataSource.query(
+      if (existingOrd) {
+        await this.updateOrdHeaderFromQuoteLine(queryRunner, {
+          iord: existingOrd,
+          tipo,
+          opv,
+          fechaEntrega: fechaEntrega,
+          comad,
+          descArt,
+        });
+        const existingBundle = await this.findOrdBundle(
+          queryRunner,
+          existingOrd,
+        );
+        await queryRunner.commitTransaction();
+        return {
+          created: false,
+          updated: true,
+          iord: existingOrd,
+          header: existingBundle.header,
+          details: existingBundle.details,
+          message: 'ORD existente actualizada correctamente',
+        };
+      }
+
+      if (ticketRel) {
+        await this.assertRelatedTicketMatch(queryRunner, {
+          ticketRel,
+          art,
+          ctd,
+          clienKey,
+        });
+      }
+
+      const rows = await queryRunner.query(
         `
-        DECLARE @IORD_OUT NVARCHAR(255);
-        EXEC dbo.sp_pv_ctr_ords_create_from_quote_line
-          @IDFOL = @0,
-          @ART = @1,
-          @DESCART = @2,
-          @CTD = @3,
-          @CLIEN = @4,
-          @ESTADO = @5,
-          @TIPO = @6,
-          @FCNM = @7,
-          @COMAD = @8,
-          @SUC = @9,
-          @OPV = @10,
-          @IORD_OUT = @IORD_OUT OUTPUT;
-        SELECT @IORD_OUT AS IORD;
-        `,
+          DECLARE @IORD_OUT NVARCHAR(255);
+          EXEC dbo.sp_pv_ctr_ords_create_from_quote_line
+            @IDFOL = @0,
+            @ART = @1,
+            @DESCART = @2,
+            @CTD = @3,
+            @CLIEN = @4,
+            @ESTADO = @5,
+            @TIPO = @6,
+            @FCNM = @7,
+            @COMAD = @8,
+            @SUC = @9,
+            @OPV = @10,
+            @IORD_OUT = @IORD_OUT OUTPUT;
+          SELECT @IORD_OUT AS IORD;
+          `,
         [
           idfol,
           art,
@@ -206,7 +360,36 @@ export class PvCtrOrdsService {
         });
       }
 
-      const createdBundle = await this.findOrdBundle(iord);
+      if (ticketRel) {
+        await this.applyRelatedTicketFlow(queryRunner, {
+          idfol,
+          ticketId,
+          iord,
+          ticketRel,
+          ticketLine,
+        });
+        await this.audit.log({
+          IDUSUARIO: requestedByUserId,
+          ACTION: 'ORD_RELATION_CREATE',
+          MODULO: 'punto-venta',
+          ENTIDAD: 'PV_CTR_ORDS',
+          ENTIDAD_ID: iord,
+          SUC: user.suc ?? suc,
+          METADATA_JSON: JSON.stringify({
+            idfol,
+            ticketId,
+            iord,
+            art,
+            ctd,
+            ticketRel,
+            supervisorUserId: relationSession?.supervisorUserId ?? null,
+          }),
+          IP: ip,
+        });
+      }
+
+      const createdBundle = await this.findOrdBundle(queryRunner, iord);
+      await queryRunner.commitTransaction();
       return {
         created: true,
         iord,
@@ -215,7 +398,10 @@ export class PvCtrOrdsService {
         message: 'ORD creada correctamente',
       };
     } catch (error) {
+      await queryRunner.rollbackTransaction();
       this.rethrowCreateOrdError(error);
+    } finally {
+      await queryRunner.release();
     }
   }
 
@@ -233,7 +419,9 @@ export class PvCtrOrdsService {
     try {
       const headerRows = await queryRunner.query(
         `
-        SELECT TOP 1 IORD
+        SELECT TOP 1
+          IORD,
+          LTRIM(RTRIM(ISNULL(TICKET_REL, ''))) AS TICKET_REL
         FROM dbo.PV_CTR_ORDS
         WHERE IORD = @0
         `,
@@ -248,6 +436,14 @@ export class PvCtrOrdsService {
           HttpStatus.NOT_FOUND,
         );
       }
+      const headerRow = (headerRows?.[0] ?? null) as Record<
+        string,
+        unknown
+      > | null;
+      const headerTicketRel = this.normalizeOptionalText(headerRow?.TICKET_REL);
+      const counterMovementTicketRel = headerTicketRel
+        ? this.buildCounterMovementTicketRel(headerTicketRel, ticketId)
+        : null;
 
       await queryRunner.query(
         `
@@ -265,6 +461,24 @@ export class PvCtrOrdsService {
         [iord],
       );
 
+      if (headerTicketRel) {
+        await queryRunner.query(
+          `
+          DELETE FROM dbo.PV_TICKET_LOG
+          WHERE (
+              LTRIM(RTRIM(ISNULL(TICKET_REL, ''))) = @1
+              OR LTRIM(RTRIM(ISNULL(TICKET_REL, ''))) = @2
+            )
+            AND ISNULL(TRY_CONVERT(FLOAT, CTD), 0) < 0
+            AND (
+              LTRIM(RTRIM(ISNULL(ORD, ''))) = @0
+              OR NULLIF(LTRIM(RTRIM(ISNULL(ORD, ''))), '') IS NULL
+            )
+          `,
+          [iord, headerTicketRel, counterMovementTicketRel],
+        );
+      }
+
       const idfolCondition = idfol ? 'AND IDFOL = @2' : '';
       const params: Array<string> = [iord, ticketId];
       if (idfol) params.push(idfol);
@@ -272,7 +486,8 @@ export class PvCtrOrdsService {
       await queryRunner.query(
         `
         UPDATE dbo.PV_TICKET_LOG
-        SET ORD = NULL
+        SET ORD = NULL,
+            TICKET_REL = NULL
         WHERE LTRIM(RTRIM(ISNULL(ORD, ''))) = @0
           AND ID = @1
           ${idfolCondition}
@@ -354,6 +569,8 @@ export class PvCtrOrdsService {
     if (dto.RESMEMR !== undefined) partial.RESMEMR = dto.RESMEMR ?? null;
     if (dto.HR_ENT !== undefined)
       partial.HR_ENT = dto.HR_ENT ? new Date(dto.HR_ENT) : null;
+    if (dto.TICKET_REL !== undefined)
+      partial.TICKET_REL = dto.TICKET_REL ?? null;
 
     const updated = this.repo.merge(row, partial);
     return this.repo.save(updated);
@@ -426,19 +643,26 @@ export class PvCtrOrdsService {
   }
 
   private async findTicketLineById(
+    executor: SqlExecutor,
     ticketId: string,
     idfol: string,
-  ): Promise<{
-    art: string;
-    ctd: number;
-    ord: string | null;
-  }> {
-    const rows = await this.dataSource.query(
+  ): Promise<TicketLineRow> {
+    const rows = await executor.query(
       `
       SELECT TOP 1
+        LTRIM(RTRIM(ISNULL(ID, ''))) AS ID,
+        LTRIM(RTRIM(ISNULL(IDFOL, ''))) AS IDFOL,
+        LTRIM(RTRIM(ISNULL(UPC, ''))) AS UPC,
         LTRIM(RTRIM(ISNULL(ART, ''))) AS ART,
+        LTRIM(RTRIM(ISNULL(DES, ''))) AS DES,
         TRY_CONVERT(FLOAT, CTD) AS CTD,
+        TRY_CONVERT(MONEY, PVTA) AS PVTA,
+        TRY_CONVERT(MONEY, PVTAT) AS PVTAT,
         LTRIM(RTRIM(ISNULL(ORD, ''))) AS ORD
+        ,LTRIM(RTRIM(ISNULL(IDDEV, ''))) AS IDDEV
+        ,TRY_CONVERT(FLOAT, CTDD) AS CTDD
+        ,TRY_CONVERT(FLOAT, CTDDF) AS CTDDF
+        ,LTRIM(RTRIM(ISNULL(TICKET_REL, ''))) AS TICKET_REL
       FROM dbo.PV_TICKET_LOG
       WHERE ID = @0
         AND IDFOL = @1
@@ -477,16 +701,55 @@ export class PvCtrOrdsService {
     const ord = this.normalizeOrdValue(
       row.ORD == null ? undefined : String(row.ORD),
     );
+    const id = String(row.ID ?? '').trim();
+    const upc = this.normalizeOptionalText(row.UPC);
+    const des = this.normalizeOptionalText(row.DES);
+    const iddev = this.normalizeOptionalText(row.IDDEV);
+    const ticketRel = this.normalizeOptionalText(row.TICKET_REL);
 
-    return { art, ctd, ord };
+    return {
+      id: id || ticketId,
+      idfol: String(row.IDFOL ?? '').trim() || idfol,
+      upc,
+      art,
+      des,
+      ctd,
+      pvta: this.toNullableNumber(row.PVTA),
+      pvtat: this.toNullableNumber(row.PVTAT),
+      ord,
+      iddev,
+      ctdd: this.toNullableNumber(row.CTDD),
+      ctddf: this.toNullableNumber(row.CTDDF),
+      ticketRel,
+    };
   }
 
   private async findOrdBundle(iord: string): Promise<{
     header: Record<string, unknown> | null;
     details: Record<string, unknown>[];
+  }>;
+  private async findOrdBundle(
+    executor: SqlExecutor,
+    iord: string,
+  ): Promise<{
+    header: Record<string, unknown> | null;
+    details: Record<string, unknown>[];
+  }>;
+  private async findOrdBundle(
+    executorOrIord: SqlExecutor | string,
+    maybeIord?: string,
+  ): Promise<{
+    header: Record<string, unknown> | null;
+    details: Record<string, unknown>[];
   }> {
+    const executor =
+      typeof executorOrIord === 'string'
+        ? (this.dataSource as SqlExecutor)
+        : executorOrIord;
+    const iord =
+      typeof executorOrIord === 'string' ? executorOrIord : (maybeIord ?? '');
     const [headerRows, detailRows] = await Promise.all([
-      this.dataSource.query(
+      executor.query(
         `
         SELECT TOP 1 *
         FROM dbo.PV_CTR_ORDS
@@ -494,7 +757,7 @@ export class PvCtrOrdsService {
         `,
         [iord],
       ),
-      this.dataSource.query(
+      executor.query(
         `
         SELECT *
         FROM dbo.PV_CTR_ORDS_DET
@@ -591,15 +854,18 @@ export class PvCtrOrdsService {
     }
   }
 
-  private async updateOrdHeaderFromQuoteLine(input: {
-    iord: string;
-    tipo: string;
-    opv: string;
-    fechaEntrega: string;
-    comad: string;
-    descArt: string;
-  }): Promise<void> {
-    const existsRows = await this.dataSource.query(
+  private async updateOrdHeaderFromQuoteLine(
+    executor: SqlExecutor,
+    input: {
+      iord: string;
+      tipo: string;
+      opv: string;
+      fechaEntrega: string;
+      comad: string;
+      descArt: string;
+    },
+  ): Promise<void> {
+    const existsRows = await executor.query(
       `
       SELECT TOP 1 IORD
       FROM dbo.PV_CTR_ORDS
@@ -615,7 +881,7 @@ export class PvCtrOrdsService {
       );
     }
 
-    await this.dataSource.query(
+    await executor.query(
       `
       UPDATE dbo.PV_CTR_ORDS
       SET
@@ -637,6 +903,185 @@ export class PvCtrOrdsService {
         input.descArt,
       ],
     );
+  }
+
+  private validateRelationAuthorizationToken(
+    token: string | null,
+    requestedByUserId: number,
+  ) {
+    if (!token) {
+      this.throwBusinessError(
+        'RELATION_AUTH_REQUIRED',
+        'Se requiere autorización supervisor para registrar TICKET_REL.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    const session = this.relationAuthStore.validate(token, {
+      scope: 'RELACION_VENTA_ANTERIOR',
+      requestedByUserId,
+    });
+    if (!session) {
+      this.throwBusinessError(
+        'RELATION_AUTH_REQUIRED',
+        'Se requiere autorización supervisor para registrar TICKET_REL.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return session;
+  }
+
+  private async assertRelatedTicketMatch(
+    executor: SqlExecutor,
+    input: {
+      ticketRel: string;
+      art: string;
+      ctd: number;
+      clienKey: string;
+    },
+  ): Promise<void> {
+    const rows = await executor.query(
+      `
+      SELECT TOP 1 t.ID
+      FROM dbo.PV_TICKET_LOG t
+      INNER JOIN dbo.PV_CTR_FOL_ASVR fol
+        ON LTRIM(RTRIM(ISNULL(fol.IDFOL, ''))) = LTRIM(RTRIM(ISNULL(t.IDFOL, '')))
+      WHERE LTRIM(RTRIM(ISNULL(t.IDFOL, ''))) = @0
+        AND LTRIM(RTRIM(ISNULL(t.ART, ''))) = @1
+        AND ABS(ISNULL(TRY_CONVERT(FLOAT, t.CTD), 0) - @2) <= @3
+        AND TRY_CONVERT(DECIMAL(38, 0), fol.CLIEN) = TRY_CONVERT(DECIMAL(38, 0), @4)
+      ORDER BY t.updated_at DESC, t.ID DESC
+      `,
+      [input.ticketRel, input.art, input.ctd, 0.0001, input.clienKey],
+    );
+    if (rows?.length) return;
+
+    const clientMismatchRows = await executor.query(
+      `
+      SELECT TOP 1 ID
+      FROM dbo.PV_TICKET_LOG
+      WHERE LTRIM(RTRIM(ISNULL(IDFOL, ''))) = @0
+        AND LTRIM(RTRIM(ISNULL(ART, ''))) = @1
+        AND ABS(ISNULL(TRY_CONVERT(FLOAT, CTD), 0) - @2) <= @3
+      ORDER BY updated_at DESC, ID DESC
+      `,
+      [input.ticketRel, input.art, input.ctd, 0.0001],
+    );
+    if (clientMismatchRows?.length) {
+      this.throwBusinessError(
+        'RELATED_TICKET_CLIENT_MISMATCH',
+        'La cotizacion relacionada no corresponde al mismo cliente.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.throwBusinessError(
+      'RELATED_TICKET_MISMATCH',
+      'El Articulo o catidad no coresponden en la cotizacion relacionada',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  private async applyRelatedTicketFlow(
+    executor: SqlExecutor,
+    input: {
+      idfol: string;
+      ticketId: string;
+      iord: string;
+      ticketRel: string;
+      ticketLine: TicketLineRow;
+    },
+  ): Promise<void> {
+    const counterMovementTicketRel = this.buildCounterMovementTicketRel(
+      input.ticketRel,
+      input.ticketId,
+    );
+    await executor.query(
+      `
+      UPDATE dbo.PV_CTR_ORDS
+      SET TICKET_REL = @1,
+          FCNMOD = GETDATE()
+      WHERE IORD = @0
+      `,
+      [input.iord, input.ticketRel],
+    );
+
+    await executor.query(
+      `
+      UPDATE dbo.PV_TICKET_LOG
+      SET
+        ORD = @2,
+        TICKET_REL = @3,
+        updated_at = GETDATE()
+      WHERE ID = @0
+        AND IDFOL = @1
+      `,
+      [input.ticketId, input.idfol, input.iord, input.ticketRel],
+    );
+
+    const negQty = -Math.abs(input.ticketLine.ctd);
+    const pvta = this.round2(this.toNullableNumber(input.ticketLine.pvta) ?? 0);
+    const pvtatBase =
+      this.toNullableNumber(input.ticketLine.pvtat) ??
+      Math.abs(input.ticketLine.ctd) * pvta;
+    const negTotal = -Math.abs(this.round2(pvtatBase));
+
+    await executor.query(
+      `
+      INSERT INTO dbo.PV_TICKET_LOG
+      (
+        ID,
+        IDFOL,
+        UPC,
+        ART,
+        DES,
+        CTD,
+        PVTA,
+        PVTAT,
+        ORD,
+        IDDEV,
+        CTDD,
+        CTDDF,
+        updated_at,
+        TICKET_REL
+      )
+      VALUES
+      (
+        @0,
+        @1,
+        @2,
+        @3,
+        @4,
+        @5,
+        @6,
+        @7,
+        NULL,
+        @8,
+        @9,
+        @10,
+        GETDATE(),
+        @11
+      )
+      `,
+      [
+        randomUUID(),
+        input.idfol,
+        input.ticketLine.upc,
+        input.ticketLine.art,
+        input.ticketLine.des,
+        negQty,
+        pvta,
+        negTotal,
+        input.ticketLine.iddev,
+        input.ticketLine.ctdd,
+        input.ticketLine.ctddf,
+        counterMovementTicketRel,
+      ],
+    );
+  }
+
+  private buildCounterMovementTicketRel(ticketRel: string, ticketId: string) {
+    return `${ticketRel}|${ticketId}`;
   }
 
   private extractSqlError(error: unknown): {
@@ -694,8 +1139,119 @@ export class PvCtrOrdsService {
     return Math.trunc(parsed);
   }
 
+  private toNullableNumber(value: unknown): number | null {
+    if (value == null) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private round2(value: number) {
+    return Math.round(value * 100) / 100;
+  }
+
+  private normalizeText(value: unknown): string {
+    return String(value ?? '').trim();
+  }
+
+  private normalizeUpper(value: unknown): string {
+    return this.normalizeText(value).toUpperCase();
+  }
+
+  private normalizeOptionalText(value: unknown): string | null {
+    const text = this.normalizeText(value);
+    return text ? text : null;
+  }
+
+  private normalizeClientKey(value: unknown): string {
+    const text = this.normalizeText(value);
+    if (text) {
+      const numericText = Number(text);
+      if (Number.isFinite(numericText)) {
+        return numericText.toFixed(0);
+      }
+      return text;
+    }
+
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '';
+    return numeric.toFixed(0);
+  }
+
+  private async loadUserWithRole(idUsuario: number) {
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1
+        u.IDUSUARIO,
+        u.USERNAME,
+        u.SUC,
+        r.CODIGO AS ROLE_CODE
+      FROM dbo.USUARIO u
+      LEFT JOIN dbo.ROL r ON r.IDROL = u.IDROL
+      WHERE u.IDUSUARIO = @0
+      `,
+      [idUsuario],
+    );
+
+    const row = (rows?.[0] ?? null) as Record<string, unknown> | null;
+    if (!row) return null;
+    return {
+      idUsuario: Number(row.IDUSUARIO ?? 0) || 0,
+      username: this.normalizeText(row.USERNAME),
+      suc: this.normalizeOptionalText(row.SUC),
+      roleCode: this.normalizeText(row.ROLE_CODE),
+    };
+  }
+
   private toMessage(value: unknown): string {
     const text = String(value ?? '').trim();
     return text || 'Error de base de datos';
+  }
+
+  private resolveUserId(user: JwtPayload): number {
+    const idUsuario = Number(user?.sub ?? 0) || 0;
+    if (idUsuario <= 0) {
+      throw new BadRequestException(
+        'No se pudo resolver usuario autenticado para auditoria',
+      );
+    }
+    return idUsuario;
+  }
+
+  private async findRelationAuthorizerByPassword(
+    password: string,
+  ): Promise<RelationAuthorizer | null> {
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        u.IDUSUARIO,
+        u.USERNAME,
+        u.PASSWORD_HASH,
+        u.SUC,
+        r.CODIGO AS ROLE_CODE
+      FROM dbo.USUARIO u
+      INNER JOIN dbo.ROL r ON r.IDROL = u.IDROL
+      WHERE u.ESTATUS = 'ACTIVO'
+        AND r.ACTIVO = 1
+        AND UPPER(LTRIM(RTRIM(ISNULL(r.CODIGO, '')))) = 'SUPERPV'
+      `,
+    );
+
+    for (const raw of rows ?? []) {
+      const row = raw as Record<string, unknown>;
+      const hash = this.normalizeText(row.PASSWORD_HASH);
+      if (!hash) continue;
+      const valid = await bcrypt.compare(password, hash);
+      if (!valid) continue;
+      const idUsuario = Number(row.IDUSUARIO ?? 0) || 0;
+      if (idUsuario <= 0) continue;
+      return {
+        idUsuario,
+        username: this.normalizeText(row.USERNAME),
+        suc: this.normalizeOptionalText(row.SUC),
+        roleCode: this.normalizeText(row.ROLE_CODE),
+      };
+    }
+
+    return null;
   }
 }

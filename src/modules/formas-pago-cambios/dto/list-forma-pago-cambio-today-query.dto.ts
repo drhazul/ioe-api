@@ -22,4 +22,24 @@ export class ListFormaPagoCambioTodayQueryDto {
   @MaxLength(255)
   @Transform(({ value }) => (value ?? '').toString().trim())
   clien?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filtro opcional por sucursal (solo admin)',
+    example: 'DF01',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  @Transform(({ value }) => (value ?? '').toString().trim().toUpperCase())
+  suc?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filtro opcional por OPV (solo admin)',
+    example: 'OPV001',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  @Transform(({ value }) => (value ?? '').toString().trim().toUpperCase())
+  opv?: string;
 }

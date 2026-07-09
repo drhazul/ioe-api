@@ -40,4 +40,7 @@ export class PvTicketLogEntity {
 
   @Column({ name: 'updated_at', type: 'datetime', nullable: true })
   UPDATED_AT: Date | null;
+
+  @Column({ name: 'TICKET_REL', type: 'nvarchar', length: 255, nullable: true })
+  TICKET_REL: string | null;
 }

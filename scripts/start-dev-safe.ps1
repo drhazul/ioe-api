@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$ports = @(3001, 8081)
+$ports = @(3000, 8081)
 $workspaceHint = 'ioe-api'
 
 foreach ($port in $ports) {

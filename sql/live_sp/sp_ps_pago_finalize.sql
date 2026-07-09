@@ -646,7 +646,7 @@ BEGIN
                                                                                                                                                                                                                                  
         @pIMPC = @impc,
                                                                                                                                                                                                                                       
-        @pIMPD = @total,
+        @pIMPD = ROUND(@formaImpp - @impc, 4),
                                                                                                                                                                                                                                      
         @pAUT = @formaAut;
                                                                                                                                                                                                                                    
@@ -1226,3 +1226,4 @@ BEGIN
                                                                                                                                                                                                                                                   
 END;
                                                                                                                                                                                                                                                          
+

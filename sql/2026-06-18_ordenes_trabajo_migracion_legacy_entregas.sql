@@ -1,0 +1,164 @@
+/*
+  2026-06-18
+  Migracion historica de entregas con firma
+  - Toma ORDs viejas en estatus 11 sin ID_ENTREGA
+  - Agrupa por IDFOL + firma
+  - Crea cabecera en PV_CTR_ORDS_ENTREGA
+  - Crea detalle en PV_CTR_ORDS_ENTREGA_DET
+  - Relaciona ORDs con el nuevo folio
+  - Limpia FIRMA_CLIENTE por ORD para dejar firma solo en cabecera
+*/
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+IF OBJECT_ID('tempdb..#LegacyEntregaGroups') IS NOT NULL
+  DROP TABLE #LegacyEntregaGroups;
+
+SELECT
+  o.IDFOL,
+  UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) AS SUC,
+  CONVERT(VARBINARY(32), HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), o.FIRMA_CLIENTE))) AS FIRMA_HASH,
+  MIN(o.FIRMA_CLIENTE) AS FIRMA_CLIENTE,
+  COUNT(1) AS TOTAL_ORDS,
+  MIN(COALESCE(o.FCNEN, o.HR_ENT, o.FCNMOD, GETDATE())) AS FCN_ENTREGA,
+  MAX(NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(MAX), o.COMAD), ''))), '')) AS OBS_BASE
+INTO #LegacyEntregaGroups
+FROM dbo.PV_CTR_ORDS o
+WHERE o.ESTSEGU = 11
+  AND o.ID_ENTREGA IS NULL
+  AND ISNULL(LTRIM(RTRIM(ISNULL(o.FIRMA_CLIENTE, ''))), '') <> ''
+GROUP BY
+  o.IDFOL,
+  UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))),
+  CONVERT(VARBINARY(32), HASHBYTES('SHA2_256', CONVERT(VARBINARY(MAX), o.FIRMA_CLIENTE)));
+
+IF EXISTS (SELECT 1 FROM #LegacyEntregaGroups)
+BEGIN
+  DECLARE
+    @IDFOL NVARCHAR(255),
+    @SUC NVARCHAR(10),
+    @FIRMA_CLIENTE NVARCHAR(MAX),
+    @TOTAL_ORDS INT,
+    @FCN_ENTREGA DATETIME,
+    @OBS_BASE NVARCHAR(255),
+    @ID_ENTREGA BIGINT,
+    @FOLIO_ENTREGA NVARCHAR(255),
+    @ORDS NVARCHAR(MAX);
+
+  DECLARE legacy_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT
+      IDFOL,
+      SUC,
+      FIRMA_CLIENTE,
+      TOTAL_ORDS,
+      FCN_ENTREGA,
+      OBS_BASE
+    FROM #LegacyEntregaGroups
+    ORDER BY FCN_ENTREGA, IDFOL, SUC;
+
+  OPEN legacy_cursor;
+  FETCH NEXT FROM legacy_cursor
+    INTO @IDFOL, @SUC, @FIRMA_CLIENTE, @TOTAL_ORDS, @FCN_ENTREGA, @OBS_BASE;
+
+  WHILE @@FETCH_STATUS = 0
+  BEGIN
+    SET @ORDS = (
+      SELECT STRING_AGG(o.IORD, ',')
+      FROM dbo.PV_CTR_ORDS o
+      WHERE o.IDFOL = @IDFOL
+        AND UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = @SUC
+        AND o.FIRMA_CLIENTE = @FIRMA_CLIENTE
+        AND o.ESTSEGU = 11
+        AND o.ID_ENTREGA IS NULL
+    );
+
+    BEGIN TRY
+      BEGIN TRANSACTION;
+
+      INSERT INTO dbo.PV_CTR_ORDS_ENTREGA (
+        FOLIO_ENTREGA,
+        SUC,
+        OBS,
+        FIRMA_CLIENTE,
+        TOTAL_ORDS,
+        USER_ALTA,
+        FCN_ALTA,
+        IP_ALTA
+      )
+      VALUES (
+        NULL,
+        NULLIF(@SUC, ''),
+        COALESCE(NULLIF(@OBS_BASE, ''), 'Migracion historica de entrega'),
+        @FIRMA_CLIENTE,
+        @TOTAL_ORDS,
+        'MIGRACION',
+        @FCN_ENTREGA,
+        NULL
+      );
+
+      SET @ID_ENTREGA = SCOPE_IDENTITY();
+
+      SET @FOLIO_ENTREGA = CONCAT(
+        'ENT-',
+        COALESCE(NULLIF(@SUC, ''), 'GEN'),
+        '-',
+        CONVERT(VARCHAR(8), @FCN_ENTREGA, 112),
+        '-',
+        RIGHT(REPLICATE('0', 6) + CAST(@ID_ENTREGA AS VARCHAR(20)), 6)
+      );
+
+      UPDATE dbo.PV_CTR_ORDS_ENTREGA
+      SET FOLIO_ENTREGA = @FOLIO_ENTREGA
+      WHERE ID_ENTREGA = @ID_ENTREGA;
+
+      INSERT INTO dbo.PV_CTR_ORDS_ENTREGA_DET (
+        IORD,
+        ID_ENTREGA,
+        USER_ALTA,
+        IP_ALTA
+      )
+      SELECT
+        o.IORD,
+        @ID_ENTREGA,
+        'MIGRACION',
+        NULL
+      FROM dbo.PV_CTR_ORDS o
+      WHERE o.IDFOL = @IDFOL
+        AND UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = @SUC
+        AND o.FIRMA_CLIENTE = @FIRMA_CLIENTE
+        AND o.ESTSEGU = 11
+        AND o.ID_ENTREGA IS NULL;
+
+      UPDATE dbo.PV_CTR_ORDS
+      SET
+        ID_ENTREGA = @ID_ENTREGA,
+        FIRMA_CLIENTE = NULL
+      WHERE IDFOL = @IDFOL
+        AND UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) = @SUC
+        AND FIRMA_CLIENTE = @FIRMA_CLIENTE
+        AND ESTSEGU = 11
+        AND ID_ENTREGA IS NULL;
+
+      COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+      IF @@TRANCOUNT > 0
+        ROLLBACK TRANSACTION;
+      THROW;
+    END CATCH;
+
+    FETCH NEXT FROM legacy_cursor
+      INTO @IDFOL, @SUC, @FIRMA_CLIENTE, @TOTAL_ORDS, @FCN_ENTREGA, @OBS_BASE;
+  END;
+
+  CLOSE legacy_cursor;
+  DEALLOCATE legacy_cursor;
+END;
+GO

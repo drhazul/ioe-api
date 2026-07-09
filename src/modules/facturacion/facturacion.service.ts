@@ -664,8 +664,8 @@ export class FacturacionService {
         total: 0,
         page: 1,
         pageSize: Math.min(
-          Math.max(Number(input.pageSize ?? 60) || 60, 1),
-          200,
+          Math.max(Number(input.pageSize ?? 150) || 150, 1),
+          150,
         ),
         totalPages: 0,
         hasPrevPage: false,
@@ -676,10 +676,10 @@ export class FacturacionService {
     const rawPage = Number(input.page ?? 1);
     const page =
       Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
-    const rawPageSize = Number(input.pageSize ?? 60);
+    const rawPageSize = Number(input.pageSize ?? 150);
     const pageSize = Math.min(
-      Math.max(Number.isFinite(rawPageSize) ? Math.floor(rawPageSize) : 60, 1),
-      200,
+      Math.max(Number.isFinite(rawPageSize) ? Math.floor(rawPageSize) : 150, 1),
+      150,
     );
     const offset = (page - 1) * pageSize;
 
@@ -973,6 +973,98 @@ LEFT JOIN dbo.FAC_SVR_SHAP f
       total: uniqueIds.length,
       validos: valid,
       rechazados: rejected,
+    };
+  }
+
+  async listarPendientesPorIdFols(idFols: string[], user?: JwtPayload | null) {
+    await this.assertFacturacionReadAccess(
+      user,
+      'consultar folios de facturación por listado',
+    );
+
+    const uniqueIds = this.uniqueIdFols(idFols ?? []);
+    if (!uniqueIds.length) {
+      return {
+        data: [],
+        total: 0,
+        page: 1,
+        pageSize: 0,
+        totalPages: 0,
+        hasPrevPage: false,
+        hasNextPage: false,
+      };
+    }
+    if (uniqueIds.length > 500) {
+      throw new BadRequestException('Máximo 500 IDFOL por consulta.');
+    }
+
+    const canWrite = await this.hasFacturacionWriteAccess(user);
+    const forcedUserSuc = canWrite
+      ? null
+      : this.normalizeUpper(user?.suc ?? '');
+    if (!canWrite && (!forcedUserSuc || forcedUserSuc === '000')) {
+      return {
+        data: [],
+        total: 0,
+        page: 1,
+        pageSize: 0,
+        totalPages: 0,
+        hasPrevPage: false,
+        hasNextPage: false,
+      };
+    }
+
+    const rows = await this.dataSource.query(
+      `${this.sqlServerStrictSetOptionsPrefix()}
+SET NOCOUNT ON;
+
+DECLARE @IdFols TABLE (
+  POS INT NOT NULL,
+  IDFOL NVARCHAR(255) NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @IdFols (POS, IDFOL)
+SELECT
+  TRY_CONVERT(INT, [key]) AS POS,
+  UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), [value])))) AS IDFOL
+FROM OPENJSON(@0)
+WHERE TRY_CONVERT(NVARCHAR(255), [value]) IS NOT NULL
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(255), [value]))) <> '';
+
+SELECT f.*
+FROM dbo.FAC_SVR_SHAP f
+INNER JOIN @IdFols i
+  ON UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '')))) = i.IDFOL
+WHERE UPPER(LTRIM(RTRIM(ISNULL(f.ESTATUS, '')))) = 'PENDIENTE'
+  ${!canWrite && forcedUserSuc ? `AND UPPER(LTRIM(RTRIM(ISNULL(f.SUC, '')))) = @1` : ''}
+ORDER BY i.POS ASC, f.FCN DESC, f.IDFOL DESC;`,
+      !canWrite && forcedUserSuc
+        ? [JSON.stringify(uniqueIds), forcedUserSuc]
+        : [JSON.stringify(uniqueIds)],
+    );
+
+    for (const row of rows ?? []) {
+      const imptValue = Number(
+        (row as Record<string, unknown>).IMPT ??
+          (row as Record<string, unknown>).impt ??
+          0,
+      );
+      if (Number.isFinite(imptValue)) {
+        const rounded = Number(imptValue.toFixed(2));
+        (row as Record<string, unknown>).IMPT = rounded;
+        (row as Record<string, unknown>).impt = rounded;
+      }
+    }
+
+    const total = rows?.length ?? 0;
+    return {
+      data: rows ?? [],
+      total,
+      page: 1,
+      pageSize: total,
+      totalPages: total === 0 ? 0 : 1,
+      hasPrevPage: false,
+      hasNextPage: false,
     };
   }
 

@@ -41,6 +41,7 @@ import { FactClientShpModule } from './modules/factclientshp/factclientshp.modul
 import { DatCatRegModule } from './modules/datcatreg/datcatreg.module';
 import { DatCatUsoModule } from './modules/datcatuso/datcatuso.module';
 import { DatEstOrdModule } from './modules/datestord/datestord.module';
+import { SucColabAccesoModule } from './modules/suc-colab-acceso/suc-colab-acceso.module';
 import { ConteosModule } from './modules/conteos/conteos.module';
 import { AccessModule } from './modules/access/access.module';
 import { JrqClasModule } from './modules/jrqclas/jrqclas.module';
@@ -71,6 +72,7 @@ import { IncidenciasVacacionesModule } from './modules/incidencias-vacaciones/in
 import { MasterdataConfigModule } from './modules/masterdata-config/masterdata-config.module';
 import { PromocionesModule } from './modules/promociones/promociones.module';
 import { MermasModule } from './modules/mermas/mermas.module';
+import { EmpresasModule } from './modules/empresas/empresas.module';
 import { TransferenciasModule } from './modules/transferencias/transferencias.module';
 
 @Module({
@@ -115,6 +117,7 @@ import { TransferenciasModule } from './modules/transferencias/transferencias.mo
     DatCatRegModule,
     DatCatUsoModule,
     DatEstOrdModule,
+    SucColabAccesoModule,
     ConteosModule,
     AccessModule,
     JrqClasModule,
@@ -142,6 +145,7 @@ import { TransferenciasModule } from './modules/transferencias/transferencias.mo
     NotificacionesModule,
     IncidenciasVacacionesModule,
     MasterdataConfigModule,
+    EmpresasModule,
     PromocionesModule,
     MermasModule,
     TransferenciasModule,

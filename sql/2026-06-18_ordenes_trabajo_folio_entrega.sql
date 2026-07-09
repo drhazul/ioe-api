@@ -1,0 +1,562 @@
+/*
+  2026-06-18
+  Folio de entrega de ORDs
+  - Agrega relación de entrega en PV_CTR_ORDS
+  - Crea encabezado y detalle de entrega
+  - Guarda firma una sola vez por folio de entrega
+  - Expone folio/firma desde detalle de ORD
+*/
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+IF COL_LENGTH('dbo.PV_CTR_ORDS', 'ID_ENTREGA') IS NULL
+BEGIN
+  ALTER TABLE dbo.PV_CTR_ORDS
+    ADD ID_ENTREGA BIGINT NULL;
+END;
+GO
+
+IF COL_LENGTH('dbo.PV_CTR_ORDS', 'FIRMA_CLIENTE') IS NULL
+BEGIN
+  ALTER TABLE dbo.PV_CTR_ORDS
+    ADD FIRMA_CLIENTE NVARCHAR(MAX) NULL;
+END;
+GO
+
+IF OBJECT_ID('dbo.PV_CTR_ORDS_ENTREGA', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.PV_CTR_ORDS_ENTREGA (
+    ID_ENTREGA BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_CTR_ORDS_ENTREGA PRIMARY KEY,
+    FOLIO_ENTREGA NVARCHAR(255) NULL,
+    SUC NVARCHAR(10) NULL,
+    OBS NVARCHAR(255) NULL,
+    FIRMA_CLIENTE NVARCHAR(MAX) NULL,
+    TOTAL_ORDS INT NOT NULL CONSTRAINT DF_PV_CTR_ORDS_ENTREGA_TOTAL_ORDS DEFAULT (0),
+    USER_ALTA NVARCHAR(255) NULL,
+    FCN_ALTA DATETIME NOT NULL CONSTRAINT DF_PV_CTR_ORDS_ENTREGA_FCN_ALTA DEFAULT (GETDATE()),
+    IP_ALTA NVARCHAR(100) NULL,
+    USER_MOD NVARCHAR(255) NULL,
+    FCNMOD DATETIME NULL
+  );
+END;
+GO
+
+IF OBJECT_ID('dbo.PV_CTR_ORDS_ENTREGA_DET', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.PV_CTR_ORDS_ENTREGA_DET (
+    ID_ENTREGA_DET BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_CTR_ORDS_ENTREGA_DET PRIMARY KEY,
+    IORD NVARCHAR(255) NOT NULL,
+    ID_ENTREGA BIGINT NOT NULL,
+    FCN_ALTA DATETIME NOT NULL CONSTRAINT DF_PV_CTR_ORDS_ENTREGA_DET_FCN_ALTA DEFAULT (GETDATE()),
+    USER_ALTA NVARCHAR(255) NULL,
+    IP_ALTA NVARCHAR(100) NULL,
+    CONSTRAINT FK_PV_CTR_ORDS_ENTREGA_DET_ENTREGA
+      FOREIGN KEY (ID_ENTREGA) REFERENCES dbo.PV_CTR_ORDS_ENTREGA (ID_ENTREGA),
+    CONSTRAINT FK_PV_CTR_ORDS_ENTREGA_DET_ORD
+      FOREIGN KEY (IORD) REFERENCES dbo.PV_CTR_ORDS (IORD),
+    CONSTRAINT UQ_PV_CTR_ORDS_ENTREGA_DET_ENTREGA_ORD UNIQUE (ID_ENTREGA, IORD)
+  );
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_detalle
+  @IORD NVARCHAR(255),
+  @IS_ADMIN BIT = 0,
+  @ALLOWED_SUCS NVARCHAR(MAX) = NULL,
+  @SUC NVARCHAR(10) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @allowed TABLE (SUC NVARCHAR(10) PRIMARY KEY);
+  INSERT INTO @allowed (SUC)
+  SELECT DISTINCT UPPER(LTRIM(RTRIM(value)))
+  FROM STRING_SPLIT(ISNULL(@ALLOWED_SUCS, ''), ',')
+  WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> '';
+
+  DECLARE @headerJson NVARCHAR(MAX);
+  DECLARE @detailsJson NVARCHAR(MAX);
+
+  SELECT @headerJson = (
+    SELECT TOP 1
+      o.*,
+      e.TIPO AS ESTSEGU_DESC,
+      ent.ID_ENTREGA AS ID_ENTREGA_REL,
+      ent.FOLIO_ENTREGA,
+      ent.FIRMA_CLIENTE AS FIRMA_CLIENTE_ENTREGA,
+      ent.FCN_ALTA AS FCN_ENTREGA,
+      ent.USER_ALTA AS USER_ENTREGA
+    FROM dbo.PV_CTR_ORDS o
+    LEFT JOIN dbo.DAT_EST_ORD e
+      ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, o.ESTSEGU)
+    LEFT JOIN dbo.DAT_LAB lab
+      ON TRY_CONVERT(INT, lab.ID) = TRY_CONVERT(INT, o.LABOR)
+    LEFT JOIN dbo.PV_CTR_ORDS_ENTREGA ent
+      ON ent.ID_ENTREGA = o.ID_ENTREGA
+    WHERE o.IORD = @IORD
+      AND (
+        @SUC IS NULL
+        OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@SUC)
+        OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) = UPPER(@SUC)
+      )
+      AND (
+        @IS_ADMIN = 1
+        OR NOT EXISTS (SELECT 1 FROM @allowed)
+        OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (SELECT SUC FROM @allowed)
+        OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) IN (SELECT SUC FROM @allowed)
+      )
+    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+  );
+
+  IF @headerJson IS NULL
+  BEGIN
+    SELECT
+      CAST(NULL AS NVARCHAR(MAX)) AS HEADER_JSON,
+      CAST('[]' AS NVARCHAR(MAX)) AS DETAILS_JSON;
+    RETURN;
+  END;
+
+  SELECT @detailsJson = (
+    SELECT
+      d.*
+    FROM dbo.PV_CTR_ORDS_DET d
+    WHERE d.IORD = @IORD
+    ORDER BY
+      CASE WHEN TRY_CONVERT(BIGINT, d.IORDP) IS NULL THEN 1 ELSE 0 END,
+      TRY_CONVERT(BIGINT, d.IORDP),
+      d.ART
+    FOR JSON PATH
+  );
+
+  SELECT
+    @headerJson AS HEADER_JSON,
+    ISNULL(@detailsJson, '[]') AS DETAILS_JSON;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_set_estado
+  @IORD NVARCHAR(255),
+  @ESTSEGU FLOAT,
+  @ESTATUS INT = NULL,
+  @ASIGN NVARCHAR(255) = NULL,
+  @LABOR INT = NULL,
+  @OBS NVARCHAR(255) = NULL,
+  @FIRMA_CLIENTE NVARCHAR(MAX) = NULL,
+  @USER NVARCHAR(255) = NULL,
+  @IP NVARCHAR(100) = NULL,
+  @IS_ADMIN BIT = 0,
+  @ALLOWED_SUCS NVARCHAR(MAX) = NULL,
+  @SUC NVARCHAR(10) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @allowed TABLE (SUC NVARCHAR(10) PRIMARY KEY);
+  INSERT INTO @allowed (SUC)
+  SELECT DISTINCT UPPER(LTRIM(RTRIM(value)))
+  FROM STRING_SPLIT(ISNULL(@ALLOWED_SUCS, ''), ',')
+  WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> '';
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM dbo.PV_CTR_ORDS o
+    LEFT JOIN dbo.DAT_LAB lab
+      ON TRY_CONVERT(INT, lab.ID) = TRY_CONVERT(INT, o.LABOR)
+    WHERE o.IORD = @IORD
+      AND (
+        @SUC IS NULL
+        OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@SUC)
+        OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) = UPPER(@SUC)
+      )
+      AND (
+        @IS_ADMIN = 1
+        OR NOT EXISTS (SELECT 1 FROM @allowed)
+        OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (SELECT SUC FROM @allowed)
+        OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) IN (SELECT SUC FROM @allowed)
+      )
+  )
+  BEGIN
+    THROW 58010, 'No existe la ORD o no esta autorizada para la sucursal', 1;
+  END;
+
+  UPDATE dbo.PV_CTR_ORDS
+  SET
+    ESTSEGU = @ESTSEGU,
+    ESTATUS = COALESCE(@ESTATUS, ESTATUS),
+    ASIGN = COALESCE(NULLIF(@ASIGN, ''), ASIGN),
+    LABOR = COALESCE(@LABOR, LABOR),
+    FCNMOD = GETDATE(),
+    FCNEN = CASE WHEN @ESTSEGU = 11 THEN GETDATE() ELSE FCNEN END,
+    HR_ENT = CASE WHEN @ESTSEGU = 11 THEN GETDATE() ELSE HR_ENT END,
+    COMAD = CASE
+      WHEN NULLIF(@OBS, '') IS NULL THEN COMAD
+      ELSE LEFT(
+        CONCAT(
+          ISNULL(CAST(COMAD AS NVARCHAR(MAX)), ''),
+          CASE
+            WHEN LTRIM(RTRIM(ISNULL(CAST(COMAD AS NVARCHAR(MAX)), ''))) = ''
+              THEN ''
+            ELSE ' | '
+          END,
+          @OBS
+        ),
+        2000
+      )
+    END
+  WHERE IORD = @IORD;
+
+  SELECT TOP 1
+    o.IORD,
+    o.IDFOL,
+    o.ESTATUS,
+    o.ESTSEGU,
+    o.SUC,
+    o.FCNMOD,
+    @USER AS USER_ACTOR,
+    @IP AS IP_ACTOR
+  FROM dbo.PV_CTR_ORDS o
+  WHERE o.IORD = @IORD;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_clone_ord
+  @IORD_ORIG NVARCHAR(255),
+  @IORD_NEW NVARCHAR(255),
+  @NEW_ART NVARCHAR(255) = NULL,
+  @NEW_CTD FLOAT = NULL,
+  @TIPOM INT = NULL,
+  @MOTR INT = NULL,
+  @REEORD NVARCHAR(255) = NULL,
+  @DOCDIF NVARCHAR(255) = NULL,
+  @ESTSEGU FLOAT = 3,
+  @ESTATUS INT = 3
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  IF OBJECT_ID('dbo.PV_CTR_ORDS', 'U') IS NULL
+    THROW 58001, 'No existe tabla PV_CTR_ORDS', 1;
+
+  DECLARE @cols NVARCHAR(MAX);
+  DECLARE @vals NVARCHAR(MAX);
+  DECLARE @sql NVARCHAR(MAX);
+
+  ;WITH cols AS (
+    SELECT
+      c.name,
+      c.column_id,
+      CONVERT(INT, COLUMNPROPERTY(c.object_id, c.name, 'IsComputed')) AS is_computed
+    FROM sys.columns c
+    WHERE c.object_id = OBJECT_ID('dbo.PV_CTR_ORDS')
+  )
+  SELECT
+    @cols = STRING_AGG(QUOTENAME(name), ','),
+    @vals = STRING_AGG(
+      CASE
+        WHEN name = 'ART' THEN 'COALESCE(NULLIF(@P_NEW_ART, ''''), o.[ART])'
+        WHEN name = 'MAT' THEN 'COALESCE(NULLIF(@P_NEW_ART, ''''), o.[MAT])'
+        WHEN name = 'CTD' THEN 'COALESCE(@P_NEW_CTD, TRY_CONVERT(FLOAT, o.[CTD]))'
+        WHEN name = 'ESTSEGU' THEN '@P_ESTSEGU'
+        WHEN name = 'ESTATUS' THEN '@P_ESTATUS'
+        WHEN name = 'FCNMOD' THEN 'GETDATE()'
+        WHEN name = 'REEORD' THEN 'COALESCE(NULLIF(@P_REEORD, ''''), @P_IORD_ORIG)'
+        WHEN name = 'REOORD' THEN 'COALESCE(NULLIF(@P_REEORD, ''''), @P_IORD_ORIG)'
+        WHEN name = 'TIPOM' THEN 'COALESCE(@P_TIPOM, TRY_CONVERT(INT, o.[TIPOM]))'
+        WHEN name = 'TPOM' THEN 'COALESCE(@P_TIPOM, TRY_CONVERT(INT, o.[TPOM]))'
+        WHEN name = 'MOTR' THEN 'COALESCE(@P_MOTR, TRY_CONVERT(INT, o.[MOTR]))'
+        WHEN name = 'DOCDIF' THEN 'COALESCE(NULLIF(@P_DOCDIF, ''''), o.[DOCDIF])'
+        WHEN name = 'DOCIF' THEN 'COALESCE(NULLIF(@P_DOCDIF, ''''), o.[DOCIF])'
+        WHEN name = 'ID_ENTREGA' THEN 'NULL'
+        WHEN name = 'FIRMA_CLIENTE' THEN 'NULL'
+        ELSE 'o.' + QUOTENAME(name)
+      END,
+      ','
+    )
+  FROM cols
+  WHERE name <> 'IORD'
+    AND ISNULL(is_computed, 0) = 0;
+
+  IF ISNULL(@cols, '') = '' OR ISNULL(@vals, '') = ''
+    THROW 58002, 'No se pudo resolver columnas para clonar ORD', 1;
+
+  SET @sql = N'
+    INSERT INTO dbo.PV_CTR_ORDS (IORD,' + @cols + N')
+    SELECT @P_IORD_NEW,' + @vals + N'
+    FROM dbo.PV_CTR_ORDS o
+    WHERE o.IORD = @P_IORD_ORIG;
+
+    IF @@ROWCOUNT = 0
+      THROW 58003, ''No existe IORD origen para clonar'', 1;
+  ';
+
+  EXEC sp_executesql
+    @sql,
+    N'@P_IORD_ORIG NVARCHAR(255), @P_IORD_NEW NVARCHAR(255), @P_NEW_ART NVARCHAR(255), @P_NEW_CTD FLOAT, @P_TIPOM INT, @P_MOTR INT, @P_REEORD NVARCHAR(255), @P_DOCDIF NVARCHAR(255), @P_ESTSEGU FLOAT, @P_ESTATUS INT',
+    @P_IORD_ORIG = @IORD_ORIG,
+    @P_IORD_NEW = @IORD_NEW,
+    @P_NEW_ART = @NEW_ART,
+    @P_NEW_CTD = @NEW_CTD,
+    @P_TIPOM = @TIPOM,
+    @P_MOTR = @MOTR,
+    @P_REEORD = @REEORD,
+    @P_DOCDIF = @DOCDIF,
+    @P_ESTSEGU = @ESTSEGU,
+    @P_ESTATUS = @ESTATUS;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_entregar_lote
+  @IORDS NVARCHAR(MAX),
+  @OBS NVARCHAR(255) = NULL,
+  @FIRMA_CLIENTE NVARCHAR(MAX) = NULL,
+  @USER NVARCHAR(255) = NULL,
+  @IP NVARCHAR(100) = NULL,
+  @IS_ADMIN BIT = 0,
+  @ALLOWED_SUCS NVARCHAR(MAX) = NULL,
+  @SUC NVARCHAR(10) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  DECLARE @firmaNorm NVARCHAR(MAX) = LTRIM(RTRIM(ISNULL(@FIRMA_CLIENTE, '')));
+  IF ISNULL(@firmaNorm, '') = ''
+    THROW 58218, 'Debe capturar firma digital para registrar la entrega', 1;
+
+  DECLARE @ords TABLE (
+    IORD NVARCHAR(255) NOT NULL PRIMARY KEY
+  );
+
+  INSERT INTO @ords (IORD)
+  SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(value, ''))))
+  FROM STRING_SPLIT(ISNULL(@IORDS, ''), ',')
+  WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> '';
+
+  IF NOT EXISTS (SELECT 1 FROM @ords)
+    THROW 58220, 'Debe enviar al menos una ORD en @IORDS', 1;
+
+  DECLARE @allowed TABLE (SUC NVARCHAR(10) PRIMARY KEY);
+  INSERT INTO @allowed (SUC)
+  SELECT DISTINCT UPPER(LTRIM(RTRIM(value)))
+  FROM STRING_SPLIT(ISNULL(@ALLOWED_SUCS, ''), ',')
+  WHERE LTRIM(RTRIM(ISNULL(value, ''))) <> '';
+
+  DECLARE @target TABLE (
+    IORD NVARCHAR(255) NOT NULL PRIMARY KEY,
+    IDFOL NVARCHAR(255) NULL,
+    SUC NVARCHAR(10) NULL,
+    ESTSEGU FLOAT NULL
+  );
+
+  INSERT INTO @target (IORD, IDFOL, SUC, ESTSEGU)
+  SELECT
+    UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) AS IORD,
+    o.IDFOL,
+    o.SUC,
+    TRY_CONVERT(FLOAT, o.ESTSEGU) AS ESTSEGU
+  FROM dbo.PV_CTR_ORDS o
+  LEFT JOIN dbo.DAT_LAB lab
+    ON TRY_CONVERT(INT, lab.ID) = TRY_CONVERT(INT, o.LABOR)
+  INNER JOIN @ords i
+    ON UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = i.IORD
+  WHERE
+    (
+      @SUC IS NULL
+      OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(@SUC)
+      OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) = UPPER(@SUC)
+    )
+    AND (
+      @IS_ADMIN = 1
+      OR NOT EXISTS (SELECT 1 FROM @allowed)
+      OR UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (SELECT SUC FROM @allowed)
+      OR UPPER(LTRIM(RTRIM(ISNULL(lab.SUC, '')))) IN (SELECT SUC FROM @allowed)
+    );
+
+  IF EXISTS (
+    SELECT 1
+    FROM @ords i
+    LEFT JOIN @target t ON t.IORD = i.IORD
+    WHERE t.IORD IS NULL
+  )
+  BEGIN
+    DECLARE @missingIords NVARCHAR(2000) = (
+      SELECT STRING_AGG(i.IORD, ', ')
+      FROM @ords i
+      LEFT JOIN @target t ON t.IORD = i.IORD
+      WHERE t.IORD IS NULL
+    );
+    DECLARE @missingMsg NVARCHAR(2048) = LEFT(
+      CONCAT('ORD no encontrada o sin acceso por sucursal: ', ISNULL(@missingIords, '')),
+      2048
+    );
+    THROW 58221, @missingMsg, 1;
+  END;
+
+  IF EXISTS (
+    SELECT 1
+    FROM @target t
+    WHERE ISNULL(t.ESTSEGU, -1) <> 10
+  )
+  BEGIN
+    DECLARE @invalidIords NVARCHAR(2000) = (
+      SELECT STRING_AGG(t.IORD, ', ')
+      FROM @target t
+      WHERE ISNULL(t.ESTSEGU, -1) <> 10
+    );
+    DECLARE @invalidMsg NVARCHAR(2048) = LEFT(
+      CONCAT('Solo se pueden entregar ORDs en estatus 10 (REGRESADO A TIENDA): ', ISNULL(@invalidIords, '')),
+      2048
+    );
+    THROW 58222, @invalidMsg, 1;
+  END;
+
+  DECLARE @batchSuc NVARCHAR(10) = NULL;
+  DECLARE @batchCount INT = 0;
+  DECLARE @idEntrega BIGINT = NULL;
+  DECLARE @folioEntrega NVARCHAR(255) = NULL;
+
+  SELECT TOP 1
+    @batchSuc = NULLIF(UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))), '')
+  FROM @target
+  ORDER BY IORD;
+
+  SELECT @batchCount = COUNT(1)
+  FROM @target;
+
+  BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DECLARE @created TABLE (ID_ENTREGA BIGINT);
+    INSERT INTO dbo.PV_CTR_ORDS_ENTREGA (
+      FOLIO_ENTREGA,
+      SUC,
+      OBS,
+      FIRMA_CLIENTE,
+      TOTAL_ORDS,
+      USER_ALTA,
+      FCN_ALTA,
+      IP_ALTA
+    )
+    OUTPUT inserted.ID_ENTREGA INTO @created (ID_ENTREGA)
+    VALUES (
+      NULL,
+      @batchSuc,
+      NULLIF(LEFT(LTRIM(RTRIM(ISNULL(@OBS, ''))), 255), ''),
+      @firmaNorm,
+      @batchCount,
+      @USER,
+      GETDATE(),
+      @IP
+    );
+
+    SELECT TOP 1 @idEntrega = ID_ENTREGA FROM @created;
+    IF @idEntrega IS NULL
+      THROW 58223, 'No se pudo crear folio de entrega', 1;
+
+    SET @folioEntrega = CONCAT(
+      'ENT-',
+      COALESCE(NULLIF(@batchSuc, ''), 'GEN'),
+      '-',
+      CONVERT(VARCHAR(8), GETDATE(), 112),
+      '-',
+      RIGHT(REPLICATE('0', 6) + CAST(@idEntrega AS VARCHAR(20)), 6)
+    );
+
+    UPDATE dbo.PV_CTR_ORDS_ENTREGA
+    SET FOLIO_ENTREGA = @folioEntrega
+    WHERE ID_ENTREGA = @idEntrega;
+
+    INSERT INTO dbo.PV_CTR_ORDS_ENTREGA_DET (
+      IORD,
+      ID_ENTREGA,
+      USER_ALTA,
+      IP_ALTA
+    )
+    SELECT
+      t.IORD,
+      @idEntrega,
+      @USER,
+      @IP
+    FROM @target t;
+
+    UPDATE o
+    SET
+      o.ESTSEGU = 11,
+      o.ESTATUS = 2,
+      o.FCNMOD = GETDATE(),
+      o.FCNEN = GETDATE(),
+      o.HR_ENT = GETDATE(),
+      o.ID_ENTREGA = @idEntrega,
+      o.FIRMA_CLIENTE = NULL,
+      o.COMAD = CASE
+        WHEN NULLIF(LEFT(LTRIM(RTRIM(ISNULL(@OBS, ''))), 255), '') IS NULL THEN o.COMAD
+        ELSE LEFT(
+          CONCAT(
+            ISNULL(CAST(o.COMAD AS NVARCHAR(MAX)), ''),
+            CASE
+              WHEN LTRIM(RTRIM(ISNULL(CAST(o.COMAD AS NVARCHAR(MAX)), ''))) = ''
+                THEN ''
+              ELSE ' | '
+            END,
+            LEFT(LTRIM(RTRIM(ISNULL(@OBS, ''))), 255)
+          ),
+          2000
+        )
+      END
+    FROM dbo.PV_CTR_ORDS o
+    INNER JOIN @target t
+      ON UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = t.IORD;
+
+    COMMIT TRANSACTION;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+  END CATCH;
+
+  SELECT
+    o.IORD,
+    o.IDFOL,
+    o.ID_ENTREGA,
+    ent.FOLIO_ENTREGA,
+    ent.TOTAL_ORDS,
+    o.SUC,
+    o.ESTATUS,
+    o.ESTSEGU,
+    o.FCNMOD,
+    @USER AS USER_ACTOR,
+    @IP AS IP_ACTOR
+  FROM dbo.PV_CTR_ORDS o
+  INNER JOIN @target t
+    ON UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = t.IORD
+  LEFT JOIN dbo.PV_CTR_ORDS_ENTREGA ent
+    ON ent.ID_ENTREGA = o.ID_ENTREGA
+  ORDER BY o.IORD;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_entregar
+  @IORD NVARCHAR(255),
+  @OBS NVARCHAR(255) = NULL,
+  @FIRMA_CLIENTE NVARCHAR(MAX) = NULL,
+  @USER NVARCHAR(255) = NULL,
+  @IP NVARCHAR(100) = NULL,
+  @IS_ADMIN BIT = 0,
+  @ALLOWED_SUCS NVARCHAR(MAX) = NULL,
+  @SUC NVARCHAR(10) = NULL
+AS
+BEGIN
+  EXEC dbo.sp_ordenes_trabajo_entregar_lote
+    @IORDS = @IORD,
+    @OBS = @OBS,
+    @FIRMA_CLIENTE = @FIRMA_CLIENTE,
+    @USER = @USER,
+    @IP = @IP,
+    @IS_ADMIN = @IS_ADMIN,
+    @ALLOWED_SUCS = @ALLOWED_SUCS,
+    @SUC = @SUC;
+END;
+GO

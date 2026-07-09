@@ -1,5 +1,5 @@
 
-CREATE   PROCEDURE dbo.sp_ordenes_trabajo_merma
+CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_merma
   @IORD NVARCHAR(255),
   @CANTIDAD_MERMA FLOAT,
   @MOTIVO NVARCHAR(255),
@@ -7,6 +7,8 @@ CREATE   PROCEDURE dbo.sp_ordenes_trabajo_merma
   @MOTR INT = NULL,
   @ART_NUEVO NVARCHAR(255) = NULL,
   @CTD_C_M FLOAT = NULL,
+  @PVTA_NUEVO FLOAT = NULL,
+  @IORD_NUEVA NVARCHAR(255) = NULL,
   @USER NVARCHAR(255) = NULL,
   @IP NVARCHAR(100) = NULL,
   @IS_ADMIN BIT = 0,
@@ -42,6 +44,7 @@ BEGIN
   DECLARE @docpMerma NVARCHAR(255);
   DECLARE @docpMermaSalida NVARCHAR(255);
   DECLARE @txtMermaReingreso NVARCHAR(255);
+  DECLARE @txtMermaCargo NVARCHAR(255);
   DECLARE @txtMermaSalida NVARCHAR(255);
   DECLARE @doc NVARCHAR(255);
   DECLARE @txtDiff NVARCHAR(255);
@@ -116,6 +119,10 @@ BEGIN
   IF ISNULL(@ctdOrig, 0) <= 0
     THROW 58033, 'La ORD no tiene cantidad valida para procesar merma', 1;
 
+  IF ABS(ISNULL(@ctdOrig, 0) - 1) > 0.0001
+     AND ABS(ISNULL(@ctdOrig, 0) - 0.5) > 0.0001
+    THROW 58038, 'La ORD origen debe haber sido creada con cantidad 1 o 0.5 para merma', 1;
+
   IF @ctdAfectada - @ctdOrig > 0.0001
     THROW 58034, 'cantidadMerma no puede ser mayor a la cantidad original', 1;
 
@@ -131,20 +138,29 @@ BEGIN
   SET @txtDiff = CONCAT('Diferencia merma ORD ', @IORD);
 
   IF @CREAR_NUEVA_ORD = 1
-    SET @newIord = LEFT(CONCAT(
-      ISNULL(@idfol, 'ORD'),
-      '-MR-',
-      FORMAT(GETDATE(), 'yyyyMMddHHmmss'),
-      '-',
-      RIGHT(CONVERT(VARCHAR(36), NEWID()), 4)
-    ), 255);
+  BEGIN
+    SET @newIord = NULLIF(LTRIM(RTRIM(ISNULL(@IORD_NUEVA, ''))), '');
+
+    IF @newIord IS NULL
+    BEGIN
+      DECLARE @fcnGenMerma DATETIME = GETDATE();
+      EXEC dbo.sp_pv_ctr_ords_generate_iord
+        @SUC = @sucOrd,
+        @FCN = @fcnGenMerma,
+        @IORD_OUT = @newIord OUTPUT;
+    END;
+
+    IF @newIord IS NULL OR LTRIM(RTRIM(@newIord)) = ''
+      THROW 58038, 'No se pudo generar la nueva IORD para merma', 1;
+  END;
 
   SET @ctdMermaAbs = ABS(@ctdAfectada);
   SET @ctdMermaSalida = -ABS(@ctdAfectada);
   SET @docpMerma = ISNULL(@idfol, @IORD);
-  SET @docpMermaSalida = ISNULL(@newIord, @docpMerma);
-  SET @txtMermaReingreso = CONCAT('Reintegracion por merma ORD ', @IORD);
-  SET @txtMermaSalida = CONCAT('Salida por merma ORD ', ISNULL(@newIord, @IORD));
+  SET @docpMermaSalida = @docpMerma;
+  SET @txtMermaReingreso = CONCAT('Merma - Reintegracion stock ORD', @IORD);
+  SET @txtMermaCargo = CONCAT('Merma por uso ', @motrInt, ', ORD: ', @IORD);
+  SET @txtMermaSalida = CONCAT('Merma - Descuento stock ORD', ISNULL(@newIord, @IORD));
 
   BEGIN TRY
     BEGIN TRANSACTION;
@@ -156,8 +172,8 @@ BEGIN
         @IORD_NEW = @newIord,
         @NEW_ART = @artSalida,
         @NEW_CTD = @ctdAfectada,
-        @TIPOM = @tipom,
-        @MOTR = @motrInt,
+        @TIPOM = 0,
+        @MOTR = NULL,
         @REEORD = @IORD,
         @DOCDIF = @doc,
         @ESTSEGU = 3,
@@ -165,8 +181,21 @@ BEGIN
 
       IF OBJECT_ID('dbo.PV_CTR_ORDS_DET', 'U') IS NOT NULL
       BEGIN
-        INSERT INTO dbo.PV_CTR_ORDS_DET (IORD, ART, JOB, ESF, CIL, EJE)
+        INSERT INTO dbo.PV_CTR_ORDS_DET (IORDP, IORD, ART, JOB, ESF, CIL, EJE)
         SELECT
+          CONCAT(
+            ROW_NUMBER() OVER (
+              ORDER BY
+                CASE UPPER(LTRIM(RTRIM(ISNULL(d.JOB, ''))))
+                  WHEN 'OD' THEN 1
+                  WHEN 'OI' THEN 2
+                  WHEN 'ADD' THEN 3
+                  ELSE 99
+                END,
+                UPPER(LTRIM(RTRIM(ISNULL(d.IORDP, ''))))
+            ),
+            @newIord
+          ),
           @newIord,
           COALESCE(NULLIF(@artSalida, ''), d.ART),
           d.JOB,
@@ -180,10 +209,11 @@ BEGIN
 
     UPDATE dbo.PV_CTR_ORDS
     SET
-      CTD = CASE WHEN @remanente > 0 THEN @remanente ELSE CTD END,
+      CTD = @ctdOrig,
       CTD_C_M = @ctdAfectada,
+      REEORD = @newIord,
       selCtrlOrd = NULL,
-      ESTSEGU = CASE WHEN @remanente > 0 THEN ESTSEGU ELSE 4 END,
+      ESTSEGU = 4,
       ESTATUS = 2,
       FCNMOD = GETDATE(),
       COMAD = LEFT(
@@ -205,7 +235,20 @@ BEGIN
     BEGIN
       UPDATE dbo.PV_CTR_ORDS
       SET
+        ASIGN = NULL,
         CTD_C_M = @ctdAfectada,
+        MOTR = NULL,
+        TIPOM = 0,
+        DESCART = COALESCE(
+          (
+            SELECT TOP 1 LTRIM(RTRIM(ISNULL(a.DES, '')))
+            FROM dbo.DAT_ART a
+            WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@sucOrd, ''))))
+              AND UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@artSalida, ''))))
+            ORDER BY TRY_CONVERT(INT, ISNULL(a.BLOQ, 0)) ASC
+          ),
+          DESCART
+        ),
         selCtrlOrd = NULL,
         FCNMOD = GETDATE()
       WHERE IORD = @newIord;
@@ -218,7 +261,16 @@ BEGIN
       @TXT = @txtMermaReingreso,
       @DOCP = @docpMerma,
       @USR = @USER,
-      @CLSM = 'ORD';
+      @CLSM = '456';
+
+    EXEC dbo.sp_ordenes_trabajo_registrar_mb51
+      @SUC = @sucOrd,
+      @ART = @artOrig,
+      @CTDA = @ctdMermaSalida,
+      @TXT = @txtMermaCargo,
+      @DOCP = @docpMerma,
+      @USR = @USER,
+      @CLSM = '455';
 
     EXEC dbo.sp_ordenes_trabajo_registrar_mb51
       @SUC = @sucOrd,
@@ -227,7 +279,7 @@ BEGIN
       @TXT = @txtMermaSalida,
       @DOCP = @docpMermaSalida,
       @USR = @USER,
-      @CLSM = 'ORD';
+      @CLSM = '457';
 
     IF @CREAR_NUEVA_ORD = 1
     BEGIN
@@ -236,7 +288,6 @@ BEGIN
         SELECT TOP 1
           @precioOrig = COALESCE(
             TRY_CONVERT(FLOAT, t.PVTAT),
-            TRY_CONVERT(FLOAT, t.PVTA),
             0
           )
         FROM dbo.PV_TICKET_LOG t
@@ -279,10 +330,58 @@ BEGIN
           AND UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@artOrig, ''))))
         ORDER BY TRY_CONVERT(INT, ISNULL(a.BLOQ, 0)) ASC;
       END;
+    SET @precioNuevo = COALESCE(@PVTA_NUEVO, @precioNuevo, @precioOrig, 0);
+    SET @importeOrig = ROUND(
+      ISNULL(@precioOrig, 0) * (ISNULL(@ctdAfectada, 0) / NULLIF(@ctdOrig, 0)),
+      2
+    );
+    SET @importeNuevo = ROUND(ISNULL(@precioNuevo, 0) * @ctdAfectada, 2);
 
-      SET @importeOrig = ROUND(ISNULL(@precioOrig, 0) * @ctdAfectada, 2);
-      SET @importeNuevo = ROUND(ISNULL(@precioNuevo, 0) * @ctdAfectada, 2);
-      SET @diffVenta = ROUND(@importeNuevo - @importeOrig, 2);
+    DECLARE @ivaIntegrado INT = 0;
+    DECLARE @rqfacFolio INT = 0;
+    DECLARE @tipoTran NVARCHAR(2) = 'VF';
+    DECLARE @totalOrig FLOAT = 0;
+    DECLARE @totalNuevo FLOAT = 0;
+
+    SELECT TOP 1
+      @ivaIntegrado = ISNULL(TRY_CONVERT(INT, s.IVA_INTEGRADO), 0)
+    FROM dbo.DAT_SUC s
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(s.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@sucOrd, ''))));
+
+    SELECT TOP 1
+      @rqfacFolio = ISNULL(TRY_CONVERT(INT, f.REQF), 0),
+      @tipoTran = CASE
+        WHEN UPPER(LTRIM(RTRIM(ISNULL(f.ORIGEN_AUT, '')))) IN ('CA', 'VF') THEN UPPER(LTRIM(RTRIM(ISNULL(f.ORIGEN_AUT, ''))))
+        WHEN UPPER(LTRIM(RTRIM(ISNULL(f.AUT, '')))) IN ('DCA', 'CA', 'DC', 'DG', 'CP', 'PS') THEN 'CA'
+        WHEN UPPER(LTRIM(RTRIM(ISNULL(f.AUT, '')))) IN ('DVF', 'VF') THEN 'VF'
+        ELSE 'VF'
+      END
+    FROM dbo.PV_CTR_FOL_ASVR f
+    WHERE UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '')))) = UPPER(LTRIM(RTRIM(ISNULL(@idfol, ''))))
+    ORDER BY ISNULL(f.FCNM, f.FCN) DESC;
+
+    IF @tipoTran = 'CA'
+    BEGIN
+      SET @totalOrig = ROUND(@importeOrig, 2);
+      SET @totalNuevo = ROUND(@importeNuevo, 2);
+    END
+    ELSE IF @ivaIntegrado = -1
+    BEGIN
+      SET @totalOrig = ROUND(@importeOrig, 2);
+      SET @totalNuevo = ROUND(@importeNuevo, 2);
+    END
+    ELSE IF @rqfacFolio = 1
+    BEGIN
+      SET @totalOrig = ROUND(@importeOrig * 1.16, 2);
+      SET @totalNuevo = ROUND(@importeNuevo * 1.16, 2);
+    END
+    ELSE
+    BEGIN
+      SET @totalOrig = ROUND(@importeOrig, 2);
+      SET @totalNuevo = ROUND(@importeNuevo, 2);
+    END;
+
+    SET @diffVenta = ROUND(@totalNuevo - @totalOrig, 2);
 
       EXEC dbo.sp_ordenes_trabajo_registrar_ctrl_ctas_diff
         @SUC = @sucOrd,
@@ -290,7 +389,8 @@ BEGIN
         @IDFOL = @idfol,
         @DIFF = @diffVenta,
         @DOCDIF = @doc,
-        @DESC_MOV = @txtDiff;
+        @DESC_MOV = @txtDiff,
+      @USR = @USER;
     END;
 
     COMMIT TRANSACTION;
@@ -310,7 +410,7 @@ BEGIN
     @ctdAfectada AS CTD_MERMA,
     @ctdAfectada AS CTD_C_M,
     @remanente AS CTD_REMANENTE,
-    CASE WHEN @remanente <= 0 THEN 1 ELSE 0 END AS ORD_CANCELADA,
+    1 AS ORD_CANCELADA,
     @diffVenta AS DIFERENCIA_ECONOMICA,
     CASE WHEN ABS(ISNULL(@diffVenta, 0)) >= 0.009 THEN 1 ELSE 0 END AS AFECTACION_CONTABLE,
     @sucOrd AS SUC,
