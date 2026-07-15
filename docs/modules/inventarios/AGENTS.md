@@ -1,8 +1,16 @@
 # Instrucciones de agente para Inventarios API
 
 ## Alcance
-- Modulos backend de inventario operativo: `datart`, `datmb51`, `datmb52`, `dat-cmov`, `mermas` y `transferencias`.
+- Modulos backend de inventario operativo: `datart`, `datmb51`, `datmb52`, `dat-cmov`, `mermas`, `transferencias` y `sugeridos`.
 - Persistencia MSSQL con tablas legacy `DAT_ART`, `DAT_MB51`, `DAT_MB51S`, `DAT_CMOV` y tablas de proceso especificas.
+
+## Planeacion y sugeridos de compra
+- Modulo API: `src/modules/sugeridos`.
+- Ruta base: `/sugeridos`.
+- Codigo front esperado: `DAT_JAA_SUG`.
+- Tablas oficiales para O.C.: `REC_CAB_PED` y `REC_DET_PED`; no crear tablas duplicadas de pedidos.
+- El calculo debe usar `DAT_ART`, stock acumulado desde `DAT_MB51` y ventas por movimientos relacionados como `VTAS` en `DAT_CMOV`, sin tablas temporales persistentes.
+- Validar alcance por sucursal con `USR_MOD_SUC` para `DAT_JAA_SUG`, con fallback a `SUC` del token cuando no existan asignaciones.
 
 ## Merma
 - Modulo API: `src/modules/mermas`.

@@ -1,5 +1,13 @@
 # Inventarios API
 
+## Planeacion y sugeridos de compra (2026-07-10)
+
+- Nuevo modulo `SugeridosModule` registrado en `AppModule` con ruta base `/sugeridos` y codigo front `DAT_JAA_SUG`.
+- `GET /sugeridos/calculo` ejecuta `sp_sugeridos_calcular`, reemplazando consultas Access encadenadas con CTEs sobre `DAT_ART`, `DAT_MB51` y clases de venta en `DAT_CMOV.RELACION='VTAS'`.
+- `POST /sugeridos` ejecuta `sp_sugeridos_crear_oc` para crear cabecera/detalle en `REC_CAB_PED` y `REC_DET_PED`; el flujo operativo usa `ABIERTO -> PENDIENTE -> PROCESADO` y `ANULADO`.
+- Catalogos: `/sugeridos/catalogos/sucursales`, `/sugeridos/catalogos/proveedores` y `/sugeridos/catalogos/estatus`.
+- Script operativo: `sql/2026-07-10_sugeridos_compra_modulo_base.sql`.
+
 ## Merma (2026-06-12)
 
 - `src/main.ts` configura body parser JSON/urlencoded a `1mb` para que `POST/PATCH /mermas/:docmer/detalle` acepte evidencia `EVI_M` dentro del limite funcional.
@@ -15,7 +23,7 @@
 - `POST /transferencias/:doc/detalle/:idpd/evidencia` guarda evidencia fotografica en `TRAN_EVID`; solo aplica en `PREPARACION` y para la sucursal origen/surtidora.
 - `POST /transferencias/:doc/transito` valida que todos los renglones activos tengan evidencia; la imagen recibida debe ser data URL de imagen, mayor a 500 bytes y maximo 500 KB.
 - El catalogo de articulos consulta `DAT_ART`; para sucursal origen `DF02` usa el inventario almacenado como `DF01` en `DAT_ART`.
-- Para rol `invjef`, el listado fuerza `estatus=PENDIENTE` y la creacion de solicitudes queda bloqueada.
+- Para rol `invjef`, el listado fuerza `estatus=PENDIENTE`, pero puede crear solicitudes desde el modulo operativo.
 - Para roles `aux` y `enc_sucursal`, el listado se limita a `BORRADOR`, `PREPARACION`, `TRANSITO` y `REVISANDO`; notificaciones agrega `LIBERADA` solo para la sucursal origen/surtidora (`SUC_SAL`) como mercancia por surtir y `TRANSITO` solo para la sucursal solicitante (`SUC_ENT`).
 - En listado general, documentos `TRANSITO` solo son visibles para la sucursal solicitante (`SUC_ENT`); la sucursal origen deja de verlos una vez enviados a transito.
 - En listado general, documentos `BORRADOR` solo son visibles para la sucursal solicitante (`SUC_ENT`).

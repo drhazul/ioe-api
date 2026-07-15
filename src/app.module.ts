@@ -74,6 +74,7 @@ import { PromocionesModule } from './modules/promociones/promociones.module';
 import { MermasModule } from './modules/mermas/mermas.module';
 import { EmpresasModule } from './modules/empresas/empresas.module';
 import { TransferenciasModule } from './modules/transferencias/transferencias.module';
+import { SugeridosModule } from './modules/sugeridos/sugeridos.module';
 
 @Module({
   imports: [
@@ -149,6 +150,7 @@ import { TransferenciasModule } from './modules/transferencias/transferencias.mo
     PromocionesModule,
     MermasModule,
     TransferenciasModule,
+    SugeridosModule,
   ],
   providers: [
     {

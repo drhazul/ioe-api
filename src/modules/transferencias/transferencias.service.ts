@@ -351,9 +351,6 @@ export class TransferenciasService {
 
   async create(dto: CreateTransferenciaDto, user: JwtPayload) {
     const ctx = await this.resolveUserContext(user);
-    if (ctx.roleCode === 'INVJEF') {
-      throw new ForbiddenException('Jefe de inventarios no crea solicitudes.');
-    }
     const sucEnt = await this.resolveTargetSuc(dto.sucEnt, ctx);
     const sucSal = this.requireText(dto.sucSal, 'sucSal').toUpperCase();
     await this.assertSucAllowed(sucEnt, ctx);
