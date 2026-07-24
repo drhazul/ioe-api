@@ -56,6 +56,15 @@ export class SugeridosController {
     return this.service.catalogEstatus();
   }
 
+  @Get('catalogos/articulos-proveedor')
+  articulosProveedor(
+    @Query('suc') suc: string,
+    @Query('prov') prov: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.catalogArticulosProveedor(suc, prov, user);
+  }
+
   @Post()
   create(@Body() dto: CreateSugeridoOrdenDto, @CurrentUser() user: JwtPayload) {
     return this.service.create(dto, user);

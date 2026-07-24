@@ -25,7 +25,7 @@ type UserContext = {
 
 @Injectable()
 export class SugeridosService {
-  private static readonly MODULE_CODES = ['DAT_JAA_SUG'];
+  private static readonly MODULE_CODES = ['DAT_JAA_SUG', 'DAT_ORD_COMP'];
   private static readonly INVENTORY_CHIEF_CODES = new Set([
     'INVJEF',
     'JEFE_INVENTARIOS',
@@ -58,6 +58,11 @@ export class SugeridosService {
         `UPPER(LTRIM(RTRIM(ISNULL(h.ESTATUS, '')))) = @${params.length}`,
       );
       params.push(estatus);
+    }
+
+    if (query.prov != null && query.prov > 0) {
+      where.push(`TRY_CONVERT(INT, h.NPROV) = @${params.length}`);
+      params.push(query.prov);
     }
 
     const from = this.normalizeDate(query.from);
@@ -409,6 +414,52 @@ export class SugeridosService {
     return (rows ?? []).map((row: Record<string, unknown>) =>
       this.normalizeText(row.estatus).toUpperCase(),
     );
+  }
+
+  async catalogArticulosProveedor(
+    sucRaw: string,
+    provRaw: string,
+    user: JwtPayload,
+  ) {
+    const ctx = await this.resolveUserContext(user);
+    const suc = this.requireText(sucRaw, 'suc').toUpperCase();
+    const prov = this.toInt(provRaw);
+    if (!prov || prov <= 0) {
+      throw new BadRequestException('Proveedor requerido.');
+    }
+    await this.assertSucAllowed(suc, ctx);
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        a.ART,
+        a.DES,
+        a.UPC,
+        a.UN_COMP,
+        CASE
+          WHEN TRY_CONVERT(INT, a.PROV_1) = @1 THEN a.CTO_PROV1
+          WHEN TRY_CONVERT(INT, a.PROV_2) = @1 THEN a.CTO_PROV2
+          WHEN TRY_CONVERT(INT, a.PROV_3) = @1 THEN a.CTO_PROV3
+          ELSE a.CTOP
+        END AS CTO
+      FROM dbo.DAT_ART a
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @0
+        AND ISNULL(a.BLOQ, 0) <> -1
+        AND (
+          TRY_CONVERT(INT, a.PROV_1) = @1
+          OR TRY_CONVERT(INT, a.PROV_2) = @1
+          OR TRY_CONVERT(INT, a.PROV_3) = @1
+        )
+      ORDER BY a.DES, a.ART
+      `,
+      [suc, prov],
+    );
+    return (rows ?? []).map((row: Record<string, unknown>) => ({
+      art: this.normalizeText(row.ART),
+      des: this.normalizeText(row.DES),
+      upc: this.normalizeText(row.UPC),
+      unComp: this.normalizeText(row.UN_COMP),
+      cto: this.toMoney(row.CTO) ?? 0,
+    }));
   }
 
   private async getHeader(npedRaw: string) {

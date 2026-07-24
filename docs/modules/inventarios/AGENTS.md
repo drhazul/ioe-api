@@ -16,6 +16,7 @@
 - Modulo API: `src/modules/mermas`.
 - Ruta base: `/mermas`.
 - La evidencia `EVI_M` se recibe como data URL de imagen en JSON; `src/main.ts` mantiene body parser JSON/urlencoded en `1mb`, alineado al limite validado de 700000 caracteres.
+- Al contabilizar, `sp_merma_contabilizar` debe guardar `DAT_MB51.CTDA` y `CTOT` negativos porque es una salida de inventario.
 
 ## Transferencias entre sucursales
 - Modulo API: `src/modules/transferencias`.
@@ -29,6 +30,7 @@
 - La evidencia de surtido se guarda en `TRAN_EVID` desde `POST /transferencias/:doc/detalle/:idpd/evidencia`; validar estado `PREPARACION` y sucursal origen/surtidora.
 - Antes de ejecutar `sp_trans_transito`, backend debe bloquear documentos con renglones sin evidencia en `TRAN_EVID`; aceptar solo data URL de imagen mayor a 500 bytes y maximo 500 KB.
 - Movimientos oficiales `DAT_CMOV`: `121` salida origen, `122` faltante reintegracion, `123` entrada destino, `124` sobrante descuento origen.
+- Los movimientos `121` y `124` deben guardar `DAT_MB51.CTDA` y `CTOT` negativos en la sucursal origen; `122` permanece positivo como reintegración en origen y `123` positivo como entrada en destino.
 - No usar tablas `TRAS_*` ni `DAT_ART_SVR`; el articulo y stock se resuelven con `DAT_ART`.
 - `GET /transferencias/reportes` y `GET /transferencias/reportes/:doc` son solo para jefe de inventarios/admin; no aplican limites operativos por estatus, excluyen `INCIDENCIA` como filtro de cabecera y devuelven `hasIncidencia` cuando algun renglon tiene `ESTATUS_R=INCIDENCIA`.
 

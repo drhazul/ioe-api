@@ -28,6 +28,11 @@ export class SugeridosQueryDto {
   estatus?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  prov?: number;
+
+  @IsOptional()
   @IsString()
   from?: string;
 

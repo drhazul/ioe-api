@@ -2,6 +2,93 @@ SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 GO
 
+/*
+  DAT_MB51 representa el inventario acumulado mediante SUM(CTDA).
+  Por ello, las salidas deben persistirse con CTDA/CTOT negativos:
+    - transferencia, movimiento 121, en la sucursal origen;
+    - merma, en la sucursal que contabiliza el documento.
+  Las cantidades capturadas en las tablas de detalle se conservan positivas.
+*/
+
+CREATE OR ALTER PROCEDURE dbo.sp_trans_transito
+  @DOC NVARCHAR(255),
+  @USER NVARCHAR(100),
+  @EMP NVARCHAR(120) = NULL,
+  @NUM_GUIA NVARCHAR(120) = NULL,
+  @RESP NVARCHAR(120) = NULL,
+  @TXT NVARCHAR(255) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DECLARE @sucSal NVARCHAR(20), @estatus NVARCHAR(30), @docBase BIGINT;
+    SELECT
+      @sucSal = LTRIM(RTRIM(ISNULL(SUC_SAL, ALM_SAL))),
+      @estatus = UPPER(LTRIM(RTRIM(ISNULL(ESTATUS, ''))))
+    FROM dbo.TRAN_CTR_DOCPRE WITH (UPDLOCK, HOLDLOCK)
+    WHERE DOC = @DOC;
+
+    IF @estatus IS NULL THROW 59150, 'Documento no existe.', 1;
+    IF @estatus <> 'PREPARACION' THROW 59151, 'Solo se puede enviar a transito desde PREPARACION.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.DAT_CMOV WHERE CMOV = 121)
+      THROW 59152, 'DAT_CMOV no tiene configurado el movimiento 121.', 1;
+
+    SELECT @docBase = TRY_CONVERT(BIGINT, NDOC)
+    FROM dbo.DAT_CMOV WITH (UPDLOCK, HOLDLOCK)
+    WHERE CMOV = 121;
+    IF @docBase IS NULL SET @docBase = 121000000;
+    SET @docBase = @docBase + 1;
+    UPDATE dbo.DAT_CMOV SET NDOC = @docBase WHERE CMOV = 121;
+
+    INSERT INTO dbo.DAT_MB51
+      (IDPD, [USER], CLSM, DOCP, ART, CTDA, CTOT, FCND, FCNC, TXT, ALMACEN, VTAESP, SUC)
+    SELECT
+      CONVERT(NVARCHAR(36), NEWID()), @USER, 121, @DOC, d.ART,
+      -ABS(ISNULL(d.CTD_LIB, 0)),
+      -ABS(ISNULL(d.CTD_LIB, 0)) * ISNULL(a.CTOP, 0),
+      GETDATE(), GETDATE(), CONCAT('TRANSFERENCIA SALIDA DOC ', @DOC),
+      '001', 0, @sucSal
+    FROM dbo.TRAN_DET_ART d
+    LEFT JOIN dbo.DAT_ART a
+      ON LTRIM(RTRIM(ISNULL(a.SUC, ''))) = @sucSal
+     AND LTRIM(RTRIM(ISNULL(a.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+    WHERE d.DOC = @DOC
+      AND ISNULL(d.BLOQ, 0) <> -1
+      AND ISNULL(d.CTD_LIB, 0) > 0;
+
+    UPDATE a
+    SET a.STOCK = ISNULL(a.STOCK, 0) - ISNULL(d.CTD_LIB, 0)
+    FROM dbo.DAT_ART a
+    JOIN dbo.TRAN_DET_ART d
+      ON LTRIM(RTRIM(ISNULL(a.ART, ''))) = LTRIM(RTRIM(ISNULL(d.ART, '')))
+     AND LTRIM(RTRIM(ISNULL(a.SUC, ''))) = @sucSal
+    WHERE d.DOC = @DOC
+      AND ISNULL(d.BLOQ, 0) <> -1;
+
+    INSERT INTO dbo.TRAN_PAQ_ENV (DOC, EMP, NUM_GUIA, FENV, RESP, TXT, USR)
+    VALUES (@DOC, @EMP, @NUM_GUIA, GETDATE(), @RESP, @TXT, @USER);
+
+    UPDATE dbo.TRAN_CTR_DOCPRE
+    SET ESTATUS = 'TRANSITO',
+        DOC_MB51_SAL = CONVERT(NVARCHAR(50), @docBase),
+        USR_E = @USER,
+        FCNM = GETDATE()
+    WHERE DOC = @DOC;
+
+    COMMIT TRANSACTION;
+    SELECT DOC, ESTATUS, DOC_MB51_SAL FROM dbo.TRAN_CTR_DOCPRE WHERE DOC = @DOC;
+  END TRY
+  BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+  END CATCH
+END;
+GO
+
 CREATE OR ALTER PROCEDURE dbo.sp_merma_contabilizar
   @DOCMER NVARCHAR(50),
   @USER NVARCHAR(100)
@@ -137,12 +224,4 @@ BEGIN
     THROW;
   END CATCH
 END;
-GO
-
--- Ajuste correctivo para movimientos históricos de merma
-UPDATE m
-SET m.ALMACEN = '001'
-FROM dbo.DAT_MB51 m
-WHERE UPPER(LTRIM(RTRIM(ISNULL(m.ALMACEN, '')))) = 'MERMA'
-  AND UPPER(LTRIM(RTRIM(ISNULL(m.TXT, '')))) LIKE 'MERMA DOC %';
 GO

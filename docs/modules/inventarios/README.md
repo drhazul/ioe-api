@@ -12,6 +12,7 @@
 
 - `src/main.ts` configura body parser JSON/urlencoded a `1mb` para que `POST/PATCH /mermas/:docmer/detalle` acepte evidencia `EVI_M` dentro del limite funcional.
 - El servicio conserva la validacion de data URL de imagen y maximo de 700000 caracteres para no guardar evidencias sobredimensionadas.
+- Desde el ajuste `2026-07-23`, la contabilizacion registra `CTDA/CTOT` negativos en `DAT_MB51`, alineados con la salida aplicada al stock.
 
 ## Transferencias entre sucursales (2026-06-09)
 
@@ -30,3 +31,5 @@
 - Script operativo: `sql/2026-06-09_transferencias_modulo_base.sql`.
 - El flujo oficial es `BORRADOR -> PENDIENTE -> LIBERADA -> PREPARACION -> TRANSITO -> REVISANDO/INCIDENCIA -> CONTABILIZADO`.
 - La salida a transito registra `DAT_MB51` con movimiento `121`; la contabilizacion registra destino `123` y diferencias con `122/124`.
+- Desde el ajuste `2026-07-23`, la salida `121` y el sobrante/descuento `124` registran `CTDA/CTOT` negativos en origen; el reintegro `122` y la entrada `123` continúan positivos.
+- `sql/2026-07-23_mb51_movimientos_historicos_signo_fix.sql` corrige los movimientos históricos oficiales de salida que quedaron positivos, sin modificar nuevamente `DAT_ART.STOCK`.
