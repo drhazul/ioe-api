@@ -328,6 +328,7 @@ BEGIN
   DECLARE @formaAut NVARCHAR(255);
   DECLARE @formaAutFinal NVARCHAR(255);
   DECLARE @impc MONEY;
+  DECLARE @formaImpd MONEY;
   DECLARE @cambioPendiente MONEY;
   DECLARE @efectivoCambioAsignado BIT = 0;
   DECLARE @execIdf NVARCHAR(255);
@@ -695,6 +696,10 @@ BEGIN
         SET @efectivoCambioAsignado = 1;
       END
 
+      SET @formaImpd = ROUND(@formaImpp - @impc, 2);
+      IF @formaImpd < 0
+        SET @formaImpd = 0;
+
       SET @formaAutFinal = CASE
         WHEN @formaForm IN ('CREDITO', 'DEUDOR') THEN @idfolVisibleNuevo
         ELSE @formaAut
@@ -734,7 +739,7 @@ BEGIN
         @pFORM = @formaForm,
         @pIMPP = @formaImpp,
         @pIMPC = @impc,
-        @pIMPD = @totalFinal,
+        @pIMPD = @formaImpd,
         @pAUT = @formaAutFinal;
 
       IF @formaForm IN ('CREDITO', 'DEUDOR')

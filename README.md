@@ -87,6 +87,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - `test/`: pruebas.
 
 ## Documentación por módulos
+- Faltantes y Sobrantes: `docs/modules/faltantes_sobrantes/README.md` (instrucciones: `docs/modules/faltantes_sobrantes/AGENTS.md`)
 - Base de módulos: `docs/modules/base_modulos/README.md` (instrucciones: `docs/modules/base_modulos/AGENTS.md`)
 - Core y seguridad: `docs/modules/core_seguridad/README.md` (instrucciones: `docs/modules/core_seguridad/AGENTS.md`)
 - Punto de venta: `docs/modules/punto_venta/README.md` (instrucciones: `docs/modules/punto_venta/AGENTS.md`)

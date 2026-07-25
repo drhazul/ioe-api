@@ -86,6 +86,7 @@ type PrintFormaItem = {
   idf: string;
   form: string;
   impp: number;
+  impd: number;
   aut: string | null;
   fcn: string | null;
 };
@@ -599,12 +600,14 @@ export class PvCotizacionesCierreService {
         const impdCol = this.toNumber(this.getRowValue(row, 'IMPD'));
         const imppRaw =
           imppCol != null && imppCol > 0 ? imppCol : (impdCol ?? imppCol ?? 0);
+        const impdRaw = impdCol ?? imppRaw;
         return {
           idf:
             this.normalizeText(this.getRowValue(row, 'IDF') ?? '') ||
             `F-${index + 1}`,
           form: this.normalizeText(this.getRowValue(row, 'FORM') ?? ''),
           impp: this.round2(imppRaw),
+          impd: this.round2(impdRaw),
           aut: this.normalizeText(this.getRowValue(row, 'AUT') ?? '') || null,
           fcn: this.toIsoDateTime(this.getRowValue(row, 'FCN')),
         } satisfies PrintFormaItem;
@@ -1332,7 +1335,7 @@ export class PvCotizacionesCierreService {
     if (input.tableColumns.has('IMPD')) {
       cols.push('IMPD');
       values.push(`@${params.length}`);
-      params.push(input.forma.impp);
+      params.push(this.round2(Math.max(input.forma.impp - input.impc, 0)));
     }
 
     if (input.tableColumns.has('AUT')) {

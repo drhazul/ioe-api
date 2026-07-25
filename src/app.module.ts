@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { FaltantesSobrantesModule } from './modules/faltantes-sobrantes/faltantes-sobrantes.module';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -78,6 +79,7 @@ import { SugeridosModule } from './modules/sugeridos/sugeridos.module';
 
 @Module({
   imports: [
+    FaltantesSobrantesModule,
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: envValidationSchema,

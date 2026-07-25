@@ -91,6 +91,7 @@ Enlaces relacionados:
 - valida suma de formas (`sum(impp)` <= total salvo efectivo con cambio) y referencias `REF_DETALLE.ESTATUS='PROCESADO'` usadas.
 - actualiza `PV_CTR_FOL_ASVR` (`ESTA='PAGADO'`, `IMPT`, `AUT='CA'|'VF'`), `PV_CTR_ORDS.ESTATUS=2`, sincroniza `PV_CTR_ORDS.RQFAC` con `REQF/RQFAC` del folio y ejecuta `dbo.sp_mb51_transmitir_folio` para stock MB51.
 - cambio de forma de pago (2026-06-26): `GET /formas-pago/cambios/today` acepta `suc/opv` para admin; la UI muestra filtros en cascada `Sucursal` -> `OPV`, y `PUT /formas-pago/cambios/:idf` permite operar filas de otro OPV solo cuando la sesión es admin + supervisor `SUPERPV`.
+- importe cobrado por forma (2026-07-22): `IMPD` debe persistir por forma como `IMPP-IMPC`, nunca como total del folio. Se corrigieron el parche de cierre visible y la ruta fallback; reparación puntual: `sql/2026-07-22_pv_reparar_df01_20260721_ca_0027.sql`.
 - compatibilidad de homologación MB51 (2026-04): si existe trigger legacy que transforma `MB51PROCES` a `TRANSMITIR`, aplicar `sql/2026-04-03_mb51proceso_homologacion.sql` para conservar `MB51PROCES` en salida operativa.
 - sincronización VF: `sp_fact_sync_folio_vf` en transacción cuando `tipotran='VF'` y `REQF=1`; si no cumple, limpia cabecera/detalle en `FAC_SVR_SHAP/FACT_TICKET_SHP`. En cambio de forma de pago, si la primera sincronización no aplica, el backend reintenta con `FORCE=1` antes de reportar error.
 - `Tipofact='CREDITO'` si alguna forma `CREDITO`; de lo contrario `INDIVIDUAL`.
