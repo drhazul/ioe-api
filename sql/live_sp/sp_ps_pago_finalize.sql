@@ -105,6 +105,7 @@ BEGIN
   DECLARE @formaAut NVARCHAR(255);
                                                                                                                                                                                                                            
   DECLARE @impc DECIMAL(18, 4);
+  DECLARE @impd DECIMAL(18, 4);
                                                                                                                                                                                                                               
   DECLARE @ctrlObjId INT = NULL;
                                                                                                                                                                                                                              
@@ -572,6 +573,7 @@ BEGIN
                                                                                                                                                                                                                                                    
 
                                                                                                                                                                                                                                                              
+      SET @impd = ROUND(@formaImpp - @impc, 4);
       SET @execIdf = CONVERT(NVARCHAR(255), NEWID());
                                                                                                                                                                                                         
 
@@ -646,7 +648,7 @@ BEGIN
                                                                                                                                                                                                                                  
         @pIMPC = @impc,
                                                                                                                                                                                                                                       
-        @pIMPD = ROUND(@formaImpp - @impc, 4),
+        @pIMPD = @impd,
                                                                                                                                                                                                                                      
         @pAUT = @formaAut;
                                                                                                                                                                                                                                    

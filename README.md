@@ -11,6 +11,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Procesos críticos en stored procedures para inventarios y PV.
 - Punto de venta / Pago de Servicios (2026-04): la salida operativa de folios pagados utiliza `ESTA='CERRADO_PS'` (manteniendo lectura compatible para históricos en `TRANSMITIR`).
 - Punto de venta / Pago de Servicios (2026-05-22): `sp_ps_pago_finalize` corrige persistencia de comprobantes múltiples para guardar `IMPD` por forma (`IMPP-IMPC`) y se añade script de reparación puntual `sql/2026-05-22_ps_fix_comprobantes_duplicados_df01_20260520_vf_0061.sql`.
+- Punto de venta / Pago de Servicios (2026-07-24): se corrige despliegue de `sp_ps_pago_finalize` para calcular `IMPD` en variable por comprobante y se repara/resincroniza `DF01-20260723-VF-0022` con `sql/2026-07-24_ps_fix_comprobantes_df01_20260723_vf_0022.sql`.
 - Facturación / Cliente fiscal (2026-04-06): la edición de `FACT_CLIENT_SHP` conserva la `SUC` original del registro; no se reasigna por contexto del usuario durante `PATCH /factclientshp/:id`.
 - Ordenes de trabajo / Asignar (2026-04-21): `GET /ordenes-trabajo/asignar/colaboradores` mantiene `suc` por query; el frontend ahora envía `DAT_LAB.SUC` del laboratorio asignado a la ORD. El catálogo `laboratorios` del panel expone además `labSuc` para distinguirla de la sucursal de acceso.
 - Ordenes de trabajo / Consulta estado (2026-04-23): `GET /ordenes-trabajo` agrega `panelMode='estado'` para consulta solo lectura, la respuesta incluye `OPV` resuelto desde `USUARIO.NOMBRE`, `saveDetail` acepta `hrEnt` en formato `HH:MM`, y `ANULAR` queda permitido solo para `admin`/`JEF_TALLER` con trazabilidad en `AUDIT_LOG`.
@@ -111,4 +112,5 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 
 ## Documentacion viva
 - Mantén este índice y los README/AGENTS de módulo actualizados con cada cambio de contrato o proceso.
+- Ordenes de trabajo / Cambio material y Merma (2026-07-24): `PV_ORD_CAMBIO_MERMA_PRECIO` conserva base económica propia por ORD derivada; API sella diferencia prorrateada y fiscal antes de ejecutar SP.
 

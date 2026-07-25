@@ -1701,6 +1701,7 @@ BEGIN
   DECLARE @formaImpp DECIMAL(18, 4);
   DECLARE @formaAut NVARCHAR(255);
   DECLARE @impc DECIMAL(18, 4);
+  DECLARE @impd DECIMAL(18, 4);
   DECLARE @ctrlObjId INT = NULL;
   DECLARE @ctrlHasCTA BIT = 0;
   DECLARE @ctrlHasCLIENT BIT = 0;
@@ -1941,6 +1942,7 @@ BEGIN
         SET @efectivoCambioAsignado = 1;
       END;
 
+      SET @impd = ROUND(@formaImpp - @impc, 4);
       SET @execIdf = CONVERT(NVARCHAR(255), NEWID());
 
       SET @sql = N'INSERT INTO ' + @folFormTable + N' (' +
@@ -1978,7 +1980,7 @@ BEGIN
         @pFORM = @formaForm,
         @pIMPP = @formaImpp,
         @pIMPC = @impc,
-        @pIMPD = ROUND(@formaImpp - @impc, 4),
+        @pIMPD = @impd,
         @pAUT = @formaAut;
 
       FETCH NEXT FROM forma_cursor INTO @formaForm, @formaImpp, @formaAut;

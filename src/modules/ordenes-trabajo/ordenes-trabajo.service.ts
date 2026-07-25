@@ -46,6 +46,13 @@ type CambioMermaFinance = {
   total: number;
 };
 
+type CambioMermaEconomicBase = {
+  unitPrice: number;
+  baseTotal: number;
+  source: string;
+  warning: string | null;
+};
+
 type CambioMermaOriginalContext = {
   row: Record<string, unknown>;
   scope: SucScope;
@@ -491,14 +498,10 @@ export class OrdenesTrabajoService {
       dto.motivo,
       this.toInt(dto.motr) ?? this.toInt(original.row.MOTR) ?? undefined,
     );
-    const pvtaOriginal = await this.resolveCambioMermaOriginalUnitPrice(
-      iord,
-      original.row,
-    );
     const pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
       this.normalizeText(original.row.SUC) ?? '',
       this.normalizeText(original.row.ART) ?? '',
-      pvtaOriginal,
+      null,
     );
     const nvaIord = await this.resolveCambioMermaReservedIord(
       this.normalizeText(original.row.SUC) ?? '',
@@ -594,25 +597,14 @@ export class OrdenesTrabajoService {
       );
     }
 
-    const artOriginal = this.normalizeText(original.row.ART) ?? '';
     const artNuevo = this.normalizeText(dto.artNuevo);
     if (!artNuevo) {
       throw new BadRequestException(
         'Debe seleccionar un artículo válido para la nueva ORD.',
       );
     }
-    if (
-      tipo === 1 &&
-      artNuevo &&
-      this.normalizeUpper(artNuevo) === this.normalizeUpper(artOriginal)
-    ) {
-      throw new BadRequestException(
-        'El artículo nuevo debe ser distinto al artículo original.',
-      );
-    }
-
     const suc = this.normalizeText(original.row.SUC) ?? '';
-    let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
+    let pvtaNuevo: number | null = null;
     pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
       suc,
       artNuevo,
@@ -728,16 +720,6 @@ export class OrdenesTrabajoService {
         'Debe seleccionar un artículo nuevo para cambio material.',
       );
     }
-    if (
-      tipo === 1 &&
-      artNuevo &&
-      this.normalizeUpper(artNuevo) === this.normalizeUpper(artOriginal)
-    ) {
-      throw new BadRequestException(
-        'El artículo nuevo debe ser distinto al artículo original.',
-      );
-    }
-
     const motivo = await this.resolveMovimientoMotrAndLabel(
       tipo,
       dto.motivo,
@@ -750,7 +732,8 @@ export class OrdenesTrabajoService {
         : this.toInt(dto.labor);
     const crearNuevaOrd = true;
     const suc = this.normalizeText(original.row.SUC) ?? '';
-    let pvtaNuevo = this.toFloat(dto.pvtaNuevo);
+    let pvtaNuevo =
+      this.toFloat(stagingBefore?.PVTA_NUEVO) ?? this.toFloat(dto.pvtaNuevo);
     pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
       suc,
       artNuevo,
@@ -1681,6 +1664,13 @@ export class OrdenesTrabajoService {
       dto.motr,
     );
     const ctdCM = this.normalizeStrictCtdCM(dto.ctdCM, 1);
+    const directPreview = await this.buildCambioMermaDirectPreview(
+      iordRaw,
+      1,
+      dto.artNuevo,
+      ctdCM,
+      user,
+    );
     const result = await this.executeSimpleAction(
       'sp_ordenes_trabajo_cambio_material',
       iordRaw,
@@ -1691,12 +1681,20 @@ export class OrdenesTrabajoService {
         this.normalizeText(dto.docDif),
         motivo.id,
         ctdCM,
+        directPreview.pvtaNuevo,
+        null,
+        directPreview.diferenciaEconomica,
       ],
       user,
       ip,
       'Cambio de material aplicado',
       'ORD_CAMBIO_MATERIAL',
-      '@ART_NUEVO=@1,@MOTIVO=@2,@LABOR=@3,@DOCDIF=@4,@MOTR=@5,@CTD_C_M=@6,',
+      '@ART_NUEVO=@1,@MOTIVO=@2,@LABOR=@3,@DOCDIF=@4,@MOTR=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,@IORD_NUEVA=@8,@DIFERENCIA_SELLADA=@9,',
+    );
+    await this.persistDirectCambioMermaSnapshot(
+      result.data,
+      directPreview,
+      this.auditActor(user),
     );
     await this.forceEstatus2FromActionData(result.data);
     return result;
@@ -1721,6 +1719,13 @@ export class OrdenesTrabajoService {
       dto.motr,
     );
     const ctdCM = this.normalizeStrictCtdCM(dto.ctdCM ?? dto.cantidadMerma);
+    const directPreview = await this.buildCambioMermaDirectPreview(
+      iordRaw,
+      2,
+      dto.artNuevo,
+      ctdCM,
+      user,
+    );
     const result = await this.executeSimpleAction(
       'sp_ordenes_trabajo_merma',
       iordRaw,
@@ -1731,13 +1736,23 @@ export class OrdenesTrabajoService {
         motivo.id,
         this.normalizeText(dto.artNuevo),
         ctdCM,
+        directPreview.pvtaNuevo,
+        null,
+        directPreview.diferenciaEconomica,
       ],
       user,
       ip,
       'Merma procesada',
       'ORD_MERMA',
-      '@CANTIDAD_MERMA=@1,@MOTIVO=@2,@CREAR_NUEVA_ORD=@3,@MOTR=@4,@ART_NUEVO=@5,@CTD_C_M=@6,',
+      '@CANTIDAD_MERMA=@1,@MOTIVO=@2,@CREAR_NUEVA_ORD=@3,@MOTR=@4,@ART_NUEVO=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,@IORD_NUEVA=@8,@DIFERENCIA_SELLADA=@9,',
     );
+    if (dto.crearNuevaOrd == null || dto.crearNuevaOrd) {
+      await this.persistDirectCambioMermaSnapshot(
+        result.data,
+        directPreview,
+        this.auditActor(user),
+      );
+    }
     await this.forceEstatus2FromActionData(result.data);
     return result;
   }
@@ -3244,16 +3259,18 @@ export class OrdenesTrabajoService {
         '')
       : (nuevoArtInfo?.des ?? '');
 
-    const precioOriginal = await this.resolveTicketLogBaseUnitPrice(
-      iord,
-      idfol,
-      artOriginal,
-      originalArtInfo?.pvta ?? 0,
-    );
+    const baseEconomicaOriginal =
+      await this.resolveCambioMermaOriginalEconomicBase(
+        iord,
+        idfol,
+        artOriginal,
+        ctdOriginal,
+        originalArtInfo?.pvta ?? 0,
+      );
     const precioNuevo = await this.resolveCambioMermaNewUnitPrice(
       suc,
       artNuevo,
-      this.toFloat(stagingRow?.PVTA_NUEVO) ?? precioOriginal,
+      this.toFloat(stagingRow?.PVTA_NUEVO),
     );
 
     const tipoTran = this.resolveCambioMermaTipoTran(
@@ -3267,7 +3284,7 @@ export class OrdenesTrabajoService {
     );
     const rqfac = this.resolveCambioMermaRqfac(originalRow);
     const ivaIntegrado = this.toInt(originalRow.IVA_INTEGRADO);
-    const originalBase = this.roundMoney(precioOriginal);
+    const originalBase = this.roundMoney(baseEconomicaOriginal.baseTotal);
     const nuevoBase = this.roundMoney(precioNuevo * ctdCM);
     const originalBaseContable =
       ctdOriginal > 0
@@ -3302,6 +3319,13 @@ export class OrdenesTrabajoService {
       montosNuevoContable.total - montosOriginalContable.total,
     );
     const generaAfectacionContable = Math.abs(diferenciaEconomica) >= 0.009;
+    const priceDifferenceMessage =
+      sameArticulo && generaAfectacionContable
+        ? baseEconomicaOriginal.source === 'PV_TICKET_LOG' ||
+          baseEconomicaOriginal.source === 'FACT_TICKET_SHP'
+          ? 'Diferencia originada por precio modificado en PV respecto al precio actual de catálogo.'
+          : 'Diferencia originada por variación entre el precio histórico de la ORD y el precio actual de catálogo.'
+        : '';
 
     const selCtrlOrd = this.toInt(originalRow.selCtrlOrd);
     const editable = this.isSelCtrlOrdEditable(selCtrlOrd);
@@ -3345,6 +3369,10 @@ export class OrdenesTrabajoService {
       totalNuevo: montosNuevo.total,
       diferenciaEconomica,
       generaAfectacionContable,
+      originalPriceSource: baseEconomicaOriginal.source,
+      originalPriceWarning: baseEconomicaOriginal.warning,
+      newPriceSource: 'DAT_ART',
+      priceDifferenceMessage,
       original: {
         ...originalRow,
         DESCFLUJO:
@@ -3359,7 +3387,10 @@ export class OrdenesTrabajoService {
           this.normalizeText(originalRow.DESCRT) ??
           null,
         CTD: ctdOriginal,
-        PVTAT_BASE: precioOriginal,
+        PVTA_UNITARIO_BASE: baseEconomicaOriginal.unitPrice,
+        PVTAT_BASE: originalBase,
+        PRECIO_ORIGEN: baseEconomicaOriginal.source,
+        PRECIO_ADVERTENCIA: baseEconomicaOriginal.warning,
         CTD_C_M: ctdCMStored,
         CTD_C_M_CALCULADO: ctdCM,
         SUBTOTAL: montosOriginal.subtotal,
@@ -3472,11 +3503,6 @@ export class OrdenesTrabajoService {
           'Debe existir artículo nuevo en la captura para cambio material.',
         );
       }
-      if (this.normalizeUpper(artNuevo) === this.normalizeUpper(artOriginal)) {
-        throw new BadRequestException(
-          'El artículo nuevo debe ser distinto al artículo original.',
-        );
-      }
     }
 
     const motivo = await this.resolveMovimientoMotrAndLabel(
@@ -3570,12 +3596,13 @@ export class OrdenesTrabajoService {
           ctdCM,
           pvtaNuevo,
           nvaIord,
+          sealedDiff,
         ],
         user,
         ip,
         'Cambio de material aplicado',
         'ORD_CAMBIO_MATERIAL',
-        '@ART_NUEVO=@1,@MOTIVO=@2,@LABOR=@3,@DOCDIF=@4,@MOTR=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,@IORD_NUEVA=@8,',
+        '@ART_NUEVO=@1,@MOTIVO=@2,@LABOR=@3,@DOCDIF=@4,@MOTR=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,@IORD_NUEVA=@8,@DIFERENCIA_SELLADA=@9,',
       );
     } else {
       result = await this.executeSimpleAction(
@@ -3590,12 +3617,13 @@ export class OrdenesTrabajoService {
           ctdCM,
           pvtaNuevo,
           nvaIord,
+          sealedDiff,
         ],
         user,
         ip,
         'Merma procesada',
         'ORD_MERMA',
-        '@CANTIDAD_MERMA=@1,@MOTIVO=@2,@CREAR_NUEVA_ORD=@3,@MOTR=@4,@ART_NUEVO=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,@IORD_NUEVA=@8,',
+        '@CANTIDAD_MERMA=@1,@MOTIVO=@2,@CREAR_NUEVA_ORD=@3,@MOTR=@4,@ART_NUEVO=@5,@CTD_C_M=@6,@PVTA_NUEVO=@7,@IORD_NUEVA=@8,@DIFERENCIA_SELLADA=@9,',
       );
     }
 
@@ -3604,6 +3632,22 @@ export class OrdenesTrabajoService {
       this.toFloat(result.data.DIFERENCIA_ECONOMICA) ?? sealedDiff ?? 0;
 
     await this.normalizeCambioMermaNewOrdRecord(finalNewIord, artNuevo, ctdCM);
+    await this.upsertCambioMermaPriceSnapshot({
+      iord: finalNewIord,
+      sourceIord: iord,
+      idfol: this.normalizeText(original.row.IDFOL) ?? '',
+      suc,
+      art: artNuevo,
+      ctd: ctdCM,
+      unitPrice: pvtaNuevo,
+      source: 'DAT_ART',
+      tipoTran: this.resolveCambioMermaTipoTran(
+        original.row.ORIGEN_AUT ?? original.row.AUT_FOLIO ?? original.row.AUT,
+      ),
+      ivaIntegrado: this.toInt(original.row.IVA_INTEGRADO),
+      rqfac: this.resolveCambioMermaRqfac(original.row),
+      actor,
+    });
     await this.forceEstatus2FromActionData(result.data);
     await this.finalizeCambioMermaOriginalAfterAuthorize(
       iord,
@@ -3687,47 +3731,240 @@ export class OrdenesTrabajoService {
     };
   }
 
-  private async resolveTicketLogBaseUnitPrice(
+  private async buildCambioMermaDirectPreview(
+    iordRaw: string,
+    tipo: number,
+    artNuevoRaw: string | null | undefined,
+    ctdCM: number,
+    user: JwtPayload,
+  ) {
+    const iord = this.requireIord(iordRaw);
+    const original = await this.fetchCambioMermaOriginalContext(
+      iord,
+      user,
+      tipo,
+    );
+    const suc = this.normalizeText(original.row.SUC) ?? '';
+    const artOriginal = this.normalizeText(original.row.ART) ?? '';
+    const artNuevo = this.normalizeText(artNuevoRaw) ?? artOriginal;
+    const pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+      suc,
+      artNuevo,
+      null,
+    );
+    const context = await this.buildCambioMermaContextResponse(
+      iord,
+      tipo,
+      original.row,
+      {
+        ART_NUEVO: artNuevo,
+        PVTA_NUEVO: pvtaNuevo,
+        CTD_C_M: ctdCM,
+      },
+    );
+    return {
+      iord,
+      original,
+      suc,
+      artNuevo,
+      ctdCM,
+      pvtaNuevo,
+      diferenciaEconomica: this.toFloat(context.diferenciaEconomica) ?? 0,
+    };
+  }
+
+  private async persistDirectCambioMermaSnapshot(
+    resultData: Record<string, unknown>,
+    preview: {
+      iord: string;
+      original: CambioMermaOriginalContext;
+      suc: string;
+      artNuevo: string;
+      ctdCM: number;
+      pvtaNuevo: number;
+    },
+    actor: string,
+  ) {
+    const newIord = this.normalizeText(resultData.IORD_NUEVA);
+    if (!newIord) return;
+
+    await this.upsertCambioMermaPriceSnapshot({
+      iord: newIord,
+      sourceIord: preview.iord,
+      idfol: this.normalizeText(preview.original.row.IDFOL) ?? '',
+      suc: preview.suc,
+      art: preview.artNuevo,
+      ctd: preview.ctdCM,
+      unitPrice: preview.pvtaNuevo,
+      source: 'DAT_ART',
+      tipoTran: this.resolveCambioMermaTipoTran(
+        preview.original.row.ORIGEN_AUT ??
+          preview.original.row.AUT_FOLIO ??
+          preview.original.row.AUT,
+      ),
+      ivaIntegrado: this.toInt(preview.original.row.IVA_INTEGRADO),
+      rqfac: this.resolveCambioMermaRqfac(preview.original.row),
+      actor,
+    });
+  }
+
+  private async resolveCambioMermaOriginalEconomicBase(
     iordRaw: string,
     idfolRaw: string,
     artRaw: string,
-    fallback: number,
-  ) {
-    if (!(await this.hasTable('PV_TICKET_LOG'))) {
-      return this.roundMoney(fallback);
-    }
+    ctdOriginalRaw: number,
+    fallbackUnitPriceRaw: number,
+  ): Promise<CambioMermaEconomicBase> {
     const iord = this.normalizeText(iordRaw) ?? '';
     const idfol = this.normalizeText(idfolRaw) ?? '';
     const art = this.normalizeText(artRaw) ?? '';
-    const rows = await this.dataSource.query(
-      `
-      SELECT TOP 1
-        TRY_CONVERT(FLOAT, t.PVTAT) AS PVTAT_BASE
-      FROM dbo.PV_TICKET_LOG t
-      WHERE (
-          UPPER(LTRIM(RTRIM(ISNULL(t.ORD, '')))) = UPPER(@0)
-          OR (
-            UPPER(LTRIM(RTRIM(ISNULL(t.IDFOL, '')))) = UPPER(@1)
-            AND UPPER(LTRIM(RTRIM(ISNULL(t.ART, '')))) = UPPER(@2)
+    const ctdOriginal = this.toFloat(ctdOriginalRaw) ?? 0;
+    const fallbackUnitPrice = this.toFloat(fallbackUnitPriceRaw) ?? 0;
+
+    if (await this.hasTable('PV_ORD_CAMBIO_MERMA_PRECIO')) {
+      const snapshotRows = await this.dataSource.query(
+        `
+        SELECT TOP 1
+          TRY_CONVERT(FLOAT, p.PVTA_UNITARIO) AS PVTA_UNITARIO,
+          TRY_CONVERT(FLOAT, p.PVTAT_BASE) AS PVTAT_BASE,
+          LTRIM(RTRIM(ISNULL(p.ORIGEN_PRECIO, 'SNAPSHOT_ORD'))) AS ORIGEN_PRECIO
+        FROM dbo.PV_ORD_CAMBIO_MERMA_PRECIO p
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(p.IORD, '')))) = UPPER(@0)
+        ORDER BY ISNULL(p.FCN_MOD, p.FCN_ALT) DESC
+        `,
+        [iord],
+      );
+      const snapshot = this.firstRow(snapshotRows);
+      const snapshotBase = this.toFloat(snapshot?.PVTAT_BASE);
+      if (snapshotBase != null && snapshotBase >= 0) {
+        const snapshotUnit =
+          this.toFloat(snapshot?.PVTA_UNITARIO) ??
+          (ctdOriginal > 0 ? snapshotBase / ctdOriginal : 0);
+        return {
+          unitPrice: this.roundMoney(snapshotUnit),
+          baseTotal: this.roundMoney(snapshotBase),
+          source: this.normalizeText(snapshot?.ORIGEN_PRECIO) ?? 'SNAPSHOT_ORD',
+          warning: null,
+        };
+      }
+    }
+
+    if (await this.hasTable('PV_TICKET_LOG')) {
+      const ticketRows = await this.dataSource.query(
+        `
+        SELECT TOP 1
+          TRY_CONVERT(FLOAT, t.PVTA) AS PVTA_UNITARIO,
+          TRY_CONVERT(FLOAT, t.PVTAT) AS PVTAT_BASE,
+          TRY_CONVERT(FLOAT, t.CTD) AS CTD_TICKET
+        FROM dbo.PV_TICKET_LOG t
+        WHERE (
+            UPPER(LTRIM(RTRIM(ISNULL(t.ORD, '')))) = UPPER(@0)
+            OR (
+              UPPER(LTRIM(RTRIM(ISNULL(t.IDFOL, '')))) = UPPER(@1)
+              AND UPPER(LTRIM(RTRIM(ISNULL(t.ART, '')))) = UPPER(@2)
+            )
           )
-        )
-      ORDER BY
-        CASE
-          WHEN UPPER(LTRIM(RTRIM(ISNULL(t.ORD, '')))) = UPPER(@0) THEN 0
-          ELSE 1
-        END,
-        CASE
-          WHEN UPPER(LTRIM(RTRIM(ISNULL(t.ART, '')))) = UPPER(@2) THEN 0
-          ELSE 1
-        END,
-        ISNULL(t.updated_at, CONVERT(DATETIME, '19000101', 112)) DESC,
-        LTRIM(RTRIM(ISNULL(t.ID, ''))) DESC
-      `,
-      [iord, idfol, art],
-    );
-    const row = this.firstRow(rows);
-    const value = this.toFloat(row?.PVTAT_BASE) ?? fallback;
-    return this.roundMoney(value);
+        ORDER BY
+          CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(t.ORD, '')))) = UPPER(@0) THEN 0
+            ELSE 1
+          END,
+          CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(t.ART, '')))) = UPPER(@2) THEN 0
+            ELSE 1
+          END,
+          ISNULL(t.updated_at, CONVERT(DATETIME, '19000101', 112)) DESC,
+          LTRIM(RTRIM(ISNULL(t.ID, ''))) DESC
+        `,
+        [iord, idfol, art],
+      );
+      const ticket = this.firstRow(ticketRows);
+      const ticketBase = this.toFloat(ticket?.PVTAT_BASE);
+      if (ticketBase != null && ticketBase >= 0) {
+        const ticketCtd = this.toFloat(ticket?.CTD_TICKET) ?? ctdOriginal;
+        const ticketUnit =
+          this.toFloat(ticket?.PVTA_UNITARIO) ??
+          (ticketCtd > 0 ? ticketBase / ticketCtd : 0);
+        return {
+          unitPrice: this.roundMoney(ticketUnit),
+          baseTotal: this.roundMoney(ticketBase),
+          source: 'PV_TICKET_LOG',
+          warning: null,
+        };
+      }
+    }
+
+    if (await this.hasTable('FACT_TICKET_SHP')) {
+      const factRows = await this.dataSource.query(
+        `
+        SELECT TOP 1
+          TRY_CONVERT(FLOAT, f.ValorUnitario) AS PVTA_UNITARIO,
+          TRY_CONVERT(FLOAT, f.PVTAT) AS PVTAT_BASE,
+          TRY_CONVERT(FLOAT, f.Cantidad) AS CTD_TICKET
+        FROM dbo.FACT_TICKET_SHP f
+        WHERE (
+            UPPER(LTRIM(RTRIM(ISNULL(f.ORD, '')))) = UPPER(@0)
+            OR (
+              UPPER(LTRIM(RTRIM(ISNULL(f.IDFOL, '')))) = UPPER(@1)
+              AND UPPER(LTRIM(RTRIM(ISNULL(f.NoIdentificacion, '')))) = UPPER(@2)
+            )
+          )
+        ORDER BY
+          CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(f.ORD, '')))) = UPPER(@0) THEN 0
+            ELSE 1
+          END,
+          LTRIM(RTRIM(ISNULL(f.IDD, ''))) DESC
+        `,
+        [iord, idfol, art],
+      );
+      const fact = this.firstRow(factRows);
+      const factBase = this.toFloat(fact?.PVTAT_BASE);
+      if (factBase != null && factBase >= 0) {
+        const factCtd = this.toFloat(fact?.CTD_TICKET) ?? ctdOriginal;
+        const factUnit =
+          this.toFloat(fact?.PVTA_UNITARIO) ??
+          (factCtd > 0 ? factBase / factCtd : 0);
+        return {
+          unitPrice: this.roundMoney(factUnit),
+          baseTotal: this.roundMoney(factBase),
+          source: 'FACT_TICKET_SHP',
+          warning: null,
+        };
+      }
+    }
+
+    if (await this.hasTable('PV_ORD_CAMBIO_MERMA_TMP')) {
+      const parentRows = await this.dataSource.query(
+        `
+        SELECT TOP 1
+          TRY_CONVERT(FLOAT, t.PVTA_NUEVO) AS PVTA_UNITARIO
+        FROM dbo.PV_ORD_CAMBIO_MERMA_TMP t
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(t.NVA_IORD, '')))) = UPPER(@0)
+          AND TRY_CONVERT(FLOAT, t.PVTA_NUEVO) IS NOT NULL
+        ORDER BY ISNULL(t.FCN_MOD, t.FCN_ALT) DESC
+        `,
+        [iord],
+      );
+      const parent = this.firstRow(parentRows);
+      const parentUnit = this.toFloat(parent?.PVTA_UNITARIO);
+      if (parentUnit != null && parentUnit >= 0) {
+        return {
+          unitPrice: this.roundMoney(parentUnit),
+          baseTotal: this.roundMoney(parentUnit * ctdOriginal),
+          source: 'CAPTURA_PADRE',
+          warning: null,
+        };
+      }
+    }
+
+    return {
+      unitPrice: this.roundMoney(fallbackUnitPrice),
+      baseTotal: this.roundMoney(fallbackUnitPrice * ctdOriginal),
+      source: 'DAT_ART_FALLBACK',
+      warning:
+        'No se localizó precio histórico de la ORD; se usó precio unitario actual de catálogo por la cantidad original.',
+    };
   }
 
   private async resolveCambioMermaNewUnitPrice(
@@ -3737,11 +3974,6 @@ export class OrdenesTrabajoService {
   ) {
     const suc = this.normalizeText(sucRaw) ?? '';
     const art = this.normalizeText(artRaw) ?? '';
-    const artInfo = await this.resolveArticuloDatArt(suc, art);
-    const value = this.toFloat(artInfo?.pvta);
-    if (value != null && Number.isFinite(value) && value >= 0) {
-      return this.roundMoney(value);
-    }
     const fallbackValue = this.toFloat(fallback);
     if (
       fallbackValue != null &&
@@ -3750,23 +3982,12 @@ export class OrdenesTrabajoService {
     ) {
       return this.roundMoney(fallbackValue);
     }
+    const artInfo = await this.resolveArticuloDatArt(suc, art);
+    const value = this.toFloat(artInfo?.pvta);
+    if (value != null && Number.isFinite(value) && value >= 0) {
+      return this.roundMoney(value);
+    }
     return 0;
-  }
-
-  private async resolveCambioMermaOriginalUnitPrice(
-    iord: string,
-    originalRow: Record<string, unknown>,
-  ) {
-    const suc = this.normalizeText(originalRow.SUC) ?? '';
-    const idfol = this.normalizeText(originalRow.IDFOL) ?? '';
-    const artOriginal = this.normalizeText(originalRow.ART) ?? '';
-    const originalArtInfo = await this.resolveArticuloDatArt(suc, artOriginal);
-    return this.resolveTicketLogBaseUnitPrice(
-      iord,
-      idfol,
-      artOriginal,
-      originalArtInfo?.pvta ?? 0,
-    );
   }
 
   private async syncCambioMermaStagingDiferencia(
@@ -3792,6 +4013,76 @@ export class OrdenesTrabajoService {
         AND TRY_CONVERT(INT, t.TIPOM) = @1
       `,
       [iord, tipo, diferenciaEconomica, actor],
+    );
+  }
+
+  private async upsertCambioMermaPriceSnapshot(options: {
+    iord: string;
+    sourceIord: string;
+    idfol: string;
+    suc: string;
+    art: string;
+    ctd: number;
+    unitPrice: number;
+    source: string;
+    tipoTran: string;
+    ivaIntegrado: number | null;
+    rqfac: number | null;
+    actor: string;
+  }) {
+    if (!(await this.hasTable('PV_ORD_CAMBIO_MERMA_PRECIO'))) return;
+
+    const baseTotal = this.roundMoney(options.unitPrice * options.ctd);
+    await this.dataSource.query(
+      `
+      MERGE dbo.PV_ORD_CAMBIO_MERMA_PRECIO AS tgt
+      USING (SELECT @0 AS IORD) AS src
+        ON UPPER(LTRIM(RTRIM(ISNULL(tgt.IORD, '')))) =
+           UPPER(LTRIM(RTRIM(ISNULL(src.IORD, ''))))
+      WHEN MATCHED THEN
+        UPDATE SET
+          IORD_ORIGEN = @1,
+          IDFOL = @2,
+          SUC = @3,
+          ART = @4,
+          CTD = @5,
+          PVTA_UNITARIO = @6,
+          PVTAT_BASE = @7,
+          ORIGEN_PRECIO = @8,
+          TIPO_TRAN = @9,
+          IVA_INTEGRADO = @10,
+          REQF = @11,
+          USER_MOD = @12,
+          FCN_MOD = GETDATE()
+      WHEN NOT MATCHED THEN
+        INSERT (
+          IORD, IORD_ORIGEN, IDFOL, SUC, ART, CTD,
+          PVTA_UNITARIO, PVTAT_BASE, ORIGEN_PRECIO,
+          TIPO_TRAN, IVA_INTEGRADO, REQF,
+          USER_ALT, FCN_ALT, USER_MOD, FCN_MOD
+        )
+        VALUES (
+          @0, @1, @2, @3, @4, @5,
+          @6, @7, @8,
+          @9, @10, @11,
+          @12, GETDATE(), @12, GETDATE()
+        );
+      `,
+      [
+        options.iord,
+        options.sourceIord,
+        options.idfol,
+        options.suc,
+        options.art,
+        options.ctd,
+        options.unitPrice,
+        baseTotal,
+        options.source,
+        options.tipoTran,
+        options.ivaIntegrado,
+        options.rqfac,
+        options.actor,
+      ],
     );
   }
 

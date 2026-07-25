@@ -109,4 +109,5 @@ Enlaces relacionados:
 - catálogo estados ORD (2026-03): `DAT_EST_ORD.ESTA` se maneja como `FLOAT`; script `sql/2026-03-22_dat_est_ord_esta_float.sql`.
 - cambio/merma CTD nueva ORD (2026-07-09): la nueva ORD derivada debe persistir `CTD = CTD_C_M`; backend lo refuerza tras autorizar y el script `sql/2026-07-09_ordenes_trabajo_cambio_merma_nueva_ord_ctdcm_fix.sql` actualiza SPs y repara derivadas ya creadas con cantidad distinta.
 - cambio/merma autorización final (2026-07-09): `sp_ordenes_trabajo_registrar_ctrl_ctas_diff` debe generar `NDOC` sin reutilizar `DAT_CTR_DOC.DOC`; usar lock global y loop de existencia. Script: `sql/2026-07-09_ordenes_trabajo_ctrl_ctas_ndoc_global_fix.sql`.
-
+- cambio/merma base económica (2026-07-24): misma ART está permitida y siempre se calcula diferencia. Resolver en orden: snapshot ORD, ticket, factura, captura padre, fallback explícito a catálogo. `PVTA` es unitario; `PVTAT` es total histórico y se prorratea por `CTD_C_M / CTD`.
+- cambio/merma fiscal (2026-07-24): diferencia sellada debe usar el mismo cálculo en contexto, staging, autorización, SP, control de cuentas y PDF; respetar `DAT_SUC.IVA_INTEGRADO`, `REQF/RQFAC` y `AUT/ORIGEN_AUT`. Script: `sql/2026-07-24_ordenes_trabajo_cambio_merma_precio_snapshot_fix.sql`.

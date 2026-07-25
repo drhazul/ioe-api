@@ -99,6 +99,7 @@ Enlaces relacionados:
 - trazabilidad UI (app, 2026-03): en impresión de ticket PS, si existen formas no `EFECTIVO`, la app agrega al final voucher `SOPORTE RECEPCION PAGO` por cada forma no efectivo usando datos de `FORMAS_JSON`, totales y contexto del folio.
 - trazabilidad backend (2026-05-22): `sp_ps_pago_finalize` persiste `IMPD` por forma (`IMPP-IMPC`) en `PV_CTR_FOL_FORM(_SVR)`; evita duplicidad de importes cuando el pago PS usa múltiples comprobantes no-efectivo.
 - trazabilidad operación/soporte (2026-05-22): script `sql/2026-05-22_ps_fix_comprobantes_duplicados_df01_20260520_vf_0061.sql` repara caso `DF01-20260520-VF-0061` y re-sincroniza resumen de entrega OPV.
+- trazabilidad backend/BD (2026-07-24): `sp_ps_pago_finalize` calcula `IMPD` en variable por comprobante antes de insertar; `sql/2026-07-24_ps_fix_comprobantes_df01_20260723_vf_0022.sql` corrigió las dos formas de `DF01-20260723-VF-0022` y dejó entrega CHEQUE sin diferencia.
 - trazabilidad UI (app, 2026-03): el voucher PS incluye espacio en blanco para firma y renglón `Firma cliente` después de `FCN`.
 - trazabilidad UI (app, 2026-03): en PS, el voucher se imprime en un segundo PDF; al cerrar la vista previa del ticket principal, la app solicita confirmación y luego abre la vista previa del voucher.
 - trazabilidad UI (app, 2026-03): se agrega línea de recorte entre `RESUMEN DE ORDS` y `ORDS`; `GRACIAS POR SU CONFIANZA` se imprime después de `RESUMEN DE ORDS` y antes del recorte hacia `ORDS`.

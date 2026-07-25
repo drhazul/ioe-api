@@ -9,6 +9,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_ordenes_trabajo_merma
   @CTD_C_M FLOAT = NULL,
   @PVTA_NUEVO FLOAT = NULL,
   @IORD_NUEVA NVARCHAR(255) = NULL,
+  @DIFERENCIA_SELLADA FLOAT = NULL,
   @USER NVARCHAR(255) = NULL,
   @IP NVARCHAR(100) = NULL,
   @IS_ADMIN BIT = 0,
@@ -381,7 +382,10 @@ BEGIN
       SET @totalNuevo = ROUND(@importeNuevo, 2);
     END;
 
-    SET @diffVenta = ROUND(@totalNuevo - @totalOrig, 2);
+    SET @diffVenta = COALESCE(
+      @DIFERENCIA_SELLADA,
+      ROUND(@totalNuevo - @totalOrig, 2)
+    );
 
       EXEC dbo.sp_ordenes_trabajo_registrar_ctrl_ctas_diff
         @SUC = @sucOrd,

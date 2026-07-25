@@ -162,6 +162,7 @@ Enlaces relacionados:
 - impresión PS: vouchers por forma no `EFECTIVO`, segundo PDF, línea de recorte `RESUMEN DE ORDS` / `ORDS`.
 - PS comprobantes múltiples (2026-05-22): al finalizar pago, `sp_ps_pago_finalize` persiste `IMPD` por forma (`IMPP-IMPC`) para evitar duplicados cuando hay más de un comprobante no-efectivo en la misma transacción.
 - PS reparación incidente (2026-05-22): script `sql/2026-05-22_ps_fix_comprobantes_duplicados_df01_20260520_vf_0061.sql` corrige formas del caso `DF01-20260520-VF-0061` y re-sincroniza entrega OPV del día.
+- PS comprobantes múltiples (2026-07-24): el cálculo se materializa en `@impd` antes de `sp_executesql`; se corrige el despliegue que guardaba el total del folio en cada forma. El script `sql/2026-07-24_ps_fix_comprobantes_df01_20260723_vf_0022.sql` repara el folio `DF01-20260723-VF-0022` y resincroniza `DF01/5094`.
 - Panel PS: folios `PAGADO` abren directo pago.
 - Validaciones núcleo (clave para devoluciones también): alta exige supervisor `SUPERPV` (401/403), creación fallback con `sp_getapplock` ante `PK_CTR_FOL`, bloqueo facturación `ESTATUS='FACTURADO'`, bloqueo ORD configurable `PV_DEV_ORD_BLOCK_THRESHOLD`, staging `PV_DEV_DET_TMP`, preparación inserta solo `CTDD>0`, previsualización usa IVA/REQF de origen y aplica regla parcial solo-efectivo, pago valida forma(s) origen, sincroniza facturación con `sp_fact_sync_folio_vf` con reintento `FORCE=1` cuando aplica, limpia cabeceras DVF residuales y ejecuta `sp_mb51_transmitir_folio` al finalizar.
 
