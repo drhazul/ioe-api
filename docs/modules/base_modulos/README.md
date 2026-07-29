@@ -34,7 +34,7 @@ Enlaces relacionados:
 - Alta masiva de artículos (`sp_art_masiva_validate_batch`/`sp_art_masiva_commit_batch`): las validaciones se aplican por combinación `SUC + ART` y `SUC + UPC`, de modo que el mismo `ART` o `UPC` puede coexistir en distintas sucursales sin bloquear la carga, mientras que las duplicaciones se detectan dentro de la misma sucursal.
 - Seguridad upload Excel (2026-05-04): `datart`, `articulos/alta-masiva` y `conteos` validan origen de archivo antes de parsear (`extensión`, `MIME`, firma binaria y límites de tamaño/estructura), manteniendo la funcionalidad de carga y reduciendo riesgo de archivos no confiables.
 - Trazabilidad frontend (2026-03): `ioe_app` incorporó impresión de etiquetas en catálogo `DAT_ART` con selección local por renglón/filtrados y vista previa de impresión (PDF `76mm x 56mm`, una etiqueta por artículo), sin endpoints nuevos en API.
-- Regla EAN13 aplicada en app: de `UPC` se toman los 12 dígitos derechos (si excede) y se calcula dígito verificador para render de código de barras.
+- Regla EAN13 coordinada (corregida 2026-07-29): de `UPC` se toman siempre los primeros 12 dígitos sanitizados (con ceros a la izquierda si faltan) y se recalcula el verificador; API devuelve metadatos `EAN13`/validez y `sql/2026-07-29_datart_ean13_normalizacion.sql` instala `fn_datart_ean13_info` + `sp_datart_ean13_auditar` sin alterar `DAT_ART.UPC`.
 - Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` (`SUC = @SUC`) y `bloqNe=-1` para resolver visibilidad con `BLOQ IS NULL OR BLOQ <> -1` en backend (compatibilidad con datos legacy en `NULL`).
 - `/dat-form` (CRUD de catalogo de formas de pago sobre `DAT_FORM`; `ASPEL` resuelve `FormaPagoSAT`, y `TARJETA CREDITO` usa `04`)
 - Inventarios:

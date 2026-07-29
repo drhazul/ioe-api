@@ -38,7 +38,7 @@ Enlaces relacionados:
 - Seguridad upload Excel (2026-05-04): cargas en `datart`, `articulos/alta-masiva` y `conteos` validan fuente confiable (`extensión`, `MIME`, firma binaria y límites de tamaño/estructura) antes de parsear; lecturas de filas sensibles usan `header:1` para evitar llaves de objeto no confiables.
 - Edición (2026-04): `PATCH /datart/:suc/:art/:upc` permite actualizar `UPC`; la API rechaza con `409` cuando el `UPC` ya está asignado a otro `ART` de la misma sucursal.
 - Trazabilidad app (2026-03): `ioe_app` agregó impresión de etiquetas en `datart_page.dart` (selección local por renglón/filtrados + impresión masiva), usando endpoints existentes de `datart` sin cambios de contrato API.
-- Regla EAN13 en app: para `UPC` mayor a 12 dígitos, frontend usa los 12 dígitos derechos para calcular dígito verificador y renderizar código de barras en etiqueta `76mm x 56mm` (una página por artículo).
+- Regla EAN13 coordinada (corregida 2026-07-29): app y API sanitizan `UPC`, usan siempre los primeros 12 dígitos (o completan a la izquierda si hay menos) y recalculan el verificador. API expone `EAN13`, `UPC_TIENE_DIGITO_VERIFICADOR` y `UPC_DIGITO_VERIFICADOR_VALIDO`; SQL `2026-07-29_datart_ean13_normalizacion.sql` instala función y SP de auditoría sin modificar la clave `DAT_ART.UPC`.
 - Detalle cotización DAT_ART (2026-03-12): `GET /datart` soporta `sucExact=true` para resolver `SUC = @SUC` y `bloqNe=-1` para aplicar visibilidad `BLOQ IS NULL OR BLOQ <> -1` desde SQL/TypeORM; `ioe_app` usa estos parámetros en `detalle_cot`.
 - `datcatreg`: `DAT_CAT_REG` (`C_REGIMENFISCAL`, `DESCRIPCION`).
 - `datcatuso`: `DAT_CAT_USO` (`USOCFDI`, `DESCRIPCION`).

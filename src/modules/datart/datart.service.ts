@@ -24,6 +24,7 @@ import {
   assertTrustedExcelUpload,
   assertTrustedWorkbookBounds,
 } from '../../common/security/trusted-excel-upload';
+import { buildEan13FromUpc } from './ean13.util';
 
 type DatArtStageRow = {
   RENGLON: number;
@@ -94,6 +95,16 @@ export class DatArtService {
     @InjectRepository(DatArtEntity)
     private readonly repo: Repository<DatArtEntity>,
   ) {}
+
+  private withEan13Metadata<T extends { UPC?: unknown }>(row: T) {
+    const info = buildEan13FromUpc(String(row.UPC ?? ''));
+    return {
+      ...row,
+      EAN13: info?.ean13 ?? null,
+      UPC_TIENE_DIGITO_VERIFICADOR: info?.sourceHasCheckDigit ?? false,
+      UPC_DIGITO_VERIFICADOR_VALIDO: info?.sourceCheckDigitValid ?? null,
+    };
+  }
 
   async findAll(query?: {
     suc?: string;
@@ -283,14 +294,15 @@ export class DatArtService {
       if (withTotal) {
         const [items, total] = await qb.getManyAndCount();
         return {
-          items,
+          items: items.map((item) => this.withEan13Metadata(item)),
           total,
           page: page ?? 1,
           limit: limit ?? items.length,
         };
       }
 
-      return qb.getMany();
+      const items = await qb.getMany();
+      return items.map((item) => this.withEan13Metadata(item));
     }
 
     if (sucExact || bloqNe !== undefined) {
@@ -340,14 +352,15 @@ export class DatArtService {
       if (withTotal) {
         const [items, total] = await qb.getManyAndCount();
         return {
-          items,
+          items: items.map((item) => this.withEan13Metadata(item)),
           total,
           page: page ?? 1,
           limit: limit ?? items.length,
         };
       }
 
-      return qb.getMany();
+      const items = await qb.getMany();
+      return items.map((item) => this.withEan13Metadata(item));
     }
 
     const findOptions: FindManyOptions<DatArtEntity> = {
@@ -361,14 +374,15 @@ export class DatArtService {
     if (withTotal) {
       const [items, total] = await this.repo.findAndCount(findOptions);
       return {
-        items,
+        items: items.map((item) => this.withEan13Metadata(item)),
         total,
         page: page ?? 1,
         limit: limit ?? items.length,
       };
     }
 
-    return this.repo.find(findOptions);
+    const items = await this.repo.find(findOptions);
+    return items.map((item) => this.withEan13Metadata(item));
   }
 
   async findOne(suc: string, art: string, upc: string) {
@@ -377,7 +391,7 @@ export class DatArtService {
     });
     if (!row)
       throw new NotFoundException(`DAT_ART ${suc}-${art}-${upc} no existe`);
-    return row;
+    return this.withEan13Metadata(row);
   }
 
   async massiveUpload(
@@ -844,7 +858,8 @@ export class DatArtService {
       MODF: dto.MODF ?? null,
     });
 
-    return this.repo.save(entity);
+    const saved = await this.repo.save(entity);
+    return this.withEan13Metadata(saved);
   }
 
   async update(suc: string, art: string, upc: string, dto: UpdateDatArtDto) {
