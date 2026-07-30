@@ -30,6 +30,7 @@ Enlaces relacionados:
 - `FACTURA` (compat: `FACTURACION`, `PV_FACTURACION`, `FACT_IOE`) habilita gestión; `FACTURA_VIEW` habilita consulta.
 - Admin (`ADMIN_ROLE_IDS`/`ADMIN_NIVELES`, usuario `ADMIN`) tiene bypass total sin depender de `USR_MOD_SUC`.
 - Facturación base no usa `USR_MOD_SUC`; excepción: `REG_SINREQF` sí aplica alcance por sucursal.
+- La edición fiscal ligada a folio (`PATCH /facturacion/:idFol/cliente-fiscal`) sigue permiso de gestión `FACTURA`, valida relación cliente-folio y `ESTATUS='PENDIENTE'`; no reutiliza autorización de `FACTURA_MTTOCLIENTE`.
 - En unificación de facturación, no restringir por `user.suc` cuando ya hay permisos de gestión.
 
 ## Caja General: autorizacion por sucursal

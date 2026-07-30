@@ -10,6 +10,7 @@ Enlaces relacionados:
 ## Facturación: edición fiscal de cliente (2026-04-06)
 - `PATCH /factclientshp/:id` no debe cambiar `SUC` en updates de datos fiscales.
 - El backend ignora reasignación de sucursal en update (sin trigger de reversa, para permitir cambios manuales controlados en BD).
+- Desde validación de factura, usar `PATCH /facturacion/:idFol/cliente-fiscal` (2026-07-30): exige gestión `FACTURA`, folio `PENDIENTE` y cliente asociado; conserva `SUC` sin depender de asignaciones `FACTURA_MTTOCLIENTE`.
 
 ## Punto de venta: gestión de promociones/descuentos (2026-05-09)
 - módulo backend agregado:

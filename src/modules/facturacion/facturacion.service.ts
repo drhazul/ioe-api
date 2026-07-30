@@ -9,6 +9,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryFailedError } from 'typeorm';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { FactClientShpService } from '../factclientshp/factclientshp.service';
+import type { UpdateFactClientShpDto } from '../factclientshp/dto/update-factclientshp.dto';
 import { FacturifyClient } from './facturify.client';
 import { constants as fsConstants } from 'node:fs';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -92,6 +94,7 @@ export class FacturacionService {
     private readonly dataSource: DataSource,
     private readonly facturify: FacturifyClient,
     private readonly config: ConfigService,
+    private readonly factClientShpService: FactClientShpService,
   ) {}
 
   private getStorageBasePathCandidates() {
@@ -2455,6 +2458,40 @@ SET NUMERIC_ROUNDABORT OFF;`;
         total: totalDetalle,
       },
     };
+  }
+
+  async actualizarClienteFiscal(
+    idFol: string,
+    dto: UpdateFactClientShpDto,
+    user?: JwtPayload | null,
+  ) {
+    await this.assertFacturacionWriteAccess(
+      user,
+      'editar datos fiscales del cliente',
+    );
+    const normalizedIdFol = this.normalizeUpper(idFol);
+    if (!normalizedIdFol) {
+      throw new BadRequestException('IDFOL requerido');
+    }
+
+    const full = await this.getFolioData(normalizedIdFol);
+    const header = (full.header ?? {}) as Record<string, unknown>;
+    const cliente = (full.cliente ?? {}) as Record<string, unknown>;
+    const estatus = this.normalizeUpper(this.readRowValue(header, 'ESTATUS'));
+    if (estatus !== 'PENDIENTE') {
+      throw new BadRequestException(
+        `Folio ${normalizedIdFol} no está en estatus PENDIENTE`,
+      );
+    }
+
+    const clienteId = Number(this.readRowValue(cliente, 'IDC') ?? 0);
+    if (!Number.isFinite(clienteId) || clienteId <= 0) {
+      throw new NotFoundException(
+        `Folio ${normalizedIdFol} no tiene cliente fiscal asociado`,
+      );
+    }
+
+    return this.factClientShpService.updateFromFacturacion(clienteId, dto);
   }
 
   private async reenviarCorreoByUuid(

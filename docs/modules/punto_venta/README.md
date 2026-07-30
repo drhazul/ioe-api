@@ -10,6 +10,7 @@ Enlaces relacionados:
 ## Facturación: edición fiscal de cliente (2026-04-06)
 - Endpoint involucrado: `PATCH /factclientshp/:id`.
 - Regla backend: la edición fiscal conserva la `SUC` original de `FACT_CLIENT_SHP` (no se reasigna por contexto JWT).
+- Corrección por folio (2026-07-30): la pantalla de validación usa `PATCH /facturacion/:idFol/cliente-fiscal`, autorizado por gestión `FACTURA` y limitado al cliente asociado a un folio `PENDIENTE`; mantenimiento general mantiene su filtro propio.
 
 ## Gestión de promociones y descuentos (2026-05-09)
 - Módulo NestJS:

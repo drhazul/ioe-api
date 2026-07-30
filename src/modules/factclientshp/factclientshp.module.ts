@@ -9,5 +9,6 @@ import { UsrModSucEntity } from '../usr-mod-suc/usr-mod-suc.entity';
   imports: [TypeOrmModule.forFeature([FactClientShpEntity, UsrModSucEntity])],
   controllers: [FactClientShpController],
   providers: [FactClientShpService],
+  exports: [FactClientShpService],
 })
 export class FactClientShpModule {}

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -21,6 +22,7 @@ import { FacturacionUnificacionPreviewDto } from './dto/facturacion-unificacion-
 import { FacturacionUnificacionCreateDto } from './dto/facturacion-unificacion-create.dto';
 import { FacturacionUnificacionReverseDto } from './dto/facturacion-unificacion-reverse.dto';
 import { FacturacionIdFolValidateDto } from './dto/facturacion-idfol-validate.dto';
+import { UpdateFactClientShpDto } from '../factclientshp/dto/update-factclientshp.dto';
 
 @ApiTags('facturacion')
 @ApiBearerAuth('jwt-auth')
@@ -134,6 +136,15 @@ export class FacturacionController {
   @Get(':idFol/validar')
   validar(@Param('idFol') idFol: string, @CurrentUser() user: JwtPayload) {
     return this.service.validarFolio(idFol, user);
+  }
+
+  @Patch(':idFol/cliente-fiscal')
+  actualizarClienteFiscal(
+    @Param('idFol') idFol: string,
+    @Body() dto: UpdateFactClientShpDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.actualizarClienteFiscal(idFol, dto, user);
   }
 
   @Post(':idFol/emitir')

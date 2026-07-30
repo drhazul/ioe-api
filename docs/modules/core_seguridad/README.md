@@ -56,5 +56,6 @@ Opcionales:
 - `FACTURA_VIEW` habilita consulta.
 - Admin (`ADMIN_ROLE_IDS`/`ADMIN_NIVELES`, usuario `ADMIN`) tiene bypass total sin requerir `USR_MOD_SUC` ni enrolamiento extra.
 - Facturación base no usa `USR_MOD_SUC`; excepción: `REG_SINREQF` sí aplica alcance por sucursal para no-admin.
+- `PATCH /facturacion/:idFol/cliente-fiscal` usa gestión `FACTURA` y limita la mutación al cliente relacionado con el folio `PENDIENTE`; el endpoint general `PATCH /factclientshp/:id` conserva su alcance propio por sucursal.
 - En unificación (`/facturacion/unificaciones/*`), no restringir por `user.suc` cuando el usuario ya tiene permisos de gestión.
 

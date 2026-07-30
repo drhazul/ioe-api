@@ -276,13 +276,16 @@ export class FactClientShpService {
     );
   }
 
-  async findOne(id: number, user?: FactClientUser | null) {
+  async findOne(
+    id: number,
+    user?: FactClientUser | null,
+  ): Promise<FactClientShpEntity> {
     const table = this.repo.metadata.tablePath;
     if (this.isAdmin(user)) {
-      const rows = await this.repo.query(
+      const rows = (await this.repo.query(
         `SELECT TOP 1 * FROM ${table} WHERE IDC = @0`,
         [id],
-      );
+      )) as FactClientShpEntity[];
       if (!rows?.length)
         throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
       return rows[0];
@@ -295,12 +298,12 @@ export class FactClientShpService {
 
     const placeholders = allowedSucs.map((_, idx) => `@${idx + 1}`);
     const params = [id, ...allowedSucs];
-    const rows = await this.repo.query(
+    const rows = (await this.repo.query(
       `SELECT TOP 1 * FROM ${table} WHERE IDC = @0 AND UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) IN (${placeholders.join(
         ', ',
       )})`,
       params,
-    );
+    )) as FactClientShpEntity[];
     if (!rows?.length)
       throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
     return rows[0];
@@ -407,14 +410,34 @@ export class FactClientShpService {
     id: number,
     dto: UpdateFactClientShpDto,
     user?: FactClientUser | null,
-  ) {
-    const row = await this.findOne(id, user);
+  ): Promise<FactClientShpEntity> {
     const isAdmin = this.isAdmin(user);
     const suc = (user?.suc ?? '').trim();
     if (!isAdmin && !suc) {
       throw new ForbiddenException('Usuario sin sucursal');
     }
+    const row = await this.findOne(id, user);
+    return this.updateResolvedRow(row, dto);
+  }
 
+  async updateFromFacturacion(
+    id: number,
+    dto: UpdateFactClientShpDto,
+  ): Promise<FactClientShpEntity> {
+    const rows = (await this.repo.query(
+      `SELECT TOP 1 * FROM ${this.repo.metadata.tablePath} WHERE IDC = @0`,
+      [id],
+    )) as FactClientShpEntity[];
+    if (!rows?.length) {
+      throw new NotFoundException(`FACT_CLIENT_SHP ${id} no existe`);
+    }
+    return this.updateResolvedRow(rows[0], dto);
+  }
+
+  private async updateResolvedRow(
+    row: FactClientShpEntity,
+    dto: UpdateFactClientShpDto,
+  ): Promise<FactClientShpEntity> {
     const partial: Partial<FactClientShpEntity> = {};
     if (dto.CLIEN_UNI !== undefined) partial.CLIEN_UNI = dto.CLIEN_UNI ?? null;
     if (dto.TIPO !== undefined) partial.TIPO = dto.TIPO ?? null;
@@ -460,10 +483,10 @@ export class FactClientShpService {
       const trxRepo = manager.getRepository(FactClientShpEntity);
       const saved = await trxRepo.save(updated);
       await this.syncPendingFacSvrShapByCliente(manager, saved);
-      const rows = await manager.query(
+      const rows = (await manager.query(
         `SELECT TOP 1 * FROM ${this.repo.metadata.tablePath} WHERE IDC = @0`,
         [saved.IDC],
-      );
+      )) as FactClientShpEntity[];
       return rows?.[0] ?? saved;
     });
   }
