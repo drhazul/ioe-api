@@ -26,6 +26,7 @@ type UserContext = {
 @Injectable()
 export class SugeridosService {
   private static readonly MODULE_CODES = ['DAT_JAA_SUG', 'DAT_ORD_COMP'];
+  private static readonly CALCULO_SUCURSALES = ['DF01', 'DF04', 'DF05', 'DF06'];
   private static readonly INVENTORY_CHIEF_CODES = new Set([
     'INVJEF',
     'JEFE_INVENTARIOS',
@@ -39,7 +40,7 @@ export class SugeridosService {
       query.page,
       query.limit,
     );
-    const where: string[] = [];
+    const where: string[] = [this.validOrderHeaderPredicate('h')];
     const params: unknown[] = [];
 
     await this.pushSucScope(where, params, ctx, query.suc);
@@ -121,9 +122,9 @@ export class SugeridosService {
   }
 
   async calcular(query: SugeridosCalculoQueryDto, user: JwtPayload) {
-    const ctx = await this.resolveUserContext(user);
+    await this.resolveUserContext(user);
     const suc = this.normalizeText(query.suc).toUpperCase();
-    await this.assertSucAllowed(suc, ctx);
+    this.assertCalculoSucAllowed(suc);
     const page = Math.max(1, this.toInt(query.page) ?? 1);
     const limit = Math.min(500, Math.max(1, this.toInt(query.limit) ?? 100));
     const rows = await this.dataSource.query(
@@ -147,11 +148,11 @@ export class SugeridosService {
         query.prov ?? null,
         this.emptyToNull(query.marca),
         this.emptyToNull(query.tipo),
-        query.depa ?? null,
-        query.subd ?? null,
-        query.clas ?? null,
-        query.scla ?? null,
-        query.scla2 ?? null,
+        this.emptyToNull(query.depa),
+        this.emptyToNull(query.subd),
+        this.emptyToNull(query.clas),
+        this.emptyToNull(query.scla),
+        this.emptyToNull(query.scla2),
         query.dias ?? 90,
         page,
         limit,
@@ -367,9 +368,22 @@ export class SugeridosService {
     const header = await this.getHeader(nped);
     await this.assertDocAccess(header.suc, ctx);
     if (!['ABIERTO', 'PENDIENTE'].includes(header.estatus)) {
-      throw new BadRequestException('La orden ya no permite anulacion.');
+      throw new BadRequestException('La orden ya no permite cancelacion.');
     }
-    await this.setStatus(header.nped, 'ANULADO');
+    await this.setStatus(header.nped, 'CANCELADA');
+    return this.findOne(header.nped, user);
+  }
+
+  async marcarRecepcion(nped: string, estatus: string, user: JwtPayload) {
+    const ctx = await this.resolveUserContext(user);
+    const header = await this.getHeader(nped);
+    await this.assertDocAccess(header.suc, ctx);
+    if (header.estatus !== 'PROCESADO') {
+      throw new BadRequestException(
+        'Solo se cambia recepcion desde estatus PROCESADO.',
+      );
+    }
+    await this.setStatus(header.nped, estatus);
     return this.findOne(header.nped, user);
   }
 
@@ -392,7 +406,7 @@ export class SugeridosService {
       SELECT ID, RSOC, ALIAS
       FROM dbo.DAT_PROVD
       WHERE ISNULL(BLOQ, 0) <> -1
-      ORDER BY ALIAS, RSOC, ID
+      ORDER BY TRY_CONVERT(INT, ID), ID
       `,
     );
     return (rows ?? []).map((row: Record<string, unknown>) => ({
@@ -419,6 +433,19 @@ export class SugeridosService {
   async catalogArticulosProveedor(
     sucRaw: string,
     provRaw: string,
+    filters: {
+      search?: string;
+      searchBy?: string;
+      depa?: string;
+      subd?: string;
+      clas?: string;
+      scla?: string;
+      scla2?: string;
+      sph?: string;
+      cyl?: string;
+      adic?: string;
+      limit?: string;
+    },
     user: JwtPayload,
   ) {
     const ctx = await this.resolveUserContext(user);
@@ -428,9 +455,45 @@ export class SugeridosService {
       throw new BadRequestException('Proveedor requerido.');
     }
     await this.assertSucAllowed(suc, ctx);
+    const search = this.normalizeText(filters.search).toUpperCase();
+    const searchBy = this.normalizeText(filters.searchBy).toUpperCase();
+    const limit = Math.min(100, Math.max(1, this.toInt(filters.limit) ?? 50));
+    const where: string[] = [
+      `UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @0`,
+      `ISNULL(a.BLOQ, 0) <> -1`,
+      `(
+          TRY_CONVERT(INT, a.PROV_1) = @1
+          OR TRY_CONVERT(INT, a.PROV_2) = @1
+          OR TRY_CONVERT(INT, a.PROV_3) = @1
+        )`,
+    ];
+    const params: unknown[] = [suc, prov];
+    if (search) {
+      const param = `@${params.length}`;
+      if (searchBy === 'ART') {
+        where.push(`UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) LIKE ${param}`);
+      } else if (searchBy === 'UPC') {
+        where.push(`UPPER(LTRIM(RTRIM(ISNULL(a.UPC, '')))) LIKE ${param}`);
+      } else if (searchBy === 'DES') {
+        where.push(`UPPER(LTRIM(RTRIM(ISNULL(a.DES, '')))) LIKE ${param}`);
+      } else {
+        where.push(
+          `(UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) LIKE ${param} OR UPPER(LTRIM(RTRIM(ISNULL(a.UPC, '')))) LIKE ${param} OR UPPER(LTRIM(RTRIM(ISNULL(a.DES, '')))) LIKE ${param})`,
+        );
+      }
+      params.push(`%${search}%`);
+    }
+    this.pushOptionalDatArtFilter(where, params, 'a.DEPA', filters.depa);
+    this.pushOptionalDatArtFilter(where, params, 'a.SUBD', filters.subd);
+    this.pushOptionalDatArtFilter(where, params, 'a.CLAS', filters.clas);
+    this.pushOptionalDatArtFilter(where, params, 'a.SCLA', filters.scla);
+    this.pushOptionalDatArtFilter(where, params, 'a.SCLA2', filters.scla2);
+    this.pushOptionalDatArtFilter(where, params, 'a.SPH', filters.sph);
+    this.pushOptionalDatArtFilter(where, params, 'a.CYL', filters.cyl);
+    this.pushOptionalDatArtFilter(where, params, 'a.ADIC', filters.adic);
     const rows = await this.dataSource.query(
       `
-      SELECT
+      SELECT TOP (@${params.length})
         a.ART,
         a.DES,
         a.UPC,
@@ -442,16 +505,10 @@ export class SugeridosService {
           ELSE a.CTOP
         END AS CTO
       FROM dbo.DAT_ART a
-      WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @0
-        AND ISNULL(a.BLOQ, 0) <> -1
-        AND (
-          TRY_CONVERT(INT, a.PROV_1) = @1
-          OR TRY_CONVERT(INT, a.PROV_2) = @1
-          OR TRY_CONVERT(INT, a.PROV_3) = @1
-        )
+      WHERE ${where.join(' AND ')}
       ORDER BY a.DES, a.ART
       `,
-      [suc, prov],
+      [...params, limit],
     );
     return (rows ?? []).map((row: Record<string, unknown>) => ({
       art: this.normalizeText(row.ART),
@@ -460,6 +517,20 @@ export class SugeridosService {
       unComp: this.normalizeText(row.UN_COMP),
       cto: this.toMoney(row.CTO) ?? 0,
     }));
+  }
+
+  private pushOptionalDatArtFilter(
+    where: string[],
+    params: unknown[],
+    column: string,
+    raw: unknown,
+  ) {
+    const value = this.normalizeText(raw).toUpperCase();
+    if (!value) return;
+    where.push(
+      `UPPER(LTRIM(RTRIM(ISNULL(${column}, '')))) = @${params.length}`,
+    );
+    params.push(value);
   }
 
   private async getHeader(npedRaw: string) {
@@ -478,6 +549,7 @@ export class SugeridosService {
         WHERE d.NPED = h.NPED AND ISNULL(d.BLOQ, 0) <> -1
       ) det
       WHERE h.NPED = @0
+        AND ${this.validOrderHeaderPredicate('h')}
       `,
       [nped],
     );
@@ -505,6 +577,11 @@ export class SugeridosService {
       WHERE UPPER(LTRIM(RTRIM(SUC))) = @0
         AND LTRIM(RTRIM(ART)) = @1
         AND ISNULL(BLOQ, 0) <> -1
+        AND (
+          TRY_CONVERT(INT, PROV_1) = @2
+          OR TRY_CONVERT(INT, PROV_2) = @2
+          OR TRY_CONVERT(INT, PROV_3) = @2
+        )
       `,
       [
         this.normalizeText(suc).toUpperCase(),
@@ -587,6 +664,20 @@ export class SugeridosService {
     params.push(...allowed);
   }
 
+  private validOrderHeaderPredicate(alias: string) {
+    return `NOT (
+      UPPER(LTRIM(RTRIM(ISNULL(${alias}.ESTATUS, '')))) = 'ABIERTO'
+      AND ${alias}.NART IS NULL
+      AND ${alias}.IMPP IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM dbo.REC_DET_PED orphan_det
+        WHERE orphan_det.NPED = ${alias}.NPED
+          AND ISNULL(orphan_det.BLOQ, 0) <> -1
+      )
+    )`;
+  }
+
   private async resolveUserContext(
     user?: JwtPayload | null,
   ): Promise<UserContext> {
@@ -640,11 +731,13 @@ export class SugeridosService {
     );
     const allowed = Array.from(
       new Set(
-        (rows ?? [])
-          .map((row: Record<string, unknown>) =>
+        [
+          ...(rows ?? []).map((row: Record<string, unknown>) =>
             this.normalizeText(row.SUC).toUpperCase(),
-          )
-          .filter(Boolean),
+          ),
+          ctx.suc,
+          ...SugeridosService.CALCULO_SUCURSALES,
+        ].filter(Boolean),
       ),
     );
     if (allowed.length) return allowed;
@@ -657,6 +750,12 @@ export class SugeridosService {
     const normalized = this.normalizeText(suc).toUpperCase();
     const allowed = await this.resolveAuthorizedSucs(ctx);
     if (allowed.includes(normalized)) return;
+    throw new ForbiddenException(`No autorizado para la sucursal ${suc}.`);
+  }
+
+  private assertCalculoSucAllowed(suc: string) {
+    const normalized = this.normalizeText(suc).toUpperCase();
+    if (SugeridosService.CALCULO_SUCURSALES.includes(normalized)) return;
     throw new ForbiddenException(`No autorizado para la sucursal ${suc}.`);
   }
 

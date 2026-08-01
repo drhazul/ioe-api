@@ -9,6 +9,7 @@
 - Ruta base: `/sugeridos`.
 - Codigo front esperado: `DAT_JAA_SUG`.
 - Tablas oficiales para O.C.: `REC_CAB_PED` y `REC_DET_PED`; no crear tablas duplicadas de pedidos.
+- El listado de O.C. debe excluir cabeceras legacy huérfanas `ABIERTO` sin detalle activo y con `NART/IMPP` nulos; las órdenes creadas por el módulo deben inicializar esos totales en cero cuando no tengan artículos.
 - El calculo debe usar `DAT_ART`, stock acumulado desde `DAT_MB51` y ventas por movimientos relacionados como `VTAS` en `DAT_CMOV`, sin tablas temporales persistentes.
 - Validar alcance por sucursal con `USR_MOD_SUC` para `DAT_JAA_SUG`, con fallback a `SUC` del token cuando no existan asignaciones.
 
