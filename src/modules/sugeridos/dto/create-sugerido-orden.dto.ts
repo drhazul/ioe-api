@@ -1,5 +1,4 @@
 import {
-  ArrayMinSize,
   IsArray,
   IsInt,
   IsNumber,
@@ -45,7 +44,6 @@ export class CreateSugeridoOrdenDto {
   sugerido?: boolean;
 
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateSugeridoOrdenItemDto)
   items!: CreateSugeridoOrdenItemDto[];

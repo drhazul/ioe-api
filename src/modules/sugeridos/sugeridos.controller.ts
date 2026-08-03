@@ -60,9 +60,37 @@ export class SugeridosController {
   articulosProveedor(
     @Query('suc') suc: string,
     @Query('prov') prov: string,
+    @Query('search') search: string,
+    @Query('searchBy') searchBy: string,
+    @Query('depa') depa: string,
+    @Query('subd') subd: string,
+    @Query('clas') clas: string,
+    @Query('scla') scla: string,
+    @Query('scla2') scla2: string,
+    @Query('sph') sph: string,
+    @Query('cyl') cyl: string,
+    @Query('adic') adic: string,
+    @Query('limit') limit: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.catalogArticulosProveedor(suc, prov, user);
+    return this.service.catalogArticulosProveedor(
+      suc,
+      prov,
+      {
+        search,
+        searchBy,
+        depa,
+        subd,
+        clas,
+        scla,
+        scla2,
+        sph,
+        cyl,
+        adic,
+        limit,
+      },
+      user,
+    );
   }
 
   @Post()
@@ -129,5 +157,30 @@ export class SugeridosController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.anular(nped, dto, user);
+  }
+
+  @Post(':nped/recepcion-parcial')
+  recepcionParcial(
+    @Param('nped') nped: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.marcarRecepcion(nped, 'RECEPCION PARCIAL', user);
+  }
+
+  @Post(':nped/recepcion-total')
+  recepcionTotal(@Param('nped') nped: string, @CurrentUser() user: JwtPayload) {
+    return this.service.marcarRecepcion(nped, 'RECEPCION TOTAL', user);
+  }
+
+  @Post(':nped/recepcion-diferencias')
+  recepcionDiferencias(
+    @Param('nped') nped: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.marcarRecepcion(
+      nped,
+      'RECEPCION CON DIFERENCIAS',
+      user,
+    );
   }
 }

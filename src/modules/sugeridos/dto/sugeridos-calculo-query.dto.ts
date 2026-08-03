@@ -1,12 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class SugeridosCalculoQueryDto {
   @IsString()
@@ -26,29 +19,24 @@ export class SugeridosCalculoQueryDto {
   tipo?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  depa?: number;
+  @IsString()
+  depa?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  subd?: number;
+  @IsString()
+  subd?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  clas?: number;
+  @IsString()
+  clas?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  scla?: number;
+  @IsString()
+  scla?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  scla2?: number;
+  @IsString()
+  scla2?: string;
 
   @IsOptional()
   @Type(() => Number)

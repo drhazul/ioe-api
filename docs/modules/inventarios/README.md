@@ -5,6 +5,7 @@
 - Nuevo modulo `SugeridosModule` registrado en `AppModule` con ruta base `/sugeridos` y codigo front `DAT_JAA_SUG`.
 - `GET /sugeridos/calculo` ejecuta `sp_sugeridos_calcular`, reemplazando consultas Access encadenadas con CTEs sobre `DAT_ART`, `DAT_MB51` y clases de venta en `DAT_CMOV.RELACION='VTAS'`.
 - `POST /sugeridos` ejecuta `sp_sugeridos_crear_oc` para crear cabecera/detalle en `REC_CAB_PED` y `REC_DET_PED`; el flujo operativo usa `ABIERTO -> PENDIENTE -> PROCESADO` y `ANULADO`.
+- `GET /sugeridos` excluye cabeceras legacy huérfanas `ABIERTO` sin detalle activo y con `NART/IMPP` nulos, para no mostrar documentos vacíos ajenos al flujo del módulo.
 - Catalogos: `/sugeridos/catalogos/sucursales`, `/sugeridos/catalogos/proveedores` y `/sugeridos/catalogos/estatus`.
 - Script operativo: `sql/2026-07-10_sugeridos_compra_modulo_base.sql`.
 
