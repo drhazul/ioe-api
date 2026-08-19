@@ -593,7 +593,10 @@ BEGIN
     DELETE FROM dbo.FACT_TICKET_SHP
     WHERE IDFOL = @idfolActual;
 
-    SET @cantidadExpr = N'(' + @remainingExpr + N')';
+    -- TICKET_REL de contramovimiento termina en "|<ID de linea positiva>".
+    -- Descontar esa cantidad de linea positiva evita facturar articulo ya
+    -- cancelado, sin alterar total cobrado/neto de PV_CTR_FOL_ASVR.
+    SET @cantidadExpr = N'R.REMAINING_CTD';
     SET @valorUnitExpr = N'CASE WHEN @pIVA = -1 THEN ROUND(ISNULL(T.PVTA, 0) / 1.16, 6) ELSE ROUND(ISNULL(T.PVTA, 0), 6) END';
     SET @importeExpr = N'ROUND((' + @cantidadExpr + N') * (' + @valorUnitExpr + N'), 2)';
 
@@ -687,8 +690,27 @@ BEGIN
         LEFT JOIN dbo.DAT_ART A
           ON A.ART = T.ART
          AND A.SUC = @pSUC
-        WHERE T.IDFOL = @pIDFOL
-          AND (' + @remainingExpr + N') > 0;
+        OUTER APPLY (
+          SELECT COALESCE(SUM(ABS(TRY_CONVERT(MONEY, C.CTD))), 0) AS CANCELLED_QTY
+          FROM dbo.PV_TICKET_LOG C
+          WHERE C.IDFOL = T.IDFOL
+            AND TRY_CONVERT(MONEY, C.CTD) < 0
+            AND CHARINDEX(''|'', LTRIM(RTRIM(ISNULL(C.TICKET_REL, '''')))) > 0
+            AND LTRIM(RTRIM(SUBSTRING(
+              C.TICKET_REL,
+              CHARINDEX(''|'', C.TICKET_REL) + 1,
+              255
+            ))) = LTRIM(RTRIM(ISNULL(T.ID, '''')))
+        ) C
+        CROSS APPLY (
+          SELECT CASE
+            WHEN (' + @remainingExpr + N') - C.CANCELLED_QTY > 0
+              THEN (' + @remainingExpr + N') - C.CANCELLED_QTY
+            ELSE 0
+          END AS REMAINING_CTD
+        ) R
+         WHERE T.IDFOL = @pIDFOL
+           AND R.REMAINING_CTD > 0;
         SELECT @pROWS = @@ROWCOUNT;';
 
       EXEC sys.sp_executesql
