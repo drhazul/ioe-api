@@ -282,7 +282,17 @@ export class SugeridosService {
     const ctx = await this.resolveUserContext(user);
     const header = await this.getHeader(nped);
     await this.assertDocAccess(header.suc, ctx);
-    this.assertEditable(header.estatus);
+    const rejectedQuantityOnly = header.estatus === 'RECHAZADO';
+    if (rejectedQuantityOnly) {
+      this.assertInventoryChiefRole(ctx);
+      if (dto.ctdped == null || dto.cto != null || dto.uncom != null) {
+        throw new BadRequestException(
+          'Una orden rechazada solo permite modificar la cantidad.',
+        );
+      }
+    } else {
+      this.assertEditable(header.estatus);
+    }
     const sets: string[] = [];
     const params: unknown[] = [];
     if (dto.ctdped != null) {
@@ -367,11 +377,127 @@ export class SugeridosService {
     const ctx = await this.resolveUserContext(user);
     const header = await this.getHeader(nped);
     await this.assertDocAccess(header.suc, ctx);
-    if (!['ABIERTO', 'PENDIENTE'].includes(header.estatus)) {
+    if (header.estatus === 'VALIDADO') {
+      this.assertInventoryChiefRole(ctx);
+      const blockers = await this.dataSource.query(
+        `
+        SELECT TOP 1 1 AS EXISTE
+        FROM dbo.REC_DET_PED
+        WHERE NPED = @0 AND ISNULL(BLOQ, 0) <> -1 AND ISNULL(CTDREC, 0) > 0
+        UNION ALL
+        SELECT TOP 1 1 AS EXISTE
+        FROM dbo.REC_CTRL_DOC_REC r
+        WHERE r.NPED = @0
+          AND UPPER(LTRIM(RTRIM(ISNULL(r.ESTATUS_REC, '')))) = 'CONTABILIZADO'
+        UNION ALL
+        SELECT TOP 1 1 AS EXISTE
+        FROM dbo.REC_CTRL_DOC_REC r
+        JOIN dbo.DAT_MB51 m
+          ON LTRIM(RTRIM(ISNULL(m.DOCP, ''))) = LTRIM(RTRIM(r.DOCREC))
+        WHERE r.NPED = @0
+        `,
+        [header.nped],
+      );
+      if (blockers?.length) {
+        throw new BadRequestException(
+          'La orden ya tiene movimientos de recepción y no puede cancelarse.',
+        );
+      }
+      await this.dataSource.transaction(async (manager) => {
+        await manager.query(
+          `
+          UPDATE dbo.REC_CTRL_DOC_REC
+          SET ESTATUS_REC = 'CANCELADO'
+          WHERE NPED = @0
+            AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS_REC, '')))) = 'VALIDADO'
+          `,
+          [header.nped],
+        );
+        await manager.query(
+          `
+          UPDATE dbo.REC_CAB_PED
+          SET ESTATUS = 'ANULADO'
+          WHERE NPED = @0
+            AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS, '')))) = 'VALIDADO'
+          `,
+          [header.nped],
+        );
+      });
+      return this.findOne(header.nped, user);
+    }
+    if (['PROCESADO', 'RECHAZADO'].includes(header.estatus)) {
+      this.assertInventoryChiefRole(ctx);
+      const received = await this.dataSource.query(
+        `
+        SELECT TOP 1 1 AS EXISTE
+        FROM dbo.REC_DET_PED
+        WHERE NPED = @0 AND ISNULL(BLOQ, 0) <> -1 AND ISNULL(CTDREC, 0) > 0
+        UNION ALL
+        SELECT TOP 1 1 AS EXISTE
+        FROM dbo.REC_CTRL_DOC_REC
+        WHERE NPED = @0
+          AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS_REC, '')))) NOT IN ('RECHAZADO', 'CANCELADO')
+        `,
+        [header.nped],
+      );
+      if (received?.length) {
+        throw new BadRequestException(
+          'La orden ya tiene recepción registrada y no puede cancelarse.',
+        );
+      }
+    } else if (!['ABIERTO', 'PENDIENTE'].includes(header.estatus)) {
       throw new BadRequestException('La orden ya no permite cancelacion.');
     }
-    await this.setStatus(header.nped, 'CANCELADA');
+    await this.setStatus(header.nped, 'ANULADO');
     return this.findOne(header.nped, user);
+  }
+
+  async devolverSucursal(
+    nped: string,
+    dto: SugeridoActionDto,
+    user: JwtPayload,
+  ) {
+    const ctx = await this.resolveUserContext(user);
+    this.assertInventoryChiefRole(ctx);
+    const header = await this.getHeader(nped);
+    await this.assertDocAccess(header.suc, ctx);
+    if (header.estatus !== 'RECHAZADO') {
+      throw new BadRequestException(
+        'Solo se pueden devolver ordenes en estatus RECHAZADO.',
+      );
+    }
+    const motivo = this.normalizeText(dto.obs);
+    if (!motivo) {
+      throw new BadRequestException('Capture el motivo de devolucion.');
+    }
+    const receipts = await this.dataSource.query(
+      `
+      SELECT TOP 1 DOCREC
+      FROM dbo.REC_CTRL_DOC_REC
+      WHERE NPED = @0
+        AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS_REC, '')))) = 'RECHAZADO'
+      ORDER BY COALESCE(FCN_AUTORIZA, FCN_FISICA, FCNC) DESC, DOCREC DESC
+      `,
+      [header.nped],
+    );
+    const docrec = this.normalizeText(receipts?.[0]?.DOCREC);
+    if (!docrec) {
+      throw new BadRequestException(
+        'La orden no tiene una recepcion rechazada para devolver.',
+      );
+    }
+    try {
+      await this.dataSource.query(
+        `EXEC dbo.sp_rec_recepcion_devolver_sucursal @DOCREC=@0,@USR=@1,@MOTIVO=@2`,
+        [docrec, ctx.username, motivo],
+      );
+      return this.findOne(header.nped, user);
+    } catch (error) {
+      this.throwSqlBusinessError(
+        error,
+        'No se pudo devolver la orden a la sucursal.',
+      );
+    }
   }
 
   async marcarRecepcion(nped: string, estatus: string, user: JwtPayload) {

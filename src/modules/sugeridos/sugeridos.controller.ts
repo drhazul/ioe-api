@@ -159,6 +159,15 @@ export class SugeridosController {
     return this.service.anular(nped, dto, user);
   }
 
+  @Post(':nped/devolver-sucursal')
+  devolverSucursal(
+    @Param('nped') nped: string,
+    @Body() dto: SugeridoActionDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.devolverSucursal(nped, dto, user);
+  }
+
   @Post(':nped/recepcion-parcial')
   recepcionParcial(
     @Param('nped') nped: string,

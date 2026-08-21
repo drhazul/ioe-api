@@ -1,0 +1,86 @@
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_PADDING ON;
+SET ANSI_WARNINGS ON;
+SET ARITHABORT ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET NUMERIC_ROUNDABORT OFF;
+GO
+
+BEGIN TRAN;
+DECLARE @lock int;
+EXEC @lock=sys.sp_getapplock
+  @Resource='DAT_REC_ELIMINAR_PRUEBA_70000288004',
+  @LockMode='Exclusive',
+  @LockOwner='Transaction',
+  @LockTimeout=15000;
+IF @lock<0 THROW 51000,'No fue posible bloquear la eliminación de la recepción de prueba.',1;
+
+DECLARE @docrec nvarchar(510)=N'70000288004';
+DECLARE @nped nvarchar(510)=N'450002277';
+
+IF NOT EXISTS(
+  SELECT 1 FROM dbo.REC_CTRL_DOC_REC
+  WHERE DOCREC=@docrec AND NPED=@nped AND ESTATUS_REC='CONTABILIZADO'
+)
+  THROW 51000,'La recepción de prueba no existe o ya no está contabilizada.',1;
+
+IF (SELECT COUNT(*) FROM dbo.REC_CTO_HIST WHERE DOCREC=@docrec)<>1
+  THROW 51000,'La recepción ya no tiene el único renglón esperado.',1;
+
+IF NOT EXISTS(
+  SELECT 1
+  FROM dbo.REC_CTO_HIST h
+  JOIN dbo.DAT_MB51 m ON m.IDPD=h.IDREC AND m.DOCP=h.DOCREC
+  WHERE h.DOCREC=@docrec AND h.IDPED='1-450002277' AND h.ART='3013131'
+    AND ISNULL(h.CTD_ACEP,h.CTD)=1 AND m.CLSM=101 AND m.CTDA=1
+    AND m.SUC='DF01' AND m.ALMACEN='002'
+)
+  THROW 51000,'El movimiento 101 ya no coincide con la recepción de prueba.',1;
+
+DECLARE @qty float=(
+  SELECT SUM(ISNULL(CTD_ACEP,CTD)) FROM dbo.REC_CTO_HIST WHERE DOCREC=@docrec
+);
+IF @qty<>1 THROW 51000,'La cantidad a revertir ya no es la esperada.',1;
+IF NOT EXISTS(SELECT 1 FROM dbo.DAT_ART WHERE SUC='DF01' AND ART='3013131' AND STOCK>=@qty)
+  THROW 51000,'El stock actual no permite revertir la recepción.',1;
+
+UPDATE dbo.DAT_ART
+SET STOCK=ISNULL(STOCK,0)-@qty
+WHERE SUC='DF01' AND ART='3013131';
+
+UPDATE dbo.REC_DET_PED
+SET CTDREC=CASE WHEN ISNULL(CTDREC,0)>=@qty THEN ISNULL(CTDREC,0)-@qty ELSE 0 END,
+    RECI=0,
+    DREC=NULL
+WHERE NPED=@nped AND IDPED='1-450002277' AND DREC=@docrec;
+
+UPDATE dbo.REC_CAB_PED
+SET ESTATUS=CASE
+      WHEN EXISTS(
+        SELECT 1 FROM dbo.REC_DET_PED d
+        WHERE d.NPED=@nped AND ISNULL(d.BLOQ,0)<>-1 AND ISNULL(d.CTDREC,0)>0
+      ) THEN 'PARCIAL'
+      ELSE 'PROCESADO'
+    END,
+    FCNR=NULL
+WHERE NPED=@nped;
+
+DELETE m
+FROM dbo.DAT_MB51 m
+JOIN dbo.REC_CTO_HIST h ON h.IDREC=m.IDPD AND h.DOCREC=m.DOCP
+WHERE h.DOCREC=@docrec;
+DELETE dbo.DAT_CTR_DOC WHERE DOC=@docrec;
+DELETE dbo.REC_GUIA_PED WHERE DOCREC=@docrec;
+DELETE dbo.REC_INCI_PED WHERE DOCREC=@docrec;
+DELETE dbo.AUDIT_LOG
+WHERE MODULO='DAT_REC' AND ENTIDAD='REC_CTRL_DOC_REC' AND ENTIDAD_ID=@docrec;
+DELETE dbo.REC_CTO_HIST WHERE DOCREC=@docrec;
+DELETE dbo.REC_CTRL_DOC_REC WHERE DOCREC=@docrec AND NPED=@nped;
+
+COMMIT;
+
+SELECT @docrec DOCREC_ELIMINADO,@nped NPED,@qty STOCK_REVERTIDO;
+GO

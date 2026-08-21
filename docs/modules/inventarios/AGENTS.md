@@ -4,7 +4,34 @@
 - Modulos backend de inventario operativo: `datart`, `datmb51`, `datmb52`, `dat-cmov`, `mermas`, `transferencias` y `sugeridos`.
 - Persistencia MSSQL con tablas legacy `DAT_ART`, `DAT_MB51`, `DAT_MB51S`, `DAT_CMOV` y tablas de proceso especificas.
 
+## Recepción de mercancías
+- Módulo API: `src/modules/recepciones`; ruta base `/recepciones`; código front `DAT_REC`.
+- Reutilizar `REC_CAB_PED/REC_DET_PED` y `REC_CTRL_DOC_REC/REC_CTO_HIST`; no crear cabeceras o detalles paralelos.
+- La recepción física no afecta inventario. Solo `sp_rec_recepcion_autorizar` registra `DAT_CTR_DOC`, movimiento `DAT_MB51` 101 en almacén 002 y actualiza `DAT_ART.STOCK`.
+- Los DTO de sucursal omiten costos y tipo/folio documental; la restricción se aplica en backend.
+- Mantener idempotencia, `sp_getapplock`, transacción y auditoría `AUDIT_LOG` en acciones críticas.
+- El listado pendiente acepta O.C. y proveedor como filtros separados y queda limitado a `DF01/DF04/DF05/DF06`.
+- El selector de proveedor usa `/recepciones/catalogos/proveedores`, ordenado por ID numérico igual que en Órdenes de compra, y filtra por `prov`.
+- Histórico filtra en servidor por O.C., proveedor, fecha y sucursal; no debe exponer filtro de estatus en la UI.
+- `ENCARGADO DE SUCURSAL` (`IDROL=13008`) solo puede consultar su `USUARIO.SUC`; debe rechazarse su acceso directo a Histórico e Indicadores.
+- Las recepciones del Encargado terminan automáticamente en `VALIDADO`; excluirlas de su listado, mantenerlas activas para Jefe/Analista y permitir autorización/rechazo exclusivamente a Inventarios.
+- La captura del Encargado se persiste como borrador por NPED mediante los SP de borrador; al crear la recepción física se elimina el borrador obsoleto.
+- El detalle de una O.C. debe proyectar totales y la recepción activa; una recepción `VALIDADO` sincroniza también la cabecera de la O.C. a `VALIDADO` hasta la autorización o contabilización.
+- Solo `JEFE DE INVENTARIOS` (`IDROL=2`) puede ejecutar el ajuste de Cantidad física en un documento `VALIDADO`; el SP debe actualizar histórico, importe, incidencias y auditoría sin afectar stock antes de contabilizar.
+- `DOCREC` debe ser único también frente a `DAT_CTR_DOC.DOC` y `DAT_MB51.DOCP`; `REC_CTO_HIST.IDREC` usa el formato `REC-{DOCREC}-{fila}` y es la clave idempotente de `DAT_MB51.IDPD`.
+- `GET /recepciones/:nped` debe exponer campos de jerarquía y la ruta descriptiva completa usando los catálogos JRQ existentes; no duplicar esos catálogos ni persistir resúmenes derivados.
+- Una creación del Encargado con tipo `RECHAZO` debe ejecutar el SP de rechazo existente, exigir observaciones como motivo desde la UI, quedar activa para consulta administrativa y excluirse del listado operativo del Encargado.
+- Conservar el contrato documental existente: `FOLIO_DOC` máximo 100 caracteres, `GUIA` libre máximo 100 y `PAQUETERIA` máximo 120; los folios adicionales se serializan con ` | ` y no justifican crear otra tabla.
+- Edición documental y costo en `VALIDADO` son exclusivas del Jefe (`IDROL=2`) y deben ejecutarse mediante los SP versionados con bloqueo, transacción y auditoría.
+- Diferenciar rechazo físico del Encargado (`RECHAZADO`) de devolución administrativa (`DEVUELTO`): esta última reconstruye `REC_BORRADOR_REC*`, devuelve la O.C. a `PROCESADO` y no genera ni revierte inventario.
+
 ## Planeacion y sugeridos de compra
+- El API conserva `PARCIAL` en `ESTATUS_SUG`; su ocultamiento en el filtro de Órdenes de compra aplica solo en Flutter para Jefe (`IDROL=2`) y Analista (`IDROL=9005`).
+- `ESTATUS_SUG` incluye `RECHAZADO`. Al rechazar una recepción, el SP sincroniza la cabecera de O.C.; `PATCH /sugeridos/:nped/detalle/:idped` acepta exclusivamente `ctdped` para ese estado y solo para el Jefe. Cancelar desde `RECHAZADO` conserva las validaciones de recepción/cantidades existentes.
+- Para retornar un rechazo, el Jefe usa `POST /sugeridos/:nped/devolver-sucursal` con `obs` obligatorio. El SP admite `RECHAZADO`, verifica ausencia de MB51, pasa la recepción a `DEVUELTO`, la O.C. a `PROCESADO` y reinicia cantidades/estatus del borrador.
+- `sp_rec_recepcion_solicitar` debe sincronizar `REC_CTRL_DOC_REC.ESTATUS_REC` y `REC_CAB_PED.ESTATUS` a `VALIDADO`. Jefe/Analista incluyen ese estado en la cola DAT_REC; Encargado no lo lista.
+- `ESTATUS_SUG` incluye `VALIDADO` para que el módulo de Órdenes de compra del Jefe pueda filtrar las recepciones pendientes de contabilización.
+- La cancelación de una O.C. `VALIDADO` es exclusiva del Jefe. Debe bloquearse si existe `CTDREC`, recepción `CONTABILIZADO` o cualquier `DAT_MB51` ligado al `DOCREC`; sin bloqueos, actualizar recepción a `CANCELADO` y cabecera a `ANULADO` dentro de la misma transacción.
 - Modulo API: `src/modules/sugeridos`.
 - Ruta base: `/sugeridos`.
 - Codigo front esperado: `DAT_JAA_SUG`.
