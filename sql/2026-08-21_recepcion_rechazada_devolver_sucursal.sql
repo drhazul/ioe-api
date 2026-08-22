@@ -1,0 +1,133 @@
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_rec_recepcion_devolver_sucursal
+  @DOCREC nvarchar(510),
+  @USR nvarchar(100),
+  @MOTIVO nvarchar(1000)
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+  BEGIN TRANSACTION;
+
+  DECLARE @lock int, @resource nvarchar(255) = CONCAT('DAT_REC_DOC_', @DOCREC);
+  EXEC @lock = sys.sp_getapplock
+    @Resource = @resource,
+    @LockMode = 'Exclusive',
+    @LockOwner = 'Transaction',
+    @LockTimeout = 15000;
+  IF @lock < 0 THROW 51000, 'No fue posible bloquear la recepción.', 1;
+  IF NULLIF(LTRIM(RTRIM(ISNULL(@MOTIVO, ''))), '') IS NULL
+    THROW 51000, 'Capture el motivo de devolución.', 1;
+
+  DECLARE
+    @NPED nvarchar(510),
+    @SUC nvarchar(20),
+    @ESTATUS nvarchar(30),
+    @TIPO_REC nvarchar(20),
+    @TIPO_DOC nvarchar(20),
+    @FOLIO nvarchar(100),
+    @OBS nvarchar(1000),
+    @USR_REC nvarchar(100),
+    @GUIA nvarchar(100),
+    @PAQUETERIA nvarchar(120);
+
+  SELECT
+    @NPED = r.NPED,
+    @SUC = h.SUC,
+    @ESTATUS = r.ESTATUS_REC,
+    @TIPO_REC = r.TIPO_RECEPCION,
+    @TIPO_DOC = r.TIPO_DOC,
+    @FOLIO = r.FOLIO_DOC,
+    @OBS = r.OBSERVACIONES,
+    @USR_REC = r.USR_RECEPCION
+  FROM dbo.REC_CTRL_DOC_REC r WITH (UPDLOCK, HOLDLOCK)
+  JOIN dbo.REC_CAB_PED h WITH (UPDLOCK, HOLDLOCK) ON h.NPED = r.NPED
+  WHERE r.DOCREC = @DOCREC;
+
+  IF @NPED IS NULL THROW 51000, 'La recepción no existe.', 1;
+  IF @ESTATUS NOT IN ('VALIDADO', 'PENDIENTE_AUTORIZACION', 'RECHAZADO')
+    THROW 51000, 'Solo se puede devolver una recepción pendiente de revisión o rechazada.', 1;
+  IF EXISTS (SELECT 1 FROM dbo.DAT_MB51 WHERE DOCP = @DOCREC)
+    THROW 51000, 'La recepción ya tiene movimientos de inventario.', 1;
+
+  SELECT TOP 1 @GUIA = GUIA, @PAQUETERIA = PAQUETERIA
+  FROM dbo.REC_GUIA_PED
+  WHERE DOCREC = @DOCREC
+  ORDER BY IDGUIA;
+
+  MERGE dbo.REC_BORRADOR_REC WITH (HOLDLOCK) AS target
+  USING (SELECT @NPED NPED) source ON source.NPED = target.NPED
+  WHEN MATCHED THEN UPDATE SET
+    SUC = @SUC,
+    USR = COALESCE(NULLIF(@USR_REC, ''), @USR),
+    TIPO_RECEPCION = @TIPO_REC,
+    TIPO_DOC = @TIPO_DOC,
+    FOLIO_DOC = @FOLIO,
+    GUIA = @GUIA,
+    PAQUETERIA = @PAQUETERIA,
+    OBSERVACIONES = @OBS,
+    FCNM = SYSDATETIME()
+  WHEN NOT MATCHED THEN
+    INSERT (NPED, SUC, USR, TIPO_RECEPCION, TIPO_DOC, FOLIO_DOC, GUIA, PAQUETERIA, OBSERVACIONES, FCNM)
+    VALUES (@NPED, @SUC, COALESCE(NULLIF(@USR_REC, ''), @USR), @TIPO_REC, @TIPO_DOC, @FOLIO, @GUIA, @PAQUETERIA, @OBS, SYSDATETIME());
+
+  DELETE dbo.REC_BORRADOR_REC_DET WHERE NPED = @NPED;
+  INSERT dbo.REC_BORRADOR_REC_DET (NPED, IDPED, ART, CTD_REC, CTD_ACEP, ESTATUS)
+  SELECT
+    @NPED,
+    h.IDPED,
+    h.ART,
+    CASE WHEN @ESTATUS = 'RECHAZADO' THEN 0 ELSE ISNULL(h.CTD, 0) END,
+    CASE WHEN @ESTATUS = 'RECHAZADO' THEN 0 ELSE ISNULL(h.CTD_ACEP, h.CTD) END,
+    CASE WHEN @ESTATUS = 'RECHAZADO' THEN NULL
+      WHEN h.CALIDAD_ESTATUS IN ('APROBADO', 'RECHAZADO', 'NO_APLICA') THEN h.CALIDAD_ESTATUS
+      ELSE 'APROBADO' END
+  FROM dbo.REC_CTO_HIST h
+  WHERE h.DOCREC = @DOCREC AND h.IDPED IS NOT NULL;
+
+  UPDATE dbo.REC_CTRL_DOC_REC
+  SET
+    ESTATUS_REC = 'DEVUELTO',
+    OBSERVACIONES = LEFT(
+      CONCAT(
+        ISNULL(OBSERVACIONES, ''),
+        CASE WHEN NULLIF(OBSERVACIONES, '') IS NULL THEN '' ELSE CHAR(13) + CHAR(10) END,
+        'DEVUELTO: ',
+        LTRIM(RTRIM(@MOTIVO))
+      ),
+      1000
+    )
+  WHERE DOCREC = @DOCREC;
+
+  UPDATE dbo.REC_CAB_PED
+  SET ESTATUS = 'PROCESADO', FCNR = NULL
+  WHERE NPED = @NPED;
+
+  INSERT dbo.AUDIT_LOG (
+    IDUSUARIO, ACTION, MODULO, ENTIDAD, ENTIDAD_ID, SUC, METADATA_JSON, FCNR
+  )
+  SELECT
+    IDUSUARIO,
+    'DEVOLVER_A_SUCURSAL',
+    'DAT_REC',
+    'REC_CTRL_DOC_REC',
+    @DOCREC,
+    @SUC,
+    CONCAT(
+      '{"nped":"', STRING_ESCAPE(@NPED, 'json'),
+      '","estatusAnterior":"', STRING_ESCAPE(@ESTATUS, 'json'),
+      '","motivo":"', STRING_ESCAPE(LTRIM(RTRIM(@MOTIVO)), 'json'), '"}'
+    ),
+    SYSDATETIME()
+  FROM dbo.USUARIO
+  WHERE UPPER(USERNAME) = UPPER(@USR);
+
+  COMMIT;
+  SELECT @DOCREC DOCREC, @NPED NPED, 'DEVUELTO' ESTATUS_REC;
+END;
+GO
