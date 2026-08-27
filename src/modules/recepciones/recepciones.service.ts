@@ -368,8 +368,43 @@ export class RecepcionesService {
     await this.assertSucAllowed(this.text(header.SUC), ctx);
     const [details, guides, incidents] = await Promise.all([
       this.dataSource.query(
-        `SELECT x.*,a.UPC,a.DES,d.CTDPED,d.CTDREC,d.UNCOM,d.CTO FROM dbo.REC_CTO_HIST x LEFT JOIN dbo.REC_DET_PED d ON d.IDPED=x.IDPED LEFT JOIN dbo.DAT_ART a ON a.SUC=@1 AND a.ART=x.ART WHERE x.DOCREC=@0 ORDER BY x.POS,x.IDREC`,
-        [docrec, this.text(header.SUC)],
+        `SELECT
+                x.IDREC,COALESCE(x.POS,d.POS) POS,COALESCE(x.ART,d.ART) ART,
+                x.FCN,COALESCE(x.CTD,0) CTD,x.CTDVTA,x.DOCREC,
+                COALESCE(x.IDPED,d.IDPED) IDPED,
+                COALESCE(x.CTD_SOL,d.CTDPED,0) CTD_SOL,
+                COALESCE(x.CTD_ACEP,x.CTD,0) CTD_ACEP,x.CALIDAD_ESTATUS,
+                x.CALIDAD_JSON,x.CADUCIDAD,x.OBSERVACIONES,
+                a.UPC,a.DES,d.CTDPED,d.CTDREC,d.UNCOM,d.CTO,
+                a.TIPO,a.DEPA,a.SUBD,a.CLAS,a.SCLA,a.SCLA2,a.BASE,a.SPH,a.CYL,a.ADIC,
+                COALESCE(NULLIF(CONCAT_WS(' / ',
+                  NULLIF(LTRIM(RTRIM(jd.DDEPA)),''),
+                  NULLIF(LTRIM(RTRIM(jsub.DSUBD)),''),
+                  NULLIF(LTRIM(RTRIM(jc.DCLAS)),''),
+                  NULLIF(LTRIM(RTRIM(js.DSCLA)),''),
+                  NULLIF(LTRIM(RTRIM(js2.DSCLA2)),'')
+                ),''),'SIN JERARQUIA') JERARQUIA_NOMBRE
+         FROM (
+           SELECT * FROM dbo.REC_DET_PED
+           WHERE NPED=@2 AND ISNULL(BLOQ,0)<>-1
+             AND UPPER(LTRIM(RTRIM(@3))) IN ('VALIDADO','CONTABILIZADO')
+         ) d
+         FULL OUTER JOIN (
+           SELECT * FROM dbo.REC_CTO_HIST WHERE DOCREC=@0
+         ) x ON x.IDPED=d.IDPED
+         LEFT JOIN dbo.DAT_ART a ON a.SUC=@1 AND a.ART=COALESCE(x.ART,d.ART)
+         LEFT JOIN dbo.JRQ_DEPA jd ON jd.DEPA=a.DEPA
+         LEFT JOIN dbo.JRQ_SUBD jsub ON jsub.SUBD=a.SUBD
+         LEFT JOIN dbo.JRQ_CLAS jc ON jc.CLAS=a.CLAS
+         LEFT JOIN dbo.JRQ_SCLA js ON js.SCLA=a.SCLA
+         LEFT JOIN dbo.JRQ_SCLA2 js2 ON js2.SCLA2=a.SCLA2
+         ORDER BY COALESCE(x.POS,d.POS),x.IDREC,d.IDPED`,
+        [
+          docrec,
+          this.text(header.SUC),
+          this.text(header.NPED),
+          this.text(header.ESTATUS_REC),
+        ],
       ),
       this.dataSource.query(
         `SELECT IDGUIA,GUIA,PAQUETERIA,NPAQ,OBSERVACIONES,FCNR,USR FROM dbo.REC_GUIA_PED WHERE DOCREC=@0 ORDER BY IDGUIA`,
@@ -940,6 +975,17 @@ export class RecepcionesService {
       caducidad: row.CADUCIDAD ?? null,
       observaciones: this.nullText(row.OBSERVACIONES),
       calidad: this.json(row.CALIDAD_JSON),
+      tipo: this.nullText(row.TIPO),
+      depa: row.DEPA ?? null,
+      subd: row.SUBD ?? null,
+      clas: row.CLAS ?? null,
+      scla: row.SCLA ?? null,
+      scla2: row.SCLA2 ?? null,
+      base: this.nullText(row.BASE),
+      sph: row.SPH ?? null,
+      cyl: row.CYL ?? null,
+      adic: row.ADIC ?? null,
+      jerarquiaNombre: this.text(row.JERARQUIA_NOMBRE || 'SIN JERARQUIA'),
       ...(financial
         ? { costo: this.toNumber(row.CTO), total: this.toNumber(row.CTDVTA) }
         : {}),

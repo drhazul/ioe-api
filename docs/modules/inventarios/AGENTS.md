@@ -20,6 +20,8 @@
 - Solo `JEFE DE INVENTARIOS` (`IDROL=2`) puede ejecutar el ajuste de Cantidad física en un documento `VALIDADO`; el SP debe actualizar histórico, importe, incidencias y auditoría sin afectar stock antes de contabilizar.
 - `DOCREC` debe ser único también frente a `DAT_CTR_DOC.DOC` y `DAT_MB51.DOCP`; `REC_CTO_HIST.IDREC` usa el formato `REC-{DOCREC}-{fila}` y es la clave idempotente de `DAT_MB51.IDPD`.
 - `GET /recepciones/:nped` debe exponer campos de jerarquía y la ruta descriptiva completa usando los catálogos JRQ existentes; no duplicar esos catálogos ni persistir resúmenes derivados.
+- `GET /recepciones/documentos/:docrec` también debe proyectar `DEP/SDEP/CLS/SCLS/SCLS2/SPH/CYL/ADIC` y la ruta descriptiva completa por renglón para que la revisión `VALIDADO` del Jefe pueda filtrar y agrupar sin otra fuente de datos.
+- El detalle de `GET /recepciones/documentos/:docrec` debe combinar `REC_DET_PED` activo con `REC_CTO_HIST`, conservando artículos de la O.C. sin renglón histórico como cantidad física cero para que los faltantes no desaparezcan de `VALIDADO` ni del registro `CONTABILIZADO`. Los renglones en cero no generan movimientos.
 - Una creación del Encargado con tipo `RECHAZO` debe ejecutar el SP de rechazo existente, exigir observaciones como motivo desde la UI, quedar activa para consulta administrativa y excluirse del listado operativo del Encargado.
 - Conservar el contrato documental existente: `FOLIO_DOC` máximo 100 caracteres, `GUIA` libre máximo 100 y `PAQUETERIA` máximo 120; los folios adicionales se serializan con ` | ` y no justifican crear otra tabla.
 - Edición documental y costo en `VALIDADO` son exclusivas del Jefe (`IDROL=2`) y deben ejecutarse mediante los SP versionados con bloqueo, transacción y auditoría.
@@ -32,6 +34,7 @@
 - `sp_rec_recepcion_solicitar` debe sincronizar `REC_CTRL_DOC_REC.ESTATUS_REC` y `REC_CAB_PED.ESTATUS` a `VALIDADO`. Jefe/Analista incluyen ese estado en la cola DAT_REC; Encargado no lo lista.
 - `ESTATUS_SUG` incluye `VALIDADO` para que el módulo de Órdenes de compra del Jefe pueda filtrar las recepciones pendientes de contabilización.
 - La cancelación de una O.C. `VALIDADO` es exclusiva del Jefe. Debe bloquearse si existe `CTDREC`, recepción `CONTABILIZADO` o cualquier `DAT_MB51` ligado al `DOCREC`; sin bloqueos, actualizar recepción a `CANCELADO` y cabecera a `ANULADO` dentro de la misma transacción.
+- La cancelación de una O.C. `PROCESADO/RECHAZADO` por el Jefe debe ignorar recepciones históricas `RECHAZADO/CANCELADO/DEVUELTO` como bloqueadores. Si no hay cantidades recibidas ni recepción activa, eliminar el borrador reconstruido y cambiar la cabecera a `ANULADO` en una transacción.
 - Modulo API: `src/modules/sugeridos`.
 - Ruta base: `/sugeridos`.
 - Codigo front esperado: `DAT_JAA_SUG`.

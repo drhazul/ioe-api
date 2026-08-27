@@ -44,7 +44,7 @@ Antes de este cambio no existían API ni pantallas Flutter para `DAT_REC`. Tampo
 | Factura/nota | `REC_CTRL_DOC_REC` | DTO financiero | Restringido a Inventarios | Columnas aditivas en cabecera. |
 | Guías | Brecha SQL | `REC_GUIA_PED` | Varias por recepción | Tabla hija mínima. |
 | Solicitud de autorización | Estado recepción | Acción API/SP | Física y administrativa separadas | `RECEPCION_FISICA -> PENDIENTE_AUTORIZACION`. |
-| Contabilización | `DAT_CTR_DOC/DAT_MB51/DAT_ART` | `sp_rec_recepcion_autorizar` | Idempotente y serializada | Movimiento 101, almacén 002 y actualización de existencia en una transacción. |
+| Contabilización | `DAT_CTR_DOC/DAT_MB51/DAT_ART` | `sp_rec_recepcion_autorizar` | Idempotente y serializada | Movimiento 101 únicamente para cantidades físicas mayores que cero, almacén 002 y actualización de existencia en una transacción. Los renglones en cero permanecen visibles en el detalle contabilizado. |
 | Rechazo | Estado recepción | Acción API/SP | Sin movimiento | Estado `RECHAZADO`. |
 | Auditoría | `AUDIT_LOG` | SPs | Usuario/fecha/entidad | Reutiliza infraestructura central. |
 | Recepción masiva | XLSX + API | Flutter + validar/confirmar | Validar, previsualizar, confirmar | Errores por fila y una sola transacción de confirmación. |

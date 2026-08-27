@@ -436,7 +436,7 @@ export class SugeridosService {
         SELECT TOP 1 1 AS EXISTE
         FROM dbo.REC_CTRL_DOC_REC
         WHERE NPED = @0
-          AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS_REC, '')))) NOT IN ('RECHAZADO', 'CANCELADO')
+          AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS_REC, '')))) NOT IN ('RECHAZADO', 'CANCELADO', 'DEVUELTO')
         `,
         [header.nped],
       );
@@ -445,6 +445,19 @@ export class SugeridosService {
           'La orden ya tiene recepción registrada y no puede cancelarse.',
         );
       }
+      await this.dataSource.transaction(async (manager) => {
+        await manager.query(`DELETE dbo.REC_BORRADOR_REC_DET WHERE NPED = @0`, [
+          header.nped,
+        ]);
+        await manager.query(`DELETE dbo.REC_BORRADOR_REC WHERE NPED = @0`, [
+          header.nped,
+        ]);
+        await manager.query(
+          `UPDATE dbo.REC_CAB_PED SET ESTATUS = 'ANULADO' WHERE NPED = @0`,
+          [header.nped],
+        );
+      });
+      return this.findOne(header.nped, user);
     } else if (!['ABIERTO', 'PENDIENTE'].includes(header.estatus)) {
       throw new BadRequestException('La orden ya no permite cancelacion.');
     }
