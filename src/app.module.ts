@@ -77,6 +77,7 @@ import { EmpresasModule } from './modules/empresas/empresas.module';
 import { TransferenciasModule } from './modules/transferencias/transferencias.module';
 import { SugeridosModule } from './modules/sugeridos/sugeridos.module';
 import { RecepcionesModule } from './modules/recepciones/recepciones.module';
+import { DevolucionesProveedorModule } from './modules/devoluciones-proveedor/devoluciones-proveedor.module';
 
 @Module({
   imports: [
@@ -155,6 +156,7 @@ import { RecepcionesModule } from './modules/recepciones/recepciones.module';
     TransferenciasModule,
     SugeridosModule,
     RecepcionesModule,
+    DevolucionesProveedorModule,
   ],
   providers: [
     {

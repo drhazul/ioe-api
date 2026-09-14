@@ -4,6 +4,20 @@
 - Modulos backend de inventario operativo: `datart`, `datmb51`, `datmb52`, `dat-cmov`, `mermas`, `transferencias` y `sugeridos`.
 - Persistencia MSSQL con tablas legacy `DAT_ART`, `DAT_MB51`, `DAT_MB51S`, `DAT_CMOV` y tablas de proceso especificas.
 
+## Devoluciones a proveedor
+- Módulo API `src/modules/devoluciones-proveedor`, ruta `/devoluciones-proveedor`, código front `DEV_PROVD`; solo Jefe de Inventarios (`IDROL=2`) y administradores.
+- La evidencia es única por documento (imagen entre 500 bytes y 500 KB); el alta/reemplazo elimina la anterior y `sp_dev_provd_solicitar` exige una evidencia global antes de reservar únicamente los detalles activos.
+- `/devoluciones-proveedor/catalogos/articulos` acepta `searchBy=ART|UPC|DES|TODO` y filtros independientes `depa/subd/clas/scla/scla2/sph/cyl/adic`; conservarlos alineados con el panel de Transferencias.
+- `PATCH /devoluciones-proveedor/:doc/detalle/:idpd` solo opera en borrador; GET de evidencias comprueba documento y renglón activo, y PATCH de evidencia también exige borrador y valida imagen de 500 bytes a 500 KB antes de reemplazarla.
+- Acciones DEV_PROVD: autorización/rechazo/cancelación conservan sus SP; tránsito usa `sp_dev_provd_enviar_transito` desde AUTORIZADA/CONSOLIDADA y recepción usa `sp_dev_provd_recibir` exclusivamente desde EN_TRANSITO. Mantener `RECIBIDA` en los checks de documento/envío.
+- Reutilizar `DAT_PROVD`, `DAT_ART`, movimiento `DAT_CMOV` 102, `DAT_CTR_DOC`, `DAT_MB51` y `AUDIT_LOG`.
+- La reserva vive en `DEV_CTRL_PROVD.CTDA_BLOQ`; no descontar `DAT_ART.STOCK` hasta autorizar. Conservar `trg_dat_art_dev_provd_reserva` para impedir que otros procesos consuman stock reservado.
+- Autorización idempotente y transaccional: liberar la reserva dentro de la misma transacción, insertar MB51 102 con cantidades/importes negativos y descontar stock una sola vez.
+- No crear `ESTATUS_DEV`, duplicar datos maestros del artículo ni guardar IDs de documentos consolidados separados por comas.
+- Contabilidad, notas de crédito, reposiciones, reembolsos y conciliación fiscal quedan fuera de `DEV_PROVD`.
+- La creación debe rechazar payloads sin origen, con ambos orígenes o con O.C./recepción que no pertenezca a la sucursal y proveedor recibidos.
+- Al agregar un artículo DEV_PROVD, costo nulo o cero significa no informado: resolver `DAT_ART.CTOP` dentro del SP y calcular `IMPT=CTDA_DEV*CTOP`; no persistir importes cero por ausencia de costo en Excel.
+
 ## Recepción de mercancías
 - Módulo API: `src/modules/recepciones`; ruta base `/recepciones`; código front `DAT_REC`.
 - Reutilizar `REC_CAB_PED/REC_DET_PED` y `REC_CTRL_DOC_REC/REC_CTO_HIST`; no crear cabeceras o detalles paralelos.
@@ -41,6 +55,7 @@
 - Tablas oficiales para O.C.: `REC_CAB_PED` y `REC_DET_PED`; no crear tablas duplicadas de pedidos.
 - El listado de O.C. debe excluir cabeceras legacy huérfanas `ABIERTO` sin detalle activo y con `NART/IMPP` nulos; las órdenes creadas por el módulo deben inicializar esos totales en cero cuando no tengan artículos.
 - El calculo debe usar `DAT_ART`, stock acumulado desde `DAT_MB51` y ventas por movimientos relacionados como `VTAS` en `DAT_CMOV`, sin tablas temporales persistentes.
+- Para `RESURTIBLE`, si `STOCK < STOCK_MIN` y la sugerencia por demanda no es positiva, `sp_sugeridos_calcular` debe aplicar la reposición mínima antes de descartar por `FAC_REAB <= 0`; el filtro final conserva únicamente cantidades de compra mayores a cero.
 - Validar alcance por sucursal con `USR_MOD_SUC` para `DAT_JAA_SUG`, con fallback a `SUC` del token cuando no existan asignaciones.
 
 ## Merma

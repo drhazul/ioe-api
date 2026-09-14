@@ -1,5 +1,20 @@
 # Inventarios API
 
+## Devoluciones a proveedor DEV_PROVD (2026-08-28)
+
+- Módulo `src/modules/devoluciones-proveedor`, ruta `/devoluciones-proveedor`, exclusivo del Jefe de Inventarios y administradores.
+- DEV_PROVD conserva una sola evidencia fotográfica de 500 bytes a 500 KB por documento; la solicitud valida esa evidencia global y procesa únicamente los detalles activos seleccionados.
+- El catálogo DEV_PROVD soporta búsqueda específica por ART/UPC/descripción y filtros independientes de jerarquía/graduación para el panel equivalente a Transferencias.
+- DEV_PROVD permite editar cantidad, motivo, lote, caducidad y reemplazar fotografías en borrador; los endpoints de evidencias validan que imagen y renglón activo pertenezcan al documento indicado.
+- La creación de DEV_PROVD requiere exactamente una orden de compra o recepción de mercancía válida para la sucursal y proveedor; sus artículos se consultan desde `/sugeridos/:nped` o `/recepciones/documentos/:docrec`.
+- Las acciones del listado usan los endpoints por documento para autorizar, rechazar, cancelar, enviar a tránsito y recibir; tránsito crea/reutiliza el envío en una transacción y recepción incorpora el estado real `RECIBIDA`.
+- Cuando la importación no proporciona costo, el alta obtiene `DAT_ART.CTOP` y recalcula el importe del renglón; el script `sql/2026-09-12_devoluciones_proveedor_costo_cero_fix.sql` corrige registros previos en cero y actualiza el SP.
+- Script operativo de acciones: `sql/2026-09-03_devoluciones_proveedor_acciones_listado.sql`.
+- Reutiliza `DAT_PROVD`, `DAT_ART`, `DAT_CMOV` 102, `DAT_CTR_DOC`, `DAT_MB51`, `AUDIT_LOG` y el acceso `MOD_FRONT` ya existente.
+- La solicitud reserva sin descontar stock; `trg_dat_art_dev_provd_reserva` evita consumo incompatible y la autorización transaccional/idempotente registra la única salida real.
+- Consolida solicitudes del mismo proveedor mediante relación normalizada y registra guía, transportista, cajas, RMA y salida física.
+- Script: `sql/2026-08-28_devoluciones_proveedor_dev_provd.sql`; diseño completo: `docs/modules/inventarios/devoluciones_proveedor_dev_provd.md`.
+
 ## Recepción de mercancías DAT_REC (2026-08-11)
 
 - Nuevo `RecepcionesModule` con ruta `/recepciones`, alcance por `DAT_REC`/`USR_MOD_SUC` y proyecciones financieras restringidas a administración de Inventarios.
@@ -32,6 +47,7 @@
 
 - Nuevo modulo `SugeridosModule` registrado en `AppModule` con ruta base `/sugeridos` y codigo front `DAT_JAA_SUG`.
 - `GET /sugeridos/calculo` ejecuta `sp_sugeridos_calcular`, reemplazando consultas Access encadenadas con CTEs sobre `DAT_ART`, `DAT_MB51` y clases de venta en `DAT_CMOV.RELACION='VTAS'`.
+- Desde `2026-09-01`, los artículos `RESURTIBLE` debajo de `STOCK_MIN` aplican la reposición mínima antes del descarte por cobertura (`FAC_REAB <= 0`), evitando que desaparezcan del resultado cuando la sugerencia por demanda es cero. Script `sql/2026-09-01_sugeridos_resurtible_stock_min_fix.sql`.
 - `POST /sugeridos` ejecuta `sp_sugeridos_crear_oc` para crear cabecera/detalle en `REC_CAB_PED` y `REC_DET_PED`; el flujo operativo usa `ABIERTO -> PENDIENTE -> PROCESADO` y `ANULADO`.
 - `GET /sugeridos` excluye cabeceras legacy huérfanas `ABIERTO` sin detalle activo y con `NART/IMPP` nulos, para no mostrar documentos vacíos ajenos al flujo del módulo.
 - Catalogos: `/sugeridos/catalogos/sucursales`, `/sugeridos/catalogos/proveedores` y `/sugeridos/catalogos/estatus`.

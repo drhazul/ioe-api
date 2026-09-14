@@ -2,6 +2,14 @@
 
 > Abre otros README/AGENTS solo cuando la tarea lo requiera; usa el índice de módulos.
 
+- DEV_PROVD / Devoluciones a proveedor (2026-08-28): módulo `src/modules/devoluciones-proveedor`, ruta `/devoluciones-proveedor`, exclusivo de Jefe de Inventarios/admin; reserva en `DEV_CTRL_PROVD`, protección global `trg_dat_art_dev_provd_reserva` y salida transaccional/idempotente `DAT_MB51` movimiento 102 solo al autorizar. Diseño: `docs/modules/inventarios/devoluciones_proveedor_dev_provd.md`.
+- DEV_PROVD / Evidencia (actualizado 2026-09-14): la evidencia es única por documento; `POST /:doc/evidencia` reemplaza la existente y `sp_dev_provd_solicitar` exige al menos una evidencia global, no una por renglón.
+- DEV_PROVD / Catálogo artículos (2026-09-03): `/catalogos/articulos` filtra por `searchBy=ART|UPC|DES|TODO` y criterios numéricos independientes `depa/subd/clas/scla/scla2/sph/cyl/adic`.
+- DEV_PROVD / Edición y visor (2026-09-03): conservar `PATCH /:doc/detalle/:idpd` para cantidad, motivo, lote y caducidad; `GET /:doc/detalle/:idpd/evidencias` lista imágenes y `PATCH /:doc/detalle/:idpd/evidencias/:evidenceId` reemplaza una, validando documento, renglón activo y estado borrador.
+- DEV_PROVD / Acciones listado (2026-09-03): `POST /:doc/transito` usa `sp_dev_provd_enviar_transito` para crear/reutilizar envío y registrar salida; `POST /:doc/recibir` usa `sp_dev_provd_recibir`, solo desde `EN_TRANSITO`. `RECIBIDA` es estado real de documento y envío. Script: `sql/2026-09-03_devoluciones_proveedor_acciones_listado.sql`.
+- DEV_PROVD / Documento origen (2026-09-08): `POST /devoluciones-proveedor` debe recibir exactamente uno de `docOc` o `docRec`; el servicio valida existencia, sucursal y proveedor contra `REC_CAB_PED`/`REC_CTRL_DOC_REC` antes de ejecutar `sp_dev_provd_crear`.
+- DEV_PROVD / Costo importado (2026-09-12): `sp_dev_provd_agregar_articulo` interpreta `@CTOP` nulo o cero como costo no informado y usa `DAT_ART.CTOP`; el servicio normaliza costo cero a nulo para recalcular `IMPT` correctamente.
+
 ## Contexto del proyecto
 - Inventarios / Recepcion de mercancias (2026-08-11): `RecepcionesModule` usa `/recepciones` y codigo `DAT_REC`; reutiliza `REC_CAB_PED/REC_DET_PED`, `REC_CTRL_DOC_REC/REC_CTO_HIST`, movimiento 101 y almacen 002. La recepcion fisica no actualiza inventario; solo la autorizacion transaccional/idempotente lo hace.
 - DAT_REC / Pedidos pendientes: filtrar O.C. y proveedor por parámetros independientes y limitar resultados a `DF01/DF04/DF05/DF06`; para Encargado de sucursal aplicar en API estado de O.C. exclusivamente `PROCESADO`; Jefe/Analista conservan `PROCESADO/PARCIAL/VALIDADO/RECHAZADO` según el flujo administrativo.

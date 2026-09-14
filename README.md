@@ -1,5 +1,17 @@
 # IOE API
 
+## DEV_PROVD / Devoluciones a proveedor (2026-08-28)
+
+- API `/devoluciones-proveedor` para creación, reserva, autorización con movimiento 102, evidencias, rechazo/cancelación, consolidación y salida física.
+- La evidencia fotográfica se administra una sola vez por documento; al solicitar autorización se valida su existencia global y se reservan únicamente los renglones activos seleccionados.
+- El catálogo de artículos DEV_PROVD acepta búsqueda por `ART/UPC/DES/TODO` y filtros numéricos `DEPA/SUBD/CLAS/SCLA/SCLA2/SPH/CYL/ADIC`.
+- Crear DEV_PROVD exige exactamente una O.C. o recepción de mercancía existente y perteneciente a la sucursal/proveedor; el frontend carga sus renglones mediante los módulos de Órdenes y Recepciones.
+- `PATCH /devoluciones-proveedor/:doc/detalle/:idpd` edita cantidad, motivo, lote y caducidad; `GET /:doc/detalle/:idpd/evidencias` entrega fotografías y `PATCH /:doc/detalle/:idpd/evidencias/:evidenceId` reemplaza una imagen validada.
+- `POST /:doc/transito` crea o reutiliza el envío y registra su salida de forma transaccional; `POST /:doc/recibir` cambia únicamente documentos `EN_TRANSITO` a `RECIBIDA`. Migración: `sql/2026-09-03_devoluciones_proveedor_acciones_listado.sql`.
+- Los artículos importados sin costo o con costo cero toman `DAT_ART.CTOP`, recalculando el importe del renglón y el resumen del documento. Migración: `sql/2026-09-12_devoluciones_proveedor_costo_cero_fix.sql`.
+- Script aplicado: `sql/2026-08-28_devoluciones_proveedor_dev_provd.sql`.
+- Diseño y contratos: `docs/modules/inventarios/devoluciones_proveedor_dev_provd.md`.
+
 Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos, inventarios, control de cuentas y punto de venta.
 
 > Abre otros README/AGENTS solo si la tarea lo requiere; navega por el índice de módulos.
