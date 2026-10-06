@@ -58,7 +58,8 @@ export class TransferenciasService {
     const where: string[] = [];
     const params: unknown[] = [];
 
-    if (!ctx.isAdmin) {
+    const suc = this.normalizeText(query.suc).toUpperCase();
+    if (!ctx.isAdmin && !this.isInventoryChief(ctx)) {
       const sucs = await this.resolveAuthorizedSucs(ctx);
       const placeholders = sucs.map((_, i) => `@${params.length + i}`);
       where.push(
@@ -78,11 +79,11 @@ export class TransferenciasService {
         )`,
       );
       params.push(...sucs);
-    } else if (this.normalizeText(query.suc)) {
+    } else if (suc) {
       where.push(
         `(UPPER(LTRIM(RTRIM(ISNULL(h.SUC_ENT, h.ALM_ENT)))) = @${params.length} OR UPPER(LTRIM(RTRIM(ISNULL(h.SUC_SAL, h.ALM_SAL)))) = @${params.length})`,
       );
-      params.push(this.normalizeText(query.suc).toUpperCase());
+      params.push(suc);
     }
 
     const search = this.normalizeText(query.search);
@@ -107,7 +108,13 @@ export class TransferenciasService {
       params.push(`%${usuario.toUpperCase()}%`);
     }
 
-    const statusLimit = this.resolveStatusLimit(ctx);
+    // El jefe opera la cola activa PENDIENTE y tambien puede recuperar los
+    // BORRADOR con cualquiera de los filtros del modulo.
+    const baseStatusLimit = this.resolveStatusLimit(ctx);
+    const statusLimit =
+      !ctx.isAdmin && this.isInventoryChief(ctx)
+        ? ['PENDIENTE', 'BORRADOR']
+        : baseStatusLimit;
     const estatus = this.normalizeText(query.estatus).toUpperCase();
     if (statusLimit.length) {
       if (estatus) {
@@ -505,7 +512,9 @@ export class TransferenciasService {
       }))
       .filter((item) => item.art && Number.isFinite(item.ctd) && item.ctd > 0);
     if (!items.length) {
-      throw new BadRequestException('El archivo no contiene articulos validos.');
+      throw new BadRequestException(
+        'El archivo no contiene articulos validos.',
+      );
     }
 
     const artSucSal = this.resolveDatArtSuc(header.sucSal);
@@ -553,7 +562,9 @@ export class TransferenciasService {
       `,
       [payload, artSucSal],
     );
-    const validation = validationRows?.[0] as Record<string, unknown> | undefined;
+    const validation = validationRows?.[0] as
+      | Record<string, unknown>
+      | undefined;
     const faltantes = this.toInt(validation?.FALTANTES) ?? 0;
     if (faltantes > 0) {
       const ejemplos = this.normalizeText(validation?.EJEMPLOS ?? '');
@@ -1580,16 +1591,18 @@ export class TransferenciasService {
   }
 
   private assertInventoryChiefRole(ctx: UserContext) {
+    if (this.isInventoryChief(ctx)) return;
+    throw new ForbiddenException('Accion reservada a jefe de inventarios.');
+  }
+
+  private isInventoryChief(ctx: UserContext) {
     const roleCode = this.normalizeText(ctx.roleCode).toUpperCase();
-    if (
+    return (
       ctx.isAdmin ||
       ctx.roleId === 2 ||
       roleCode === 'INVJEF' ||
       roleCode === 'JEFE_INVENTARIOS'
-    ) {
-      return;
-    }
-    throw new ForbiddenException('Accion reservada a jefe de inventarios.');
+    );
   }
 
   private assertHeaderEditable(estatus: string) {

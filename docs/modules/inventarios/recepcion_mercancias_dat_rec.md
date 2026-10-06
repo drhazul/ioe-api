@@ -34,7 +34,7 @@ Antes de este cambio no existían API ni pantallas Flutter para `DAT_REC`. Tampo
 
 | Requisito | Fuente actual | Componente | Regla | Cambio |
 |---|---|---|---|---|
-| Pedidos pendientes | `REC_CAB_PED/REC_DET_PED` | `GET /recepciones` | Solo `PROCESADO/PARCIAL` con pendiente | Query paginada con alcance DAT_REC. |
+| Pedidos pendientes | `REC_CAB_PED/REC_DET_PED` | `GET /recepciones` | Encargado: `PROCESADO`; Jefe/Analista: `PROCESADO/VALIDADO/RECHAZADO` | Una O.C. sale de la cola al contabilizar, incluso con faltantes. |
 | Ocultar costos en sucursal | Roles/JWT | Proyecciones API | No basta ocultar columnas | Campos financieros se omiten del DTO no autorizado. |
 | Recepción física | `REC_CTRL_DOC_REC/REC_CTO_HIST` | `POST /recepciones/:nped` | No afecta inventario | SP transaccional crea estado `RECEPCION_FISICA`. |
 | Validación de sucursal | `REC_CTRL_DOC_REC` | Automática al crear por Encargado | No afecta inventario | Transiciona a `VALIDADO` y queda para revisión de Inventarios. |

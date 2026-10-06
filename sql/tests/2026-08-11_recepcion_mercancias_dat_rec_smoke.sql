@@ -36,17 +36,9 @@ BEGIN TRY
   EXEC dbo.sp_rec_recepcion_solicitar @DOCREC=@DOCREC,@USR=@USR,@MOTIVO=NULL;
   EXEC dbo.sp_rec_recepcion_autorizar @DOCREC=@DOCREC,@USR=@USR,@MOTIVO=NULL;
   IF NOT EXISTS(SELECT 1 FROM dbo.DAT_MB51 WHERE DOCP=@DOCREC AND CLSM=101 AND CTDA=1) THROW 52000,'No se genero movimiento 101.',1;
-  IF (SELECT ESTATUS FROM dbo.REC_CAB_PED WHERE NPED=@NPED)<>'PARCIAL' THROW 52000,'No se conservo la orden parcial.',1;
+  IF (SELECT ESTATUS FROM dbo.REC_CAB_PED WHERE NPED=@NPED)<>'CONTABILIZADO' THROW 52000,'La orden no se cerro como contabilizada.',1;
   EXEC dbo.sp_rec_recepcion_autorizar @DOCREC=@DOCREC,@USR=@USR,@MOTIVO=NULL;
   IF (SELECT COUNT(*) FROM dbo.DAT_MB51 WHERE DOCP=@DOCREC)<>1 THROW 52000,'La reejecucion duplico el movimiento.',1;
-
-  DELETE FROM @out;
-  INSERT @out EXEC dbo.sp_rec_recepcion_fisica @NPED=@NPED,@USR=@USR,@TIPO_RECEPCION='TOTAL',@TIPO_DOC='FACTURA',@FOLIO_DOC='UT-2',@ALMACEN='002',@OBSERVACIONES='SMOKE 2',@ITEMS_JSON=@items,@GUIAS_JSON='[]',@INCIDENCIAS_JSON='[]';
-  SET @DOCREC=(SELECT TOP 1 DOCREC FROM @out);
-  EXEC dbo.sp_rec_recepcion_solicitar @DOCREC=@DOCREC,@USR=@USR,@MOTIVO=NULL;
-  EXEC dbo.sp_rec_recepcion_autorizar @DOCREC=@DOCREC,@USR=@USR,@MOTIVO=NULL;
-  IF (SELECT ESTATUS FROM dbo.REC_CAB_PED WHERE NPED=@NPED)<>'RECIBIDO' THROW 52000,'La segunda recepcion no cerro la orden.',1;
-  IF (SELECT CTDREC FROM dbo.REC_DET_PED WHERE IDPED=@IDPED)<>2 THROW 52000,'El acumulado recibido es incorrecto.',1;
 
   DECLARE @NPED_R nvarchar(255)=CONCAT('UTRECR',@@SPID),@IDPED_R nvarchar(255);
   SET @IDPED_R=CONCAT('1-',@NPED_R);
@@ -61,7 +53,7 @@ BEGIN TRY
   IF EXISTS(SELECT 1 FROM dbo.DAT_MB51 WHERE DOCP=@DOCREC) THROW 52000,'El rechazo genero inventario.',1;
 
   ROLLBACK;
-  SELECT 'OK' RESULTADO,'identificadores unicos, total, parcial, multiples, faltante, guia, rechazo, inventario e idempotencia' CASOS;
+  SELECT 'OK' RESULTADO,'identificadores unicos, cierre contabilizado, faltante, guia, rechazo, inventario e idempotencia' CASOS;
 END TRY
 BEGIN CATCH
   IF @@TRANCOUNT>0 ROLLBACK;

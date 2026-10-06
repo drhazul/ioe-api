@@ -39,7 +39,7 @@
 
 ## Planeacion y sugeridos de compra (2026-07-10)
 
-- El catálogo `/sugeridos/catalogos/estatus` conserva `PARCIAL`; la app lo oculta únicamente para Jefe y Analista de Inventarios en el filtro de Órdenes de compra.
+- Al contabilizar una recepción se cierra también la O.C. como `CONTABILIZADO`, incluso cuando queden cantidades no recibidas; esas diferencias permanecen como evidencia histórica y la O.C. no vuelve a Pedidos pendientes.
 - El catálogo agrega `RECHAZADO`; `sp_rec_recepcion_rechazar` sincroniza ese estado en `REC_CAB_PED`. El Jefe puede cancelar la O.C. o actualizar únicamente `CTDPED`; se rechazan costo, unidad, altas y bajas mientras permanezca rechazada. Script `sql/2026-08-21_recepcion_rechazo_sincroniza_oc.sql`.
 - `POST /sugeridos/:nped/devolver-sucursal` devuelve una recepción `RECHAZADO` mediante motivo obligatorio. `sp_rec_recepcion_devolver_sucursal` la marca `DEVUELTO`, cambia la O.C. a `PROCESADO`, reconstruye el borrador y pone sus cantidades en cero para recaptura; script `sql/2026-08-21_recepcion_rechazada_devolver_sucursal.sql`.
 - La transición a `VALIDADO` sincroniza recepción y O.C.; el estado se agrega a `ESTATUS_SUG`, aparece en el filtro de Órdenes de compra y permanece visible para la revisión administrativa de DAT_REC. Script `sql/2026-08-21_recepcion_validado_sincroniza_oc.sql`.

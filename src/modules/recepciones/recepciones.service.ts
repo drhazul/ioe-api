@@ -50,7 +50,7 @@ export class RecepcionesService {
     const where = [
       ctx.isBranchManager
         ? `UPPER(LTRIM(RTRIM(ISNULL(h.ESTATUS, '')))) = 'PROCESADO'`
-        : `UPPER(LTRIM(RTRIM(ISNULL(h.ESTATUS, '')))) IN ('PROCESADO', 'PARCIAL', 'VALIDADO', 'RECHAZADO')`,
+        : `UPPER(LTRIM(RTRIM(ISNULL(h.ESTATUS, '')))) IN ('PROCESADO', 'VALIDADO', 'RECHAZADO')`,
       `UPPER(LTRIM(RTRIM(ISNULL(h.SUC, '')))) IN ('DF01', 'DF04', 'DF05', 'DF06')`,
       `EXISTS (SELECT 1 FROM dbo.REC_DET_PED dx WHERE dx.NPED=h.NPED AND ISNULL(dx.BLOQ,0)<>-1 AND ISNULL(dx.CTDREC,0)<ISNULL(dx.CTDPED,0))`,
     ];
