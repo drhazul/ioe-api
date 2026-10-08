@@ -230,6 +230,7 @@ Enlaces relacionados:
 - trazabilidad UI: en cierre `CA`, el selector de formas en app permite `EFECTIVO` o `CREDITO`.
 - trazabilidad UI: el campo `aut` (Autorizacion / referencia) y boton `Generar/Asignar referencia` se muestran en app para `TARJETA`, `CHEQUE`, `TRANSFERENCIA` y `DEPOSITO 3RO`.
 - trazabilidad UI: la referencia se crea/asigna en `REF_DETALLE` y se retorna `IDREF` al formulario de pago.
+- trazabilidad UI (2026-10-08): el modal acepta importe canónico (`4537.92`) o agrupación válida (`4,537.92`) y normaliza antes de invocar API; payload numérico y validación backend permanecen sin cambios.
 - trazabilidad UI tecnica: app corrigio id temporal de formas para Flutter Web usando `nextInt(0x100000000)`; no cambia API.
 - trazabilidad UI: app bloquea cambio de `tipotran` (`CA`/`VF`) cuando ya hay formas capturadas; no cambia endpoints ni payload.
 - trazabilidad UI: `RQFAC` fue movido al AppBar y los totales de cotizacion/formas se presentan en un solo card en app; no cambia API.

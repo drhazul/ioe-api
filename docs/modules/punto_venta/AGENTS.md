@@ -69,6 +69,7 @@ Enlaces relacionados:
 - app mueve UI a `lib/features/modulos/punto_venta/cotizaciones/pago/*` y oculta tarjeta de contexto.
 - `CA` lista `EFECTIVO`/`CREDITO`; `aut`+`Generar/Asignar referencia` solo para `TARJETA/TARJETA CREDITO/CHEQUE/TRANSFERENCIA/DEPOSITO 3RO`.
 - referencias se crean/asignan en `REF_DETALLE` y regresan `IDREF` al pago.
+- El modal de pago en app acepta importe canónico (`4537.92`) o agrupación válida (`4,537.92`) y lo normaliza antes de invocar API; payload y validación backend siguen sin cambios.
 - app bloquea cambio de `tipotran` cuando ya hay formas; `RQFAC` en AppBar; totales en card único; oculta `IVA integrado sucursal`; recalcula preview al reingresar.
 - app persiste `RQFAC` con `PATCH /pvctrfolasvr/:idfol`; habilita `Imprimir ticket` consumiendo `GET /pv/cotizaciones/:idfol/cierre/print-preview`.
 - si el folio vuelve desde panel en `PAGADO/MB51PROCES`, la UI reusa `GET /pv/cotizaciones/:idfol/cierre/print-preview` para rehidratar formas persistidas y mostrar `Pagos/Faltante/Cambio` correctos.
