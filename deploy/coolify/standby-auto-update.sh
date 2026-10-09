@@ -25,7 +25,7 @@ assert s["image"] == "ioe-allinone:standby-auto", "unexpected image"
 assert s["pull_policy"] == "never", "unexpected pull policy"
 assert s["entrypoint"] == ["/usr/sbin/nginx"], "API must remain stopped"
 assert s.get("volumes") is None, "unexpected mounts"
-assert s["ports"] == [{"mode":"ingress","host_ip":"127.0.0.1","target":8085,"published":"18085","protocol":"tcp"}], "unexpected port"
+assert s["ports"] == [{"mode":"ingress","host_ip":"172.16.100.40","target":8085,"published":"18085","protocol":"tcp"}], "unexpected port"
 '
 }
 
@@ -96,7 +96,7 @@ fi
 healthy=0
 for _ in $(seq 1 30); do
   if [[ $(docker inspect -f '{{.State.Health.Status}}' "$container_name" 2>/dev/null || true) == healthy ]] \
-     && curl --silent --show-error --fail --output /dev/null http://127.0.0.1:18085/; then
+     && curl --silent --show-error --fail --output /dev/null http://172.16.100.40:18085/; then
     healthy=1
     break
   fi
