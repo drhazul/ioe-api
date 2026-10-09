@@ -42,7 +42,7 @@
 - Diferenciar rechazo físico del Encargado (`RECHAZADO`) de devolución administrativa (`DEVUELTO`): esta última reconstruye `REC_BORRADOR_REC*`, devuelve la O.C. a `PROCESADO` y no genera ni revierte inventario.
 
 ## Planeacion y sugeridos de compra
-- El API conserva `PARCIAL` en `ESTATUS_SUG`; su ocultamiento en el filtro de Órdenes de compra aplica solo en Flutter para Jefe (`IDROL=2`) y Analista (`IDROL=9005`).
+- Al contabilizar una recepción, `sp_rec_recepcion_autorizar` debe cerrar también `REC_CAB_PED.ESTATUS` como `CONTABILIZADO`, aunque existan cantidades no recibidas; no debe dejar la O.C. en `PARCIAL` ni permitir una recepción posterior.
 - `ESTATUS_SUG` incluye `RECHAZADO`. Al rechazar una recepción, el SP sincroniza la cabecera de O.C.; `PATCH /sugeridos/:nped/detalle/:idped` acepta exclusivamente `ctdped` para ese estado y solo para el Jefe. Cancelar desde `RECHAZADO` conserva las validaciones de recepción/cantidades existentes.
 - Para retornar un rechazo, el Jefe usa `POST /sugeridos/:nped/devolver-sucursal` con `obs` obligatorio. El SP admite `RECHAZADO`, verifica ausencia de MB51, pasa la recepción a `DEVUELTO`, la O.C. a `PROCESADO` y reinicia cantidades/estatus del borrador.
 - `sp_rec_recepcion_solicitar` debe sincronizar `REC_CTRL_DOC_REC.ESTATUS_REC` y `REC_CAB_PED.ESTATUS` a `VALIDADO`. Jefe/Analista incluyen ese estado en la cola DAT_REC; Encargado no lo lista.
@@ -73,6 +73,7 @@
 - `GET /transferencias/notificaciones` debe incluir `LIBERADA` para roles de sucursal solo con `SUC_SAL` y `TRANSITO` solo con `SUC_ENT`.
 - `GET /transferencias` debe ocultar `TRANSITO` a la sucursal origen; en ese estatus solo se lista para `SUC_ENT`.
 - `GET /transferencias` debe mostrar `BORRADOR` solo a `SUC_ENT`.
+- Para el jefe de inventarios, `GET /transferencias` limita cualquier consulta operativa a `PENDIENTE` y `BORRADOR` de todas las sucursales, permitiendo recuperar capturas interrumpidas; si envia `suc`, debe filtrar por sucursal de entrada o salida.
 - La evidencia de surtido se guarda en `TRAN_EVID` desde `POST /transferencias/:doc/detalle/:idpd/evidencia`; validar estado `PREPARACION` y sucursal origen/surtidora.
 - Antes de ejecutar `sp_trans_transito`, backend debe bloquear documentos con renglones sin evidencia en `TRAN_EVID`; aceptar solo data URL de imagen mayor a 500 bytes y maximo 500 KB.
 - Movimientos oficiales `DAT_CMOV`: `121` salida origen, `122` faltante reintegracion, `123` entrada destino, `124` sobrante descuento origen.
