@@ -63,6 +63,7 @@ import { FormasPagoCambiosModule } from './modules/formas-pago-cambios/formas-pa
 import { CajonEstadoModule } from './modules/cajon-estado/cajon-estado.module';
 import { CajaGeneralModule } from './modules/caja-general/caja-general.module';
 import { FacturacionModule } from './modules/facturacion/facturacion.module';
+import { CfdiModule } from './modules/cfdi/cfdi.module';
 import { OrdenesTrabajoModule } from './modules/ordenes-trabajo/ordenes-trabajo.module';
 import { SucursalesModule } from './modules/sucursales/sucursales.module';
 import { ColaboradoresModule } from './modules/colaboradores/colaboradores.module';
@@ -142,6 +143,7 @@ import { RecepcionesModule } from './modules/recepciones/recepciones.module';
     CajonEstadoModule,
     CajaGeneralModule,
     FacturacionModule,
+    CfdiModule,
     SucursalesModule,
     ColaboradoresModule,
     HorariosModule,

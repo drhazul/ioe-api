@@ -15,6 +15,7 @@
 - Órdenes de compra / Devolver rechazo (2026-08-21): `POST /sugeridos/:nped/devolver-sucursal` es exclusivo del Jefe y reutiliza `sp_rec_recepcion_devolver_sucursal`; admite `RECHAZADO`, lo deja `DEVUELTO`, cambia la O.C. a `PROCESADO` y reconstruye borrador con cantidades en cero.
 - Órdenes de compra / Validado sincronizado (2026-08-21): `sp_rec_recepcion_solicitar` cambia tanto la recepción como `REC_CAB_PED` a `VALIDADO`; el catálogo incorpora el estado y DAT_REC administrativo incluye cabeceras `VALIDADO`, mientras sucursal conserva solo `PROCESADO`.
 - Órdenes de compra / Cancelar validada (2026-08-21): solo el Jefe puede cancelar una O.C. `VALIDADO`; antes debe comprobarse ausencia de `CTDREC`, recepción contabilizada y `DAT_MB51`, y la transacción cambia la recepción a `CANCELADO` y la cabecera a `ANULADO`.
+- Facturación / Timbrado CFDI con Quadrum (2026-09-14 a 2026-10-07): `CfdiModule` monta `/cfdi/*` y timbra, cancela y emite notas de crédito y complementos de pago con Quadrum, sellando del lado de la API con el CSD de cada razón social (`FACT_CSD`). No sustituye a Facturify ni modifica `src/modules/facturacion/`; `FAC_SVR_SHAP.CFDI_PAC` indica quién timbró cada folio. Reglas de trabajo en la sección «Facturación CFDI con Quadrum».
 - Backend NestJS (TypeScript) modular por feature (`controller -> service -> dto/entity`).
 - Persistencia con TypeORM sobre MSSQL (schema `dbo`), entidades/columnas en mayúsculas.
 - Seguridad: JWT, `RolesGuard` global, `AuditInterceptor` global, `ValidationPipe` (`whitelist + transform + forbid`).
@@ -100,6 +101,51 @@
 - Punto de venta / Gestión de promociones (2026-05-26): `GET /promociones/catalogos/clientes` usa `FACT_CLIENT_SHP` con criterio `SUC=@suc AND ESTATUS=0`, toma `IDC` como `CLIENTE`, ya no limita a `TOP 200`, y deduplica por `CLIENTE` (fila `RN=1`) para devolver listado completo por sucursal al selector único del frontend.
 - Punto de venta / Cotizaciones precio manual vs promoción (2026-05-23): `PATCH /pvticketlog/:id/precio` deja de recalcular promociones sobre la línea para preservar `PVTA` manual; el proceso limpia trazas/marcadores de promo del renglón. Script recomendado de rendimiento para evaluación por línea: `sql/2026-05-23_pv_promociones_linea_indexes.sql`.
 - Punto de venta / Cotizaciones ORD vs precio manual (2026-05-23): `PATCH /pvticketlog/:id` solo reaplica promoción cuando cambian campos de cálculo (`IDFOL/ART/UPC/CTD`); al asignar/quitar `ORD` no recalcula promo ni regresa `PVTA` a catálogo.
+
+## Facturación CFDI con Quadrum
+
+Segundo camino de timbrado, **separado del de Facturify**. Los dos conviven y ninguno sustituye al otro todavía.
+
+### Regla que no se rompe
+- **No tocar `src/modules/facturacion/`** salvo que el cambio sea explícitamente para Facturify. Todo lo de Quadrum vive en `src/modules/cfdi/`.
+- `FAC_SVR_SHAP.CFDI_PAC` decide a quién se consulta o cancela: `QUADRUM` para los nuestros, nulo para los de Facturify. Antes de operar un folio ajeno, revisar esa columna.
+- Un folio con CFDI vigente no se vuelve a timbrar. Solo se permite si el anterior quedó cancelado, y entonces el control de folios da una reemisión nueva.
+
+### Dónde está cada cosa
+- `cfdi.controller.ts`: rutas `/cfdi/*`. `JwtAuthGuard` a nivel de controlador; solo el alta de CSD exige admin.
+- `timbrado.service.ts`: sella y timbra. `emision.service.ts`: folios reales (reserva, timbra, marca).
+- `cancelacion.service.ts`, `nota-credito.service.ts`, `complemento-pago.service.ts`: los tres flujos que cuelgan de una factura.
+- `csd.service.ts` / `csd.repositorio.ts` / `cripto.ts`: custodia de certificados y cuentas del PAC.
+- `cadena-original.ts`, `cfdi-sellador.ts`, `comprobante.ts`, `recibo-pago.ts`: el motor. `cfdi-lector.ts` lee un CFDI timbrado; `representacion-impresa.service.ts` lo imprime.
+- `quadrum.client.ts` y `quadrum-cancelacion.client.ts`: los dos servicios SOAP, con namespace y contrato distintos.
+
+### Al tocar el motor
+- La cadena original es `||v1|v2|…|vn||`, separador **antes** de cada valor. Está cubierta por pruebas contra el XSLT del SAT: si una falla, la cadena está mal, no la prueba.
+- `NoCertificado` y `Certificado` se ponen **antes** de generar la cadena; `Sello` nunca forma parte de ella.
+- El XML se envía en UTF-8 **sin BOM**.
+- `InformacionGlobal` solo en ingresos. En egresos a público en general el PAC responde `CFDI40130`.
+- El REP (`tipo P`) no se arma con `construirComprobante`: tiene su propio constructor porque va en ceros con moneda `XXX` y el importe vive en el complemento.
+
+### Al tocar credenciales
+- El CSD y la cuenta de Quadrum son de la misma razón social y viajan juntos (`CredencialesSellado.cuentaPac`). Sellar con un certificado y timbrar con la cuenta de otro RFC es un error que el PAC rechaza.
+- Las contraseñas se cifran con `CSD_CIFRADO_LLAVE`. **Nunca** escribirlas en logs, respuestas HTTP ni archivos de evidencia.
+- Sin cuenta propia, el RFC cae a `QUADRUM_USUARIO`/`QUADRUM_CONTRASENA` del `.env`. Ese respaldo se conserva para el certificado de pruebas.
+
+### Resultado incierto
+Si el PAC no contesta, el timbre **pudo haberse consumido**. En ese caso el folio NO se libera: liberarlo permitiría reusar la serie y terminar con dos CFDI del mismo ticket. Hay que consultar por UUID antes de reintentar. La bandera es `PacError.resultadoIncierto`.
+
+### Antes de gastar un timbre
+Todos los flujos tienen simulación (`probar`): arma y sella sin llamar al PAC ni escribir en la base. Úsala para validar datos del folio antes de timbrar, y pide confirmación al usuario antes de cualquier operación que gaste timbre o cancele.
+
+### Evidencia
+Cada timbrado y cada cancelación dejan carpeta en `CFDI_EVIDENCIA_DIR` con el XML enviado, la cadena, el acuse y el timbrado. Esas carpetas están en `.gitignore` y no deben commitearse. El `.cer` y la llave nunca se escriben ahí.
+
+### Pruebas
+`npx jest src/modules/cfdi` cubre cadena original, sellado, comprobantes, REP, cancelación y mapeo de ventas. Correrlas antes de entregar cualquier cambio del módulo.
+
+### Compilación en watch
+El proyecto vive dentro de OneDrive, donde los avisos de cambio de archivo no son confiables y el compilador incremental llega a servir código viejo. `tsconfig.json` usa `watchOptions` con sondeo. Si un cambio "no se aplica" aunque esté en el código, borrar `dist` y `*.tsbuildinfo` y volver a levantar.
+
 
 ## Documentación por módulos
 - Faltantes y Sobrantes: `docs/modules/faltantes_sobrantes/AGENTS.md` (README: `docs/modules/faltantes_sobrantes/README.md`)

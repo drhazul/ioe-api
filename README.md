@@ -89,7 +89,66 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Punto de venta / Gestión de promociones (2026-05-26): `GET /promociones/catalogos/clientes` toma clientes desde `FACT_CLIENT_SHP` con filtro `SUC=@suc` y `ESTATUS=0`; usa `IDC` como identificador de `CLIENTE`, sin `TOP 200`, y entrega catálogo deduplicado para búsqueda/selección única en frontend.
 - Punto de venta / Cotizaciones precio manual vs promoción (2026-05-23): al editar `PVTA` por `PATCH /pvticketlog/:id/precio`, backend conserva precio manual sin reaplicar promoción sobre esa línea y limpia trazabilidad de promo por renglón; para optimizar consulta/evaluación de promociones por línea se agrega script `sql/2026-05-23_pv_promociones_linea_indexes.sql`.
 - Punto de venta / Cotizaciones ORD vs precio manual (2026-05-23): al guardar cambios de renglón por `PATCH /pvticketlog/:id` para asignar o liberar `ORD`, backend ya no recalcula promoción de la línea ni revierte `PVTA` manual; la reaplicación promo queda acotada a cambios de `IDFOL/ART/UPC/CTD`.
+- Facturación / Timbrado CFDI con Quadrum (2026-09-14 a 2026-10-07): nuevo módulo `CfdiModule` en `/cfdi/*` que timbra, cancela y emite notas de crédito y complementos de pago con Quadrum, con CSD y cuenta del PAC por razón social en `FACT_CSD`. Convive con Facturify sin modificarlo: `FAC_SVR_SHAP.CFDI_PAC` distingue quién timbró cada folio. Detalle en la sección «Facturación CFDI con Quadrum».
 - Notas de documentación viva: este README se modifica solo por cambios de arquitectura, módulos o rutas principales; los ajustes funcionales se registran en los README/AGENTS del módulo correspondiente.
+
+## Facturación CFDI con Quadrum
+
+Camino de timbrado propio, **independiente de Facturify**. Los dos conviven: la columna `FAC_SVR_SHAP.CFDI_PAC` dice quién timbró cada folio (`QUADRUM`, o nulo para los de Facturify) y de eso depende a quién se le consulta o cancela después. El flujo de Facturify no se modificó.
+
+La diferencia de fondo: Facturify sella del lado del PAC con los certificados que tiene en custodia; **Quadrum no sella**, recibe el XML ya sellado. Por eso este camino necesita los `.cer` y `.key` de cada razón social, y por eso existe `FACT_CSD`.
+
+### Qué hace
+- Módulo `src/modules/cfdi/` montado en `/cfdi/*`. Arma, sella y timbra CFDI 4.0 contra los dos servicios SOAP de Quadrum: `/timbrar` (timbrar, consulta, obtener_pdf) y `/cancelar` (cancelar, acuse, estatus SAT).
+- Comprobantes soportados: ingreso (`I`), egreso (`E`, notas de crédito) y pago (`P`, complementos con `pago20:Pagos` 2.0).
+- Genera la representación impresa (PDF) por su cuenta, con código QR de verificación del SAT. No se le pide al PAC.
+
+### Endpoints
+| Ruta | Qué hace | ¿Escribe? |
+|---|---|---|
+| `POST /cfdi/probar/:idFol` | Simula: arma y sella sin llamar al PAC | No |
+| `POST /cfdi/emitir/:idFol` | Timbra el folio y lo marca `CFDI_PAC='QUADRUM'` | Sí |
+| `GET /cfdi/xml/:idFol` | XML timbrado (el documento fiscal) | No |
+| `GET /cfdi/pdf/:idFol` | Representación impresa; se genera y cachea | Sí (archivo) |
+| `POST /cfdi/cancelacion` | Solicita la cancelación ante el SAT | Sí |
+| `GET /cfdi/cancelacion/estatus/:uuid` | Consulta al SAT y sincroniza el folio | Sí |
+| `GET /cfdi/acuse-cancelacion/:idFol` | Acuse firmado por el SAT | No |
+| `GET/POST /cfdi/nota-credito/:idFol/*` | Conceptos disponibles, simular y emitir | Sí al emitir |
+| `GET/POST /cfdi/complemento-pago/:idFol/*` | Estado de cuenta, simular y emitir | Sí al emitir |
+| `POST/GET /cfdi/csd` | Alta y listado de certificados (alta: solo admin) | Sí |
+
+### Certificados y cuentas por razón social
+`FACT_CSD` custodia un CSD por RFC emisor. El RFC **no se captura**: se lee del propio `.cer`, así no hay forma de subir el certificado equivocado bajo otro RFC. Régimen fiscal y código postal sí se capturan, porque el certificado no los trae.
+
+Cada renglón guarda además la **cuenta de Quadrum de esa razón social** (`QUADRUM_USUARIO` / `QUADRUM_PASSWORD_CIFRADA`): cada RFC timbra con su propio contrato. Si no se captura, ese RFC cae a la cuenta del `.env`.
+
+Las dos contraseñas —la del `.key` y la del PAC— se cifran con AES-256-GCM. La llave vive en `CSD_CIFRADO_LLAVE` del `.env`, nunca en la base. Agregar una razón social es captura, no código.
+
+### Series y folios
+- Facturas: serie = primeras 4 letras del RFC, vía `sp_fact_cfdi_serie_reserve`.
+- Notas de crédito: serie `NC` + 2 letras del RFC. Complementos de pago: `PG` + 2 letras. Ambas por `sp_fact_cfdi_rel_reserve`, con consecutivo propio por serie para no abrir huecos en la numeración de facturas.
+- Notas y complementos **no crean renglón en `FAC_SVR_SHAP`**: se registran en `FACT_CFDI_FOLIOS_DIARIOS` con `IDFOL` terminado en `-NC` o `-PG`, que es también como se relacionan con su factura.
+
+### Cancelar y volver a facturar
+Una factura cancelada deja el folio en `ESTATUS='PENDIENTE'` para poder rehacerla —misma regla que ya usaba Facturify—, con el rastro en `CFDI_STATUS` y `CFDI_CANCEL_STATUS`. El folio se libera en cuanto el SAT acepta la solicitud, sin esperar a que la dé por concluida, porque esa confirmación tarda. Al refacturar se limpian las marcas de cancelación y el control de folios asigna una reemisión nueva.
+
+### Lo que cuesta caro si se olvida
+- **Cadena original**: el formato del SAT es `||v1|v2|…|vn||`, con el separador **antes** de cada valor. Un `|` de más al inicio y el PAC rechaza con `CFDI40102`.
+- **`/cancelar` lee `cer` y `key` como texto**: van en base64 de **PEM**, no de DER. Con DER responde `'ascii' codec can't decode byte 0x82`.
+- **`InformacionGlobal` solo existe en ingresos**. En una nota de crédito a público en general el PAC rechaza con `CFDI40130`.
+- **El REP va en ceros**: `SubTotal="0"`, `Total="0"`, `Moneda="XXX"`, sin `FormaPago` ni `MetodoPago`. El importe vive en el complemento, y la representación impresa debe mostrarlo o el documento parece decir que no se pagó nada.
+- **Forma de pago `99`** vale en la factura a crédito, nunca al cobrarla en un REP.
+- **El ambiente de pruebas valida al receptor contra el padrón real del SAT**: los RFC de prueba fallan con `CFDI40147`. En devws pasa `XAXX010101000`.
+
+### Scripts SQL
+- `sql/2026-09-22_fact_csd.sql`: tabla `FACT_CSD`.
+- `sql/2026-09-23_fact_cfdi_pac.sql`: columna `CFDI_PAC` en `FAC_SVR_SHAP`.
+- `sql/2026-10-01_fact_cfdi_nota_credito.sql` y `sql/2026-10-01_fact_cfdi_relacionados.sql`: folios de notas y complementos.
+- `sql/2026-10-07_fact_csd_credenciales_pac.sql`: cuenta de Quadrum por razón social.
+
+### Variables de entorno
+`QUADRUM_ENDPOINT`, `QUADRUM_ENDPOINT_CANCELACION`, `QUADRUM_USUARIO`, `QUADRUM_CONTRASENA` (cuenta por omisión), `QUADRUM_TIMEOUT_MS`, `CSD_CIFRADO_LLAVE`, `CFDI_STORAGE_BASE_PATH`, `CFDI_EVIDENCIA_DIR`.
+
 
 ## Arquitectura
 - NestJS + TypeORM (`mssql`).

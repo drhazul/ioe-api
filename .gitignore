@@ -54,3 +54,9 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Reporte generado por scripts/cfdi-prueba-integral.mjs
+cfdi-prueba-integral.txt
+
+# Evidencia local de timbrados de prueba (XML con datos fiscales)
+cfdi-timbrados/
