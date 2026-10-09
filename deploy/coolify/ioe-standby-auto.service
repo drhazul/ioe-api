@@ -1,0 +1,11 @@
+[Unit]
+Description=Rebuild private IOE standby front when either GitHub master changes
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+ConditionPathExists=/data/coolify/services/tysuzjl0xcdbhfje49pbcqyg/docker-compose.yml
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ioe-coolify-auto/standby-auto-update.sh
+TimeoutStartSec=50min
+Nice=10

@@ -1,0 +1,37 @@
+# Build both GitHub repositories into one standby image. Runtime starts only
+# Nginx when used by standby-front.compose.yaml; compiled API stays inactive.
+FROM ghcr.io/cirruslabs/flutter:stable AS flutter_build
+WORKDIR /app/ioe_app
+COPY ioe_app/ ./
+# The repository's assets/.env is excluded from the build context. Flutter
+# requires this asset, so generate a public, non-secret local API path.
+RUN printf 'API_BASE_URL_WEB=/api\nAPI_BASE_URL=\n' > assets/.env \
+    && flutter pub get \
+    && flutter build web --release --pwa-strategy=none
+
+FROM node:20-alpine AS api_build
+WORKDIR /api/ioe-api
+COPY ioe-api/package*.json ./
+RUN npm ci
+COPY ioe-api/ ./
+RUN npm run build
+
+FROM node:20-alpine
+ARG API_SHA
+ARG APP_SHA
+LABEL org.opencontainers.image.source-api="https://github.com/drhazul/ioe-api" \
+      org.opencontainers.image.source-app="https://github.com/drhazul/ioe_app" \
+      org.opencontainers.image.revision-api="${API_SHA}" \
+      org.opencontainers.image.revision-app="${APP_SHA}"
+RUN apk add --no-cache nginx
+WORKDIR /srv/api
+COPY --from=api_build /api/ioe-api/dist ./dist
+COPY --from=api_build /api/ioe-api/node_modules ./node_modules
+COPY --from=api_build /api/ioe-api/package*.json ./
+WORKDIR /srv/www
+COPY --from=flutter_build /app/ioe_app/build/web ./web
+COPY deploy/nginx.conf /etc/nginx/nginx.conf
+EXPOSE 8085
+ENV NODE_ENV=production PORT=3001
+ENTRYPOINT ["/usr/sbin/nginx"]
+CMD ["-g", "daemon off;"]

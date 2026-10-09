@@ -1,0 +1,19 @@
+# Coolify: front standby privado
+
+`standby-front.compose.yaml` inicia solo Nginx/Flutter. No inicia API, jobs ni conexiones SQL. La imagen antigua enviada desde `.234` intentaba enviar `/api/` a `127.0.0.1:3001` dentro del contenedor; la imagen automática responde `503` para dejar explícito que API standby está inactiva. Este recurso sirve únicamente para comprobar front estático en sombra.
+
+La imagen previa `ioe-allinone:master-crm-retired-20261007` se importó al Docker de `ioevps` como punto de retorno. Imagen de origen: `192.168.10.234`, ID `sha256:dc7440ee7c2e0212802720c91e6d5635aee78d0aef10fabc760f3542bfbf1047`, HEAD de build API `4f501807e6271b6e8441ba4885799ad2d53624d8` y App `463a3c1f6c739e8e89b9ff2921c06dd3f34789d1`. Tras `docker save`/`docker load`, el almacén OCI de Docker 29 en `.40` presenta ID `sha256:4dc2ef1fd07b08100187aadfc68520e0396fd93f70c484f882bee85d996b894d`; configuración e índice de 13 capas coinciden por SHA-256 con origen.
+
+Crear recurso **Docker Compose Empty** en proyecto `IOE Standby`, entorno `standby`, con el YAML de este directorio. Revisar Compose desplegable de Coolify antes de arrancar. El puerto `18085` debe quedar ligado solo a `127.0.0.1`. Probar por SSH con `ssh -L 18085:127.0.0.1:18085 root@172.16.100.40` y abrir `http://127.0.0.1:18085`.
+
+## Actualización desde ambos repositorios
+
+El recurso existente usa `ioe-allinone:standby-auto` en Docker local de `.40`. `ioe-standby-auto.timer` revisa cada cinco minutos `master` de `https://github.com/drhazul/ioe-api.git` y `https://github.com/drhazul/ioe_app.git`. Si cambia cualquiera, `standby-auto-update.sh` descarga ambos HEAD, construye una imagen conjunta con `Dockerfile.standby-auto` y recrea solo `standby-front` con el Compose generado por Coolify. El API queda compilado en la imagen, pero el `entrypoint` inicia exclusivamente Nginx. La ruta `/api/` responde 503 en este preview privado. Nunca iniciar el API standby mediante este timer.
+
+`assets/.env` rastreado por Git queda fuera del build Docker; durante compilación se crea únicamente `API_BASE_URL_WEB=/api` y `API_BASE_URL` vacío. Otros `.env`, claves, `.git`, `node_modules` y salidas de build también se excluyen. El script bloquea rutas del CRM retirado y despliegue si cambian UUID, imagen, puertos, mounts o entrypoint de Compose. Si falla build no mueve etiqueta activa; si health/HTTP del front nuevo falla restaura la imagen anterior. No borra volúmenes ni imágenes antiguas.
+
+Instalación en `.40`: copiar Dockerfile, Nginx, `.dockerignore` y script a `/opt/ioe-coolify-auto/` (directorio `0700`); copiar unidades a `/etc/systemd/system/`; dar `0700` al script; ejecutar `systemctl daemon-reload`. Antes de activar timer, etiquetar imagen previa como `ioe-allinone:standby-auto`, guardar Compose fuente con esa etiqueta y ejecutar una vez `systemctl start ioe-standby-auto.service`. Tras comprobar salud, `systemctl enable --now ioe-standby-auto.timer`.
+
+Operación: `systemctl status ioe-standby-auto.timer`, `journalctl -u ioe-standby-auto.service -n 100 --no-pager`, y `cat /var/lib/ioe-coolify-auto/active-heads` muestran temporizador, último build y SHA de API/App. `systemctl stop ioe-standby-auto.timer` pausa futuros cambios; para retorno manual, etiquetar `ioe-allinone:standby-previous` como `ioe-allinone:standby-auto` y recrear solo `standby-front` con el Compose de Coolify. El reinicio automático directo por Compose aparece en systemd/Docker, no en historial de despliegues Coolify. No publicar panel para usar webhooks GitHub; el sondeo es saliente y privado.
+
+Conservar `ioe-standby-front` anterior en `127.0.0.1:8085` hasta validar el recurso. No arrancar `ioe-standby-api` mientras `IOELOCAL` destino esté `RESTORING`. Nginx público en CT `.3` sigue sin nueva ruta. Ver plan y seguimiento en raíz `docs/COOLIFY_*.md`.

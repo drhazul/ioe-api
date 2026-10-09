@@ -1,0 +1,12 @@
+[Unit]
+Description=Check IOE GitHub repositories for private standby rebuilds
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=ioe-standby-auto.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+**/.env
+**/.env.*
+**/.git
+**/node_modules
+**/.dart_tool
+**/build
+**/dist
+**/.ssh
+**/*.pem
+**/*.key
+**/id_rsa*
