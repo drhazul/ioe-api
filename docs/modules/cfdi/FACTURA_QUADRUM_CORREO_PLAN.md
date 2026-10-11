@@ -1,13 +1,13 @@
 # Plan: envío de CFDI por correo en FACTURA_QUADRUM
 
 Fecha de preparación: 2026-10-10
-Estado: diseño v1 Gmail aprobado para piloto; API/App implementados en repositorios y DDL aplicado en `IOELOCAL` producción. El titular reporta que rotó el secreto expuesto y actualizó `.env`; no se verificó el valor con Google. Clave de cifrado generada y guardada en `.env` local; provisionamiento en backend desplegado, despliegue y UAT siguen pendientes.
+Estado: implementación desplegada en producción; configuración OAuth, consentimiento, envío de prueba y UAT pendientes. Envío automático sigue apagado.
 Alcance de este documento: diseño y compuertas operativas; el seguimiento registra avance verificable.
 
 ## Preparación OAuth Google
 
 - Para el piloto inicial, el titular eligió su cuenta personal de Gmail actual. Esto permite probar el flujo; todavía no define proveedor ni cuenta de producción.
-- Ya existe proyecto de Google Cloud y cliente OAuth web. URI registrada: `https://erp.ioebusiness.com.mx/api/auth/google/callback`. Titular confirma que `erp.ioebusiness.com.mx` será hostname público de producción; conservar esta URI, ya coincide con el callback de la API. TLS público ya enruta al build conjunto de `.234`; la imagen vigente aún no incluye el callback de correo.
+- Ya existe proyecto de Google Cloud y cliente OAuth web. URI registrada: `https://erp.ioebusiness.com.mx/api/auth/google/callback`. Titular confirma que `erp.ioebusiness.com.mx` será hostname público de producción; conservar esta URI, ya coincide con el callback de la API. TLS público enruta al build conjunto de `.234`; callback ya desplegado, GET sin state devuelve 400 esperado.
 - La pantalla OAuth quedó en modo externo/pruebas y la cuenta actual fue añadida como usuaria de prueba, según las confirmaciones del titular.
 - El flujo solicita `openid`, `email` y `https://www.googleapis.com/auth/gmail.send`. Google clasifica `gmail.send` como sensible; validar requisitos antes de publicar para uso continuo.
 - La API ya tiene ruta de inicio y callback en código. El titular no necesita copiar ni generar el refresh token: al autorizar desde el panel, el callback lo intercambia y lo guarda cifrado en SQL. No hay evidencia de consentimiento ni token generados todavía.
@@ -17,9 +17,9 @@ Alcance de este documento: diseño y compuertas operativas; el seguimiento regis
 - La clave local `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY` ya fue generada y guardada sin mostrar su valor. El backend desplegado debe recibir la misma clave como secreto estable antes de OAuth.
 - Despliegue de producción: usar build conjunto front+back en `192.168.10.234`, bajo `/root/ioe_stack`; contenedor `ioe`, imagen `ioe-allinone:latest`, front `8085`, API `3001`. No desplegar integración en `.40` ni activar API standby.
 - Ruta pública aplicada: `erp.ioebusiness.com.mx` conserva TLS en Nginx `.3`; upstream actual `.3` → `172.16.100.2:8085` (HAProxy ingress) → `.234:8085`; Nginx del contenedor conjunto sirve Flutter y proxya `/api/` a `127.0.0.1:3001`. Sin cambio DNS ni de URI OAuth. Respaldo del vhost: `/root/erp-proxy-backup-20261010/erp.ioebusiness.com.mx.conf.before-combined-prod`.
-- Postflight de la ruta: Nginx `.3` pasó `nginx -t` y quedó activo tras reload; HTTPS `/` y `/api/health/db` responden 200 con certificado válido. El callback de correo responde 404 porque el build vigente en `.234` aún no incluye esta integración; falta publicar la nueva imagen.
-- Preflight de release: `/root/ioe_stack/deploy/ioe-api.env` es `root:root`, modo `600`; consulta de nombres confirma que aún no contiene variables `GOOGLE_*` ni `CFDI_EMAIL_*`. Producción sigue en API `d9bca1b` y App `68d872b`; esos `origin/master` no contienen el módulo/pantalla Quadrum requeridos por correo. Repos locales tienen siete commits adelantados y cambios sin commit; API además va uno detrás. El historial API pendiente incluye evidencia de timbrado retirada después del árbol final; App incluye cambios de transferencias. No publicar `master` local tal cual: preparar release limpio con solo dependencias Quadrum+correo y preservar configuración/cambios del host.
-- El host de producción requiere secretos OAuth y la misma `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY` local, provisionados en su archivo privado de entorno. No copiar secretos a este repositorio ni alterar configuración productiva durante preparación.
+- Postflight de producción: Nginx `.3` activo; HTTPS `/` y `/api/health/db` responden 200 con TLS válido. Tras el release, API `/health`, front y DB health responden 200; callback sin state da 400 esperado.
+- Preflight previo al release (superado): se preservó `/root/ioe_stack/deploy/ioe-api.env` y cambios locales del host; se publicó desde árbol limpio sin snapshot SQL ni secretos.
+- El env privado de producción sigue intacto porque política de comandos rechazó transferir valores desde `.env`. Titular debe cargar por canal seguro `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `GOOGLE_OAUTH_PUBLISHING_STATUS=TESTING` y `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY`; no copiar refresh token.
 
 Fuentes oficiales: [flujo OAuth web y acceso offline](https://developers.google.com/identity/protocols/oauth2/web-server?hl=es-419), [alcances Gmail y clasificación de `gmail.send`](https://developers.google.com/workspace/gmail/api/auth/scopes), [modo externo de pruebas y vencimiento a siete días](https://support.google.com/cloud/answer/15549945?hl=es).
 
@@ -173,8 +173,8 @@ Estados sugeridos: `PENDIENTE`, `PROCESANDO`, `ENVIADO` (proveedor aceptó), `RE
 
 ### F6 — Liberación y UAT
 
-- Desplegar API/App mediante el flujo autorizado; la migración de correo ya fue aplicada en `IOELOCAL`.
-- Postflight: versión, estado de worker, configuración, entrega a buzón controlado y logs sin secretos.
+- Completado: commits API `63b11cf` y App `b9fca0b` publicados y desplegados; build conjunto exitoso; DDL ya aplicado en `IOELOCAL`.
+- Postflight técnico completado: contenedor activo; API/front/DB health HTTP 200; callback HTTP 400 sin state. Falta cargar env, consentir OAuth, enviar prueba y completar UAT.
 - UAT autenticado del titular/área de Facturación: comprobar destinatario real autorizado, XML, PDF, cuerpo del mensaje, reintentos y visualización de estado.
 
 ## Criterios de aceptación
@@ -188,3 +188,11 @@ Estados sugeridos: `PENDIENTE`, `PROCESANDO`, `ENVIADO` (proveedor aceptó), `RE
 7. No se envían automáticamente notas, complementos, CFDI Facturify ni documentos históricos.
 8. Bitácora permite relacionar `IDFOL`, UUID, destinatario enmascarado, proveedor, intentos y resultado sin guardar adjuntos ni secretos.
 9. La autorización OAuth permanece válida bajo el modo aprobado para operación; el piloto de siete días no se presenta como credencial de producción.
+
+## Estado del release 2026-10-10
+
+El código está publicado y desplegado: API `63b11cf`, App `b9fca0b`; imagen activa `sha256:34bcc71984fbf6d4163fe7ab1c5aa0f31992308a0052c072351843e17e0b7fb9`. Health del API, front, base y HTTPS público pasó. La ruta callback existe. Se conservó rollback de imagen y se añadió `/root/ioe_stack/.dockerignore` para excluir `.git`, `.env` privados, backups, outputs y archivos de llave; se conserva `ioe_app/assets/.env` sin nombres secretos.
+
+El env privado `/root/ioe_stack/deploy/ioe-api.env` no se modificó porque la política de comandos rechazó transferir credenciales locales. Intervención titular requerida: agregar las variables OAuth y clave de cifrado indicadas arriba por canal seguro, reiniciar el contenedor, autorizar Gmail desde el panel, enviar prueba XML/PDF y completar UAT. Estado OAuth previsto `TESTING`; `AUTOMATICO=0` permanece. Sin consentimiento ni correos enviados.
+
+El build reportó avisos de WASM y 81 vulnerabilidades npm, incluidas 2 críticas; no se actualizaron dependencias automáticamente.
