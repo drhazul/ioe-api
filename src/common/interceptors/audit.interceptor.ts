@@ -39,6 +39,10 @@ export class AuditInterceptor implements NestInterceptor {
       'authPassword',
       'refreshToken',
       'accessToken',
+      'destinatario',
+      'recipient',
+      'email',
+      'to',
     ]) {
       if (k in body) body[k] = '[REDACTED]';
     }

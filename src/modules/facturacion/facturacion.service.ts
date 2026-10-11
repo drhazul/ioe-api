@@ -800,15 +800,28 @@ export class FacturacionService {
     const whereSql = where.length ? `WHERE ${where.join('\n  AND ')}` : '';
     const offsetParam = `@${params.length}`;
     const fetchParam = `@${params.length + 1}`;
+    // En los pendientes manda el ultimo movimiento, no la fecha de la
+    // venta: un folio que vuelve a pendiente tras cancelarse trae FCNF de
+    // hoy y tiene que aparecer arriba. Los que nunca se facturaron tienen
+    // FCNF nulo y siguen ordenandose por FCN, como siempre.
+    const fcnExpr = this.facColumnRef({
+      alias: 'f',
+      columns,
+      primary: 'FCN',
+      fallbackColumns: ['FCNF'],
+      defaultSql: 'f.FCN',
+    });
+    const fcnfExpr = this.facColumnRef({
+      alias: 'f',
+      columns,
+      primary: 'FCNF',
+      fallbackColumns: ['FCN'],
+      defaultSql: 'f.FCN',
+    });
+
     const orderDateExpr =
       filterEstatus === 'PENDIENTE'
-        ? this.facColumnRef({
-            alias: 'f',
-            columns,
-            primary: 'FCN',
-            fallbackColumns: ['FCNF'],
-            defaultSql: 'f.FCN',
-          })
+        ? `COALESCE(${fcnfExpr}, ${fcnExpr})`
         : this.facColumnRef({
             alias: 'f',
             columns,
