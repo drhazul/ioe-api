@@ -19,10 +19,8 @@ import { ActualizarCorreoConfigDto } from './dto/actualizar-correo-config.dto';
 import { ProbarCorreoDto } from './dto/probar-correo.dto';
 import { ErrorEntregaCorreo } from './gmail.provider';
 import { GoogleOAuthService } from './google-oauth.service';
-import {
-  CFDI_CORREO_PROVIDER,
-  ProveedorCorreo,
-} from './proveedor-correo';
+import { CFDI_CORREO_PROVIDER } from './proveedor-correo';
+import type { ProveedorCorreo } from './proveedor-correo';
 
 @Injectable()
 export class CfdiCorreoService {

@@ -21,7 +21,7 @@ export class GoogleOAuthCallbackController {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader(
       'Content-Security-Policy',
-      \"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'\",
+      "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
     );
 
     if (error || !code || !state) {
