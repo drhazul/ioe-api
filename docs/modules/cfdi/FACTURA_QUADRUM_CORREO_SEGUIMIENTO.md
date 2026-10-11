@@ -1,7 +1,7 @@
 # Seguimiento: envío de CFDI por correo en FACTURA_QUADRUM
 
 Actualizado: 2026-10-10
-Estado: API/App publicado y desplegado en producción; variables OAuth/clave cargadas en backend y contenedor reiniciado. Postflight API/front/DB HTTP 200, TLS válido y callback sin parámetros HTTP 400 esperado. Falta consentir Gmail, enviar prueba y completar UAT. Envío automático sigue desactivado.
+Estado: API/App publicados en producción; variables OAuth/clave cargadas; Gmail conectado y refresh token cifrado presente. `AUTOMATICO=1` por decisión del titular. UAT de XML/PDF bloqueada porque XML históricos no están accesibles desde almacenamiento del contenedor; no se envió correo.
 Plan: [FACTURA_QUADRUM_CORREO_PLAN.md](FACTURA_QUADRUM_CORREO_PLAN.md)
 
 ## Avance comprobable
@@ -29,24 +29,24 @@ Plan: [FACTURA_QUADRUM_CORREO_PLAN.md](FACTURA_QUADRUM_CORREO_PLAN.md)
 | ID | Actividad | Estado | Criterio de cierre |
 |---|---|---|---|
 | QMAIL-00 | Diseño y alcance v1 | Completo | Gmail API piloto; una cuenta global; solo facturas Quadrum. |
-| QMAIL-01 | Preparar OAuth en Cloud | Preparado para piloto | Cliente web, callback HTTPS productivo y cuenta tester configurados; app sigue en `TESTING`. Falta consentimiento Gmail y resolver publicación para operación continua. |
-| QMAIL-02 | API y outbox | API desplegada; env cargado | Falta consentimiento OAuth, validar conexión autenticada y ejecutar prueba controlada de XML/PDF. |
-| QMAIL-03 | Panel Flutter | App desplegada | Confirmar rol admin permitido por `ADMIN_ROLE_IDS` o `ADMIN_NIVELES`; hacer UAT. |
-| QMAIL-04 | Preflight de datos y DDL | Completo | Backup verificado, DDL aplicado en `IOELOCAL`, postflight PASS; envío automático permanece apagado. |
+| QMAIL-01 | Preparar OAuth en Cloud | Consentimiento completado; app en `TESTING` | Cliente web y callback HTTPS registrados; falta resolver publicación/verificación para operación continua. |
+| QMAIL-02 | API y outbox | API desplegada; env cargado; Gmail conectado | DB confirma cuenta conectada y refresh token cifrado; callback activo. |
+| QMAIL-03 | Panel Flutter | App desplegada | OAuth se autorizó desde panel admin; falta UAT de adjuntos. |
+| QMAIL-04 | Preflight de datos y DDL | Completo; `AUTOMATICO=1` desde 2026-10-10 | Backup verificado, DDL aplicado, postflight PASS; activación solicitada por titular. |
 | QMAIL-05 | Release conjunto y habilitar callback | Completo | Commits publicados en `master`; API `63b11cf`, App `b9fca0b`; build conjunto desplegado en `.234`; health HTTP 200 y callback responde 400 sin state. No activar API de `.40`. |
-| QMAIL-06 | Consentimiento Google | Pendiente | Admin conecta cuenta desde panel; callback guarda refresh token cifrado. No copiar token a `.env` ni al chat. |
-| QMAIL-07 | Prueba controlada y UAT | Pendiente | Gmail acepta mensaje a buzón controlado; confirmar XML y PDF adjuntos y revisar historial. |
+| QMAIL-06 | Consentimiento Google | Completo | DB confirma cuenta conectada y refresh token cifrado; token no se muestra ni copia. |
+| QMAIL-07 | Prueba controlada y UAT | Bloqueado por almacenamiento de XML | Recuperar XML original y montar almacenamiento persistente; luego enviar un CFDI a buzón controlado y verificar XML/PDF e historial. |
 | QMAIL-08 | Operación continua | Pendiente | Resolver modo de publicación OAuth: en modo externo/pruebas el refresh token expira a los 7 días para `gmail.send`; aprobar publicación/verificación para producción. |
 
 ## Variables que API requiere
 
-Configurar en el almacén de secretos del backend, nunca en Flutter, Git o estos documentos:
+Nombres requeridos en el almacén de secretos del backend; valores omitidos, nunca en Flutter, Git o estos documentos:
 
 - `GOOGLE_OAUTH_CLIENT_ID`
 - `GOOGLE_OAUTH_CLIENT_SECRET` (secreto reemplazado según reporte del titular; no compartir)
 - `GOOGLE_OAUTH_REDIRECT_URI` = callback registrado de HTTPS
 - `GOOGLE_OAUTH_PUBLISHING_STATUS` = estado real de la pantalla OAuth (`TESTING` o `PRODUCTION`)
-- `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY` = clave aleatoria de 32+ caracteres, ya presente localmente; instalar la misma en secretos del backend y conservarla estable porque perderla impide descifrar tokens/destinatarios.
+- `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY` = clave aleatoria de 32+ caracteres; provisionada en backend y conservada estable porque perderla impide descifrar tokens/destinatarios.
 
 Compatibilidad: el código también acepta `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI`. No hace falta renombrar las claves que ya existen en `.env`; usa los nombres preferidos al configurar un entorno nuevo. `GOOGLE_REFRESH_TOKEN` no se carga manualmente: backend lo obtiene tras consentimiento y persiste cifrado en la tabla de configuración; panel nunca lo muestra.
 
@@ -55,9 +55,9 @@ Compatibilidad: el código también acepta `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SE
 1. Rotación reportada como completada por el titular; conservar credencial solo en `.env` local y almacén de secretos del backend desplegado. No pegar ningún secreto ni token en chat.
 2. Completo: titular agregó por SSH/nano en `/root/ioe_stack/deploy/ioe-api.env` las cinco variables requeridas. Preflight confirmó presencia no vacía por nombre y permisos `0600 root:root`; ningún valor secreto se leyó ni copió. No copiar `GOOGLE_REFRESH_TOKEN`.
 3. Completo: contenedor `ioe` reiniciado para cargar env. Postflight API/front/health DB públicos HTTP 200, TLS válido, callback sin parámetros HTTP 400 esperado. Mantener callback actual y no activar API standby en `.40`.
-4. Desde el panel, admin inicia conexión y autoriza Gmail. Google devuelve el código al callback; backend obtiene y cifra refresh token automáticamente.
-5. Enviar prueba al buzón controlado, validar XML/PDF, estado y logs. Mantener automático desactivado hasta aceptar UAT.
-6. Resolver publicación/verificación OAuth para uso continuo. Las autorizaciones de prueba no sirven como operación estable.
+4. Completo: consentimiento Gmail desde panel; backend persiste refresh token cifrado.
+5. UAT detenida: recuperar XML original y montar almacenamiento persistente en `/ArchivosUsuarios/respaldoCFDI`. Luego validar XML/PDF, estado e historial con buzón controlado.
+6. Resolver publicación/verificación OAuth para uso continuo. En `TESTING`, autorización `gmail.send` vence a los siete días.
 
 ## Registro
 
@@ -89,4 +89,12 @@ Build registró avisos de WASM y `npm ci` reportó 81 vulnerabilidades (2 críti
 - Titular confirmó edición manual de `/root/ioe_stack/deploy/ioe-api.env`. Preflight verificó presencia no vacía solo por nombre para `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `GOOGLE_OAUTH_PUBLISHING_STATUS` y `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY`; archivo `0600 root:root`. No se leyeron ni copiaron valores.
 - Contenedor `ioe` recreado con `ioe-allinone:latest`, política `unless-stopped`, puertos 8085/3001.
 - Postflight: API health HTTP 200, front HTTP 200, DB health pública HTTP 200 con TLS válido, callback OAuth sin parámetros HTTP 400 esperado. Las cinco variables aparecen dentro del contenedor por nombre.
-- OAuth aún sin consentimiento; no se envió correo. `AUTOMATICO=0` se mantiene hasta prueba controlada y UAT de adjuntos XML/PDF.
+
+## UAT de adjuntos y activación 2026-10-10
+
+- El titular autorizó mantener `AUTOMATICO=1`. Lectura de producción `IOELOCAL` confirmó activación desde `2026-10-10T23:44:32Z`, cuenta Google conectada y refresh token cifrado.
+- Hay cuatro CFDI vigentes timbrados por `QUADRUM`, fechas 1–5 de octubre; todos preceden la activación. El más reciente es `OM01-20261005-VF-0003`. No existen candidatos automáticos posteriores a la activación y outbox permanece vacía.
+- Los cuatro destinatarios registrados pasan validación; direcciones no se copiaron ni mostraron. No se insertó trabajo de correo.
+- Los XML/PDF guardados en SQL usan rutas Windows, inexistentes en estación y contenedor `.234`. La API tiene configurada `/ArchivosUsuarios/respaldoCFDI`; ruta no existe dentro del contenedor. `docker inspect` reporta cero montajes. El directorio del host existe, pero no contiene esos CFDI.
+- No se envió correo. `POST /cfdi/correo/prueba` solo manda texto y no se usó como sustituto de UAT de adjuntos. No se emitió CFDI nuevo.
+- Pendiente: recuperar XML original y montar almacenamiento persistente en la ruta configurada. PDF puede regenerarse desde XML. Sin montaje, documentos nuevos podrían quedar en capa efímera y perderse al recrear contenedor.
