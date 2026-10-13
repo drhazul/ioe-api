@@ -1,7 +1,7 @@
 # Seguimiento de corrección Quadrum para producción
 
 Actualizado: 2026-10-12 (America/Mexico_City).
-Estado general: corrección desplegada; configuración habilita exclusivamente FACTURA para JICJ800630854 y JIFT6203071N7. UAT de JICJ800630854 intentada con autorización: rechazo PAC 702, sin UUID. JIFJ4704238T5 queda en espera de verificación de credenciales y continúa bloqueado. Edición de cuenta PAC en preparación de release API/App. Habilitación de configuración no equivale a aceptación fiscal.
+Estado general: corrección y edición de cuenta PAC desplegadas; configuración habilita exclusivamente FACTURA para JICJ800630854 y JIFT6203071N7. UAT de JICJ800630854 intentada con autorización: rechazo PAC 702, sin UUID. JIFJ4704238T5 queda en espera de verificación de credenciales y continúa bloqueado. Habilitación de configuración no equivale a aceptación fiscal.
 Plan: [QUADRUM_PRODUCCION_PLAN.md](QUADRUM_PRODUCCION_PLAN.md).
 
 ## Regla de evidencia
@@ -19,7 +19,7 @@ Registrar cada actividad con fecha, entorno, versión, resultado y evidencia seg
 | QPROD-04 | Diagnóstico por RFC y parser de errores | Completo desplegado | Interpreta error con HTTP 200; consulta admitida no acredita autorización del timbrado |
 | QPROD-05 | Persistencia y recuperación fiscal | Técnico completo; recuperación fiscal pendiente de UAT | Evidencia persistente escribible y legado preservado; reservas no se liberan automáticamente |
 | QPROD-06 | Pruebas y build de corrección | Completo técnico | Release aislado de edición: build API PASS, 53 suites / 260 pruebas PASS; 2 widgets PASS; CSD analyze sin incidencias |
-| QPROD-07 | Release, entorno efectivo y postflight | Base completa; edición en preparación | API fiscal 5042fbf desplegada; gate parcial FACTURA efectivo. Edición requiere release API/App y postflight |
+| QPROD-07 | Release, entorno efectivo y postflight | Completo técnico | API 900b625 / App 9a72b96 desplegadas; edición y guard JWT verificados, entorno sin cambios; gate parcial FACTURA efectivo |
 | QPROD-08 | UAT por RFC y flujo; aceptación | Bloqueado JICJ por PAC; pendiente JIFT | DF01-20261012-VF-0040 simulado y autorizado; PAC rechaza timbrado con 702. No reintentar sin resolver proveedor y nueva autorización |
 
 ## Configuración local frente a servidor — corte histórico anterior al despliegue
@@ -77,7 +77,7 @@ No hay UAT de producción acreditada para los tres RFC comerciales en este exped
 
 ## Próxima ejecución
 
-1. Publicar edición de cuenta PAC desde release aislado, conservando entorno y bloqueos efectivos; verificar ruta JWT y frontend.
+1. Release de edición publicado y verificado. UAT administrativa de nuevo guardado desde navegador sólo cuando titular tenga cuenta verificada; no modificar secretos para demostrar una ruta.
 2. Resolver con Quadrum rechazo 702 de JICJ800630854. Conservar XML enviado/acuse y ERROR_EMISION; no realizar otro timbrado con autorización consumida en el intento anterior.
 3. Revalidar acceso y preparar nueva simulación del mismo documento sólo tras solución del proveedor; solicitar nueva autorización concreta antes de reenviar.
 4. JIFT6203071N7 requiere folio comercial autorizado y UAT propia. NC/REP/cancelación siguen fuera de activación.
@@ -153,3 +153,22 @@ Postflight ejecutado desde clases compiladas y entorno del nuevo proceso:
 Reversa de esta activación: contenedor detenido `ioe-before-activation-20261012` conserva configuración previa con emisión apagada. Valores públicos previos de las tres variables quedaron en `before-partial-activation-public-settings.json`, dentro del directorio privado de release previamente registrado. Reversa no requiere restaurar SQL ni rotar secretos. Mantener además reversa de versión anterior del pase técnico.
 
 QPROD-08 sigue pendiente: elegir documento real necesario para negocio, autorizar su RFC/folio exactos, simular y validar primera factura productiva. Activación de gate y consultas autenticadas no acreditan emisión fiscal real, saldo/contrato ni aceptación funcional. Cuenta JIFJ4704238T5 sigue pendiente de corrección; datos discrepantes históricos no se reasignan automáticamente.
+
+## Continuación del plan: edición desplegada y UAT rechazada
+
+El titular decidió mantener JIFJ4704238T5 en espera hasta verificar y confirmar credenciales. Revalidación anterior del mismo día, tras edición informada: un CSD activo, usuario/contraseña presentes y descifrables, consulta productiva HTTP 200 con `Usuario o Contrasena Invalida`. No se volvió a contactar esa cuenta durante continuación; se comprobó su bloqueo por configuración.
+
+Titular eligió DF01-20261012-VF-0040 de JICJ800630854. Simulación verificó emisor coincidente en folio/sucursal, ausencia de UUID y reservas, un concepto, subtotal 120.00 y total 139.20 MXN, PUE/01. El titular autorizó explícitamente un timbrado después de revisar receptor y datos. Una emisión ejecutada: PAC devuelve 702 `Sorry there was an error when validating the reseller and user`. Postflight confirma ERROR, UUID/XML_PATH nulos, control de serie JICJ/01120 en ERROR_EMISION y ningún trabajo de correo. No hubo reenvío, PDF fiscal ni cancelación. Acta: [QUADRUM_PRODUCCION_UAT.md](QUADRUM_PRODUCCION_UAT.md); expediente para proveedor: [QUADRUM_SOPORTE_702.md](QUADRUM_SOPORTE_702.md).
+
+Release acotado de edición:
+
+- API de código `900b6250f137b1e3e691bf773fdd165dc797be32`; App `9a72b96a6b4410bbcb6293a1294ae42f31ab2881`. Publicados en origin/master, sincronizados por fast-forward en servidor. Los repositorios principales locales y sus cambios ajenos se conservaron.
+- Imagen `sha256:d6ad51c0ec473c6e5b423118fedc74638e88f8c451fdf4d3e24756b42449812f`, tag `ioe-allinone:quadrum-cuenta-20261012` y alias latest. Etiquetas incluyen ambos commits.
+- Web compilada con Flutter 3.47.2 / Dart 3.13.2, dependencias bloqueadas sin cambios de pubspec/lock. Contexto generado desde fuentes revisadas; configuración web pública `/api`, sin copiar .env privados. SHA256 de main.dart.js servido coincide: `085ea2895b8820e50c7a294e6ded89d25d8de55ab3e20a59a148a24fcfe7de17`.
+- Build API y 53 suites / 260 pruebas PASS en release aislado; dos widgets PASS y analyze CSD sin incidencias. Análisis amplio conserva nueve avisos previos de correo; no impiden build JS. Hot reload local correcto y sin errores de runtime.
+- Ruta PATCH documentada en API efectiva, guard administrativo comprobado en imagen y petición sin JWT HTTP 401. Se verificó artefacto web con texto de edición; no se invocó guardado real para probar despliegue ni se modificaron credenciales por herramientas del agente.
+- Health API/DB/web/HTTPS público HTTP 200. Contenedor running/unless-stopped, puertos 8085/3001 y bind persistente anteriores conservados; hash privado del archivo de entorno idéntico antes/después. Nginx/Supervisor se conservan de imagen anterior.
+- Postflight de 2026-10-12 20:56 America/Mexico_City: ambas cuentas habilitadas admitidas sólo por consulta; gate bloquea JIFJ4704238T5, RFC de pruebas y NC/REP/cancelación. Correo AUTOMATICO=true preservado; sin nuevos CFDI en postflight.
+- Reversa de software: imagen `ioe-allinone:before-quadrum-cuenta-20261012` y contenedor detenido `ioe-before-quadrum-cuenta-20261012`. Metadatos seguros en `/root/ioe_stack/releases/quadrum-cuenta-900b625/previous-runtime.json`. Detener/renombrar el contenedor nuevo y devolver nombre ioe al anterior antes de arrancarlo; restaurar alias de imagen y comprobar health. No restaurar SQL ni borrar reserva/evidencia del intento fiscal.
+
+UAT no aprobada; configuración de habilitación parcial se conserva por autorización previa. Resolver 702 con proveedor y nueva autorización concreta antes de reintentar. JIFT6203071N7 requiere su propio documento autorizado. JIFJ4704238T5 permanece diferido, sin condicionar correcciones técnicas de otros emisores.
