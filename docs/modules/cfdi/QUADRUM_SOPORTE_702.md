@@ -6,6 +6,8 @@ Actualización 2026-10-13: nuevo intento de JICJ800630854 solicitado por titular
 
 Actualización posterior del mismo día, 10:29:40: reintento expresamente solicitado de JIFT6203071N7 devuelve **CFDI40147** sobre DomicilioFiscalReceptor, sin UUID. 702 tampoco apareció en ese ensayo y queda histórico para ambos RFC; no se atribuye causa o solución del rechazo anterior. Acta vigente: [QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md). Este resultado supersede afirmación de JIFT sin nuevo intento del corte previo.
 
+Actualización 10:38:57: JIFT6203071N7 timbró correctamente **otro documento**, DF04-20261012-VF-0030, UUID CD32676E-C226-505C-B452-27B53DFBC07C, JIFT/02224. Acta: [QUADRUM_PRODUCCION_UAT_JIFT6203071N7_VF0030.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7_VF0030.md). Ambos emisores configurados acreditan timbrado de un documento; 702 se conserva como incidente histórico, sin atribuir causa. El caso VF0004 sigue rechazado por su receptor y no se modificó.
+
 ## Hechos y solicitud
 
 En producción, las cuentas asociadas a JICJ800630854 y JIFT6203071N7 admiten consulta con UUID ficticio, pero rechazan timbrado real autorizado de sus documentos con 702. Solicitamos revisar vinculación y habilitación de distribuidor/usuario para Web Services productivos por cuenta/emisor. Confirmar causa exacta y acción requerida; no asumir contraseña incorrecta, saldo insuficiente ni fallo XML sin validación del proveedor.

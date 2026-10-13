@@ -2,6 +2,8 @@
 
 Actualizado: 2026-10-13, America/Mexico_City. Resultado actual: **no aprobada**, reintento solicitado rechazado con CFDI40147 sobre DomicilioFiscalReceptor. Sin UUID, XML/PDF timbrados ni correo. El 702 del primer intento queda como antecedente histórico. Una nueva emisión en esta solicitud, sin reintento automático.
 
+El emisor JIFT6203071N7 posteriormente timbró otro folio por solicitud del titular: [DF04-20261012-VF-0030](QUADRUM_PRODUCCION_UAT_JIFT6203071N7_VF0030.md), UUID CD32676E-C226-505C-B452-27B53DFBC07C. Esto no corrige ni autoriza reenviar VF-0004, que conserva rechazo de datos de su propio receptor.
+
 ## Alcance y preflight del primer intento — 2026-10-12
 
 Titular solicitó mismo proceso de UAT para este emisor/folio y autorizó expresamente un timbrado después de revisar simulación, receptor e importes. Ejecución con clases compiladas de API 900b625 dentro del contenedor productivo `ioe`, imagen `sha256:d6ad51c0ec473c6e5b423118fedc74638e88f8c451fdf4d3e24756b42449812f`. No se inició otro backend ni worker.

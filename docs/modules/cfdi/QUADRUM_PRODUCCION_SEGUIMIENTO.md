@@ -1,7 +1,7 @@
 # Seguimiento de corrección Quadrum para producción
 
 Actualizado: 2026-10-13 (America/Mexico_City).
-Estado general: FACTURA de JICJ800630854 timbrada y persistida tras reintento autorizado. PDF generado con recorte visual pendiente; correo Gmail 403 y consulta SAT no completada. Reintento de JIFT6203071N7 rechazado con CFDI40147 sobre domicilio fiscal del receptor; 702 pasa a histórico. JIFJ4704238T5 continúa en espera y bloqueado. Configuración de dos RFC/FACTURA sin cambios; integración funcional completa no acreditada.
+Estado general: una FACTURA de JICJ800630854 y una de JIFT6203071N7 timbradas y persistidas. Casos: DF01-20261012-VF-0040 y DF04-20261012-VF-0030. PDF con recorte visual, correo Gmail 403 y consulta SAT pendientes. DF04-20261012-VF-0004 conserva CFDI40147 de receptor, sin UUID; JIFJ4704238T5 continúa en espera y bloqueado. Configuración de dos RFC/FACTURA sin cambios; integración funcional completa no acreditada.
 Plan: [QUADRUM_PRODUCCION_PLAN.md](QUADRUM_PRODUCCION_PLAN.md).
 
 ## Regla de evidencia
@@ -20,7 +20,7 @@ Registrar cada actividad con fecha, entorno, versión, resultado y evidencia seg
 | QPROD-05 | Persistencia y recuperación fiscal | Técnico completo; recuperación fiscal pendiente de UAT | Evidencia persistente escribible y legado preservado; reservas no se liberan automáticamente |
 | QPROD-06 | Pruebas y build de corrección | Completo técnico | Release aislado de edición: build API PASS, 53 suites / 260 pruebas PASS; 2 widgets PASS; CSD analyze sin incidencias |
 | QPROD-07 | Release, entorno efectivo y postflight | Completo técnico | API 900b625 / App 9a72b96 desplegadas; edición y guard JWT verificados, entorno sin cambios; gate parcial FACTURA efectivo |
-| QPROD-08 | UAT por RFC y flujo; aceptación | JICJ fiscal verificado; cierre funcional parcial. JIFT bloqueado por datos fiscales | DF01 timbrado el 13/10 con UUID; PDF/correo/SAT y aceptación pendientes. DF04 rechazado CFDI40147 en reintento autorizado, sin UUID |
+| QPROD-08 | UAT por RFC y flujo; aceptación | JICJ/JIFT fiscal verificado por documento; cierre funcional parcial | DF01-VF0040 y DF04-VF0030 timbrados el 13/10; PDF/correo/SAT y aceptación pendientes. DF04-VF0004 con error de receptor, sin UUID |
 
 ## Configuración local frente a servidor — corte histórico anterior al despliegue
 
@@ -43,7 +43,7 @@ Fuente del último diagnóstico: consultas desde contenedor `ioe`, datos `IOELOC
 | RFC | CSD/RFC/descifrado del último diagnóstico | Consulta productiva sin emisión | Estado de preparación |
 |---|---|---|---|
 | `JICJ800630854` | Válidos; vence 2029-10-18 | Consulta admitida; reintento de DF01-20261012-VF-0040 timbrado el 13/10 | XML/UUID/SQL verificados; cierre funcional de PDF/correo/SAT pendiente |
-| `JIFT6203071N7` | Válidos; vence 2028-07-08 | Consulta admitida; reintento de DF04-20261012-VF-0004 rechazado con CFDI40147 | Revisar domicilio fiscal del receptor; sin UUID, ERROR / ERROR_EMISION |
+| `JIFT6203071N7` | Válidos; vence 2028-07-08 | Consulta admitida; DF04-VF0030 timbrado, VF0004 conserva CFDI40147 | XML/UUID/SQL verificados en VF0030; receptor de VF0004 requiere revisión propia |
 | `JIFJ4704238T5` | Válidos; vence 2028-03-08 | Revalidación tras edición: HTTP 200, `Usuario o Contrasena Invalida` | En espera por decisión del titular; bloqueado hasta verificar cuenta productiva |
 | `XIQB891116QE4` | CSD de pruebas; vence 2027-05-15 | No se envió consulta con cuenta propia: no existe | Excluir de activación productiva |
 
@@ -88,7 +88,8 @@ No hay UAT de producción acreditada para los tres RFC comerciales en este exped
 | RFC | Flujo | Documento autorizado | UUID / evidencia privada | Resultado / aceptación |
 |---|---|---|---|---|
 | `JICJ800630854` | Factura | DF01-20261012-VF-0040; reintento solicitado expresamente 13/10 | 899F7CC4-A545-5FFE-9BA2-3E4A62FDAB7B; evidencia privada 20261013T160542_JICJ-01120 | TIMBRADO / FACTURADO; PDF/correo/SAT y aceptación pendientes |
-| `JIFT6203071N7` | Factura | DF04-20261012-VF-0004; reintento solicitado 13/10 | Sin UUID; evidencia privada 20261013T162940_JIFT-02223 | Rechazo CFDI40147; estado ERROR / ERROR_EMISION |
+| `JIFT6203071N7` | Factura | DF04-20261012-VF-0030, solicitado expresamente 13/10 | CD32676E-C226-505C-B452-27B53DFBC07C; evidencia privada 20261013T163857_JIFT-02224 | TIMBRADO / FACTURADO; PDF/correo/SAT y aceptación pendientes |
+| `JIFT6203071N7` | Factura, caso anterior | DF04-20261012-VF-0004; no reenviado con esta solicitud | Sin UUID; evidencia privada 20261013T162940_JIFT-02223 | Rechazo CFDI40147 del receptor; ERROR / ERROR_EMISION |
 | `JIFJ4704238T5` | Factura | Pendiente | Pendiente | En espera por titular; bloqueado por cuenta hasta confirmación y revalidación |
 | RFC autorizado por caso | NC / REP / cancelación, según alcance final | Pendiente | Pendiente | No asumir cobertura por pruebas de factura |
 
@@ -199,3 +200,12 @@ Titular pidió repetir intento para DF04-20261012-VF-0004. Preflight de las 10:2
 Postflight 10:30:25: ESTATUS PENDIENTE, CFDI_STATUS ERROR, PAC QUADRUM, UUID/XML_PATH/PDF_PATH nulos; JIFT/02223, REEMISION 1, ERROR_EMISION. Sin outbox de correo ni reintento automático. Evidencia preservada, identificadores y acta en [QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md).
 
 702 queda histórico para este RFC. Revisar C.P. fiscal y datos de receptor registrados ante SAT; no inferir ni cambiar valores sin confirmación y autorización exacta. Nueva simulación y autorización antes de otra emisión. JICJ timbrado no se volvió a emitir; JIFJ sigue bloqueado y diferido. Este corte supersede rechazo 702 vigente de JIFT indicado en secciones anteriores.
+
+
+## Nuevo documento JIFT timbrado — DF04-20261012-VF-0030
+
+Titular solicitó un intento para RFC JIFT6203071N7 con nuevo folio exacto VF0030. Preflight de las 10:37:49 confirmó PENDIENTE, identidad folio/sucursal coincidente y sin UUID/reserva/cancelación/incertidumbre. Simulación y sello válidos; consulta de cuenta propia admitida. Se presentaron receptor/datos e importes (10 conceptos, subtotal 948.30, impuestos 151.70 y total 1100.00 MXN; PUE/28, G01); se releyeron sin cambios antes de una emisión conforme a instrucción expresa.
+
+PAC aceptó a las 10:38:57, JIFT/02224, UUID CD32676E-C226-505C-B452-27B53DFBC07C. Postflight 10:40:13: SQL FACTURADO/TIMBRADO, control TIMBRADO REEMISION 1 con mismo UUID; XML y sello CFD verificados. PDF persistido (38141 bytes, 1 página), con UUID/importes correctos pero recorte de sellos/cadena pendiente. Outbox ID 2 ERROR_FINAL, un intento GMAIL_HTTP_403, sin envío ni reintento manual. Consulta SAT vía PAC no completada; no declarar Vigente confirmado.
+
+Acta: [QUADRUM_PRODUCCION_UAT_JIFT6203071N7_VF0030.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7_VF0030.md). Un timbrado, sin reintento automático. No se cambiaron cuentas, cliente, código, entorno ni despliegue. VF0004 sigue con CFDI40147 y no fue modificado/reenviado; JICJ conserva UUID y JIFJ continúa bloqueado/diferido. Este caso acredita una factura del segundo RFC, sin cerrar representación/entrega ni todos los flujos. No reenviar documentos con UUID por fallos de correo/PDF.
