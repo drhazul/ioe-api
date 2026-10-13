@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Patch,
   Res,
   Query,
   UseGuards,
@@ -30,6 +31,7 @@ import { EmitirVentaDto } from './dto/emitir-venta.dto';
 import { EmitirNotaCreditoDto } from './dto/nota-credito.dto';
 import { EmitirComplementoPagoDto } from './dto/complemento-pago.dto';
 import { GuardarCsdDto } from './dto/guardar-csd.dto';
+import { ActualizarCuentaQuadrumDto } from './dto/actualizar-cuenta-quadrum.dto';
 import {
   TimbrarNotaCreditoPruebaDto,
   TimbrarPruebaDto,
@@ -243,6 +245,15 @@ export class CfdiController {
   @Get('csd')
   listarCsd() {
     return this.csd.listar();
+  }
+
+  @Patch('csd/:rfc/quadrum')
+  @UseGuards(AdminOnlyGuard)
+  actualizarCuentaQuadrum(
+    @Param('rfc') rfc: string,
+    @Body() dto: ActualizarCuentaQuadrumDto,
+  ) {
+    return this.csd.actualizarCuentaQuadrum(rfc, dto);
   }
 
   /** CSD, ambiente y conexion con Quadrum. No gasta timbre. */

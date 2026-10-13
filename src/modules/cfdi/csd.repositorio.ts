@@ -1,4 +1,8 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
 /** Un renglon de FACT_CSD, con los archivos y la contrasena cifrada. */
@@ -60,6 +64,50 @@ export interface GuardarFilaCsd {
 @Injectable()
 export class CsdRepositorio {
   constructor(private readonly dataSource: DataSource) {}
+
+  async cuentaActivaPorRfc(rfc: string): Promise<{
+    NO_CERTIFICADO: string;
+    QUADRUM_USUARIO: string | null;
+    TIENE_PASSWORD: boolean;
+  } | null> {
+    await this.assertTabla();
+    const rows = await this.dataSource.query(
+      `SELECT NO_CERTIFICADO, QUADRUM_USUARIO,
+              CASE WHEN NULLIF(QUADRUM_PASSWORD_CIFRADA, '') IS NULL THEN 0 ELSE 1 END AS TIENE_PASSWORD
+         FROM dbo.FACT_CSD WHERE RFC = @0 AND ACTIVO = 1`,
+      [rfc],
+    );
+    return rows[0] ?? null;
+  }
+
+  async actualizarCuentaQuadrum(input: {
+    rfc: string;
+    noCertificado: string;
+    usuarioAnterior: string | null;
+    quadrumUsuario: string;
+    quadrumPasswordCifrada?: string;
+  }): Promise<void> {
+    await this.assertTabla();
+    const rows = await this.dataSource.query(
+      `UPDATE dbo.FACT_CSD
+          SET QUADRUM_USUARIO = @1,
+              QUADRUM_PASSWORD_CIFRADA = COALESCE(@2, QUADRUM_PASSWORD_CIFRADA)
+        OUTPUT inserted.RFC
+        WHERE RFC = @0 AND ACTIVO = 1 AND NO_CERTIFICADO = @3
+          AND COALESCE(QUADRUM_USUARIO, '') = COALESCE(@4, '')`,
+      [
+        input.rfc,
+        input.quadrumUsuario,
+        input.quadrumPasswordCifrada ?? null,
+        input.noCertificado,
+        input.usuarioAnterior,
+      ],
+    );
+    if (rows.length !== 1)
+      throw new ConflictException(
+        'El certificado o usuario cambió; refresca listado y vuelve a editar.',
+      );
+  }
 
   /** Mensaje util en vez de un error de SQL si nadie corrio el script. */
   private async assertTabla(): Promise<void> {

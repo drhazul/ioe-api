@@ -6,6 +6,16 @@
 
 Plan de corrección y criterios de activación: [QUADRUM_PRODUCCION_PLAN.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_PLAN.md). Estado por RFC, configuración y UAT: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_SEGUIMIENTO.md). La captura de endpoints en `.env` local no acredita su carga en el proceso productivo ni habilita los caminos fiscales bloqueados por código.
 
+Acta de primer caso autorizado: [QUADRUM_PRODUCCION_UAT.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_UAT.md). DF01-20261012-VF-0040 fue rechazado por PAC 702, sin UUID; consulta admitida no prueba permiso de timbrado. JIFJ4704238T5 permanece en espera y bloqueado hasta verificar credenciales.
+
+## Edición independiente de cuenta PAC
+
+`PATCH /cfdi/csd/:rfc/quadrum` exige JWT y `AdminOnlyGuard`. Recibe `quadrumUsuario` y `quadrumPassword` opcional. Cambiar usuario o configurar cuenta sin contraseña guardada exige contraseña nueva. Omitirla con el mismo usuario conserva cifrado. No devuelve contraseña ni requiere recargar CER/KEY.
+
+Sólo actualiza las dos columnas PAC del CSD activo, con comprobación de certificado/usuario anteriores para detectar cambios concurrentes; cifra contraseña con clave existente e invalida caché. No cambia emisor, certificados, vigencia ni lista de RFC habilitados. No envía consulta ni consume timbre al guardar.
+
+Release acotado API/App: `deploy/quadrum/Dockerfile.cuenta` recibe API exportada de Git y web compilada por separado. Mantiene Nginx/Supervisor del runtime actual y datos/entorno externos. El build web usa exclusivamente configuración pública `/api`, sin copiar archivos privados del servidor ni modificar assets/.env de los repositorios originales.
+
 ## Correo
 
 - `EmisionService` encola después de persistir UUID/XML/estado. La falla de email no cambia el resultado fiscal.

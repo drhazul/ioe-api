@@ -1,7 +1,7 @@
 # Seguimiento de corrección Quadrum para producción
 
 Actualizado: 2026-10-12 (America/Mexico_City).
-Estado general: corrección desplegada; facturas habilitadas exclusivamente para JICJ800630854 y JIFT6203071N7. JIFJ4704238T5 y demás flujos bloqueados. UAT fiscal pendiente. No activar producción por la sola captura de variables.
+Estado general: corrección desplegada; configuración habilita exclusivamente FACTURA para JICJ800630854 y JIFT6203071N7. UAT de JICJ800630854 intentada con autorización: rechazo PAC 702, sin UUID. JIFJ4704238T5 queda en espera de verificación de credenciales y continúa bloqueado. Edición de cuenta PAC en preparación de release API/App. Habilitación de configuración no equivale a aceptación fiscal.
 Plan: [QUADRUM_PRODUCCION_PLAN.md](QUADRUM_PRODUCCION_PLAN.md).
 
 ## Regla de evidencia
@@ -14,15 +14,15 @@ Registrar cada actividad con fecha, entorno, versión, resultado y evidencia seg
 |---|---|---|---|
 | QPROD-00 | Plan y seguimiento | Completo | Archivos creados y enlazados; alcance documental actual explícito |
 | QPROD-01 | Preflight actualizado de fuente y servidor | Completo | Revalidación de servidor y cuentas el 2026-10-12; cuenta JIFJ4704238T5 sigue rechazada |
-| QPROD-02 | Separar pruebas y operación productiva | Completo local | Rutas de prueba bloqueadas; documento real requiere flag, RFC y flujo explícitos |
+| QPROD-02 | Separar pruebas y operación productiva | Completo desplegado | Rutas de prueba bloqueadas; documento real requiere flag, RFC y flujo explícitos |
 | QPROD-03 | Cuenta/CSD estrictos por RFC | Código completo; cuenta bloqueada | Sin fallback productivo y sin caché antigua; JIFJ4704238T5 requiere corrección del titular/proveedor |
-| QPROD-04 | Diagnóstico por RFC y parser de errores | Completo local | Interpreta error con HTTP 200; distingue rechazo de UUID ficticio inexistente |
+| QPROD-04 | Diagnóstico por RFC y parser de errores | Completo desplegado | Interpreta error con HTTP 200; consulta admitida no acredita autorización del timbrado |
 | QPROD-05 | Persistencia y recuperación fiscal | Técnico completo; recuperación fiscal pendiente de UAT | Evidencia persistente escribible y legado preservado; reservas no se liberan automáticamente |
-| QPROD-06 | Pruebas y build de corrección | Completo | Checkout limpio sobre origin/master: build PASS, 52 suites / 254 pruebas PASS |
-| QPROD-07 | Release, entorno efectivo y postflight | Completo técnico | API 5042fbf desplegada; endpoints productivos efectivos, health y montaje PASS; emisión apagada |
-| QPROD-08 | UAT por RFC y flujo; aceptación | Pendiente | Operaciones/documentos exactos autorizados, evidencia fiscal y aceptación del titular |
+| QPROD-06 | Pruebas y build de corrección | Completo técnico | Release aislado de edición: build API PASS, 53 suites / 260 pruebas PASS; 2 widgets PASS; CSD analyze sin incidencias |
+| QPROD-07 | Release, entorno efectivo y postflight | Base completa; edición en preparación | API fiscal 5042fbf desplegada; gate parcial FACTURA efectivo. Edición requiere release API/App y postflight |
+| QPROD-08 | UAT por RFC y flujo; aceptación | Bloqueado JICJ por PAC; pendiente JIFT | DF01-20261012-VF-0040 simulado y autorizado; PAC rechaza timbrado con 702. No reintentar sin resolver proveedor y nueva autorización |
 
-## Configuración local frente a servidor
+## Configuración local frente a servidor — corte histórico anterior al despliegue
 
 | Elemento | Verificación local en esta solicitud | Último corte del servidor: diagnóstico previo 2026-10-12 | Pendiente |
 |---|---|---|---|
@@ -42,16 +42,16 @@ Fuente del último diagnóstico: consultas desde contenedor `ioe`, datos `IOELOC
 
 | RFC | CSD/RFC/descifrado del último diagnóstico | Consulta productiva sin emisión | Estado de preparación |
 |---|---|---|---|
-| `JICJ800630854` | Válidos; vence 2029-10-18 | Servicio cancelación: `UUID does not exist`; timbrado: `Could not get invoice` | Acceso de consulta admitido; revalidación y UAT pendientes |
+| `JICJ800630854` | Válidos; vence 2029-10-18 | Consulta admitida; timbrado UAT de DF01-20261012-VF-0040 rechazado con 702 | Configurado activo; aceptación fiscal bloqueada por proveedor, sin UUID |
 | `JIFT6203071N7` | Válidos; vence 2028-07-08 | Misma respuesta para UUID ficticio | Acceso de consulta admitido; revalidación y UAT pendientes |
-| `JIFJ4704238T5` | Válidos; vence 2028-03-08 | Servicio cancelación: `Usuario o Contrasena Invalida`; timbrado: Fault interno HTTP 500 | Bloqueado por cuenta productiva; corrección/revalidación pendientes |
+| `JIFJ4704238T5` | Válidos; vence 2028-03-08 | Revalidación tras edición: HTTP 200, `Usuario o Contrasena Invalida` | En espera por decisión del titular; bloqueado hasta verificar cuenta productiva |
 | `XIQB891116QE4` | CSD de pruebas; vence 2027-05-15 | No se envió consulta con cuenta propia: no existe | Excluir de activación productiva |
 
 Control negativo del diagnóstico: cuenta ficticia recibió rechazo explícito en consulta del servicio de cancelación productivo. En demo, rechazo apareció dentro de `consultaResult` con HTTP 200. No tomar estos indicadores de transporte como autenticación.
 
 No hay UAT de producción acreditada para los tres RFC comerciales en este expediente. El titular informa que desarrollo ya pasó; conservar ese antecedente sin trasladarlo a aceptación productiva. Confirmar saldo/contrato y autorización de timbrado de cada RFC antes de emitir.
 
-## Riesgos abiertos
+## Riesgos detectados en preflight inicial — historial
 
 | Riesgo | Evidencia / impacto | Acción requerida |
 |---|---|---|
@@ -77,19 +77,19 @@ No hay UAT de producción acreditada para los tres RFC comerciales en este exped
 
 ## Próxima ejecución
 
-1. Ejecutar QPROD-01 con datos/entorno frescos y confirmar alcance de implementación.
-2. Corregir QPROD-02/03/04 y preparar solución de QPROD-05; resolver cuenta JIFJ4704238T5 por canal seguro.
-3. Completar QPROD-06 y preparar diff/versiones; presentar evidencia para despliegue autorizado.
-4. Completar QPROD-07 y consultas por RFC desde servidor; autorizar UAT por documento y RFC.
-5. Cerrar QPROD-08 sólo para los flujos efectivamente aceptados; documentar restricciones restantes.
+1. Publicar edición de cuenta PAC desde release aislado, conservando entorno y bloqueos efectivos; verificar ruta JWT y frontend.
+2. Resolver con Quadrum rechazo 702 de JICJ800630854. Conservar XML enviado/acuse y ERROR_EMISION; no realizar otro timbrado con autorización consumida en el intento anterior.
+3. Revalidar acceso y preparar nueva simulación del mismo documento sólo tras solución del proveedor; solicitar nueva autorización concreta antes de reenviar.
+4. JIFT6203071N7 requiere folio comercial autorizado y UAT propia. NC/REP/cancelación siguen fuera de activación.
+5. Mantener JIFJ4704238T5 en espera y fuera de lista habilitada; retomarlo sólo cuando titular confirme cuenta verificada. No cambiar credenciales ni reasignar emisores.
 
 ## Registro de UAT pendiente
 
 | RFC | Flujo | Documento autorizado | UUID / evidencia privada | Resultado / aceptación |
 |---|---|---|---|---|
-| `JICJ800630854` | Factura | Pendiente | Pendiente | Pendiente |
+| `JICJ800630854` | Factura | DF01-20261012-VF-0040, autorizado tras simulación | Sin UUID; evidencia privada 20261013T024518_JICJ-01120 | Rechazo PAC 702; estado ERROR / ERROR_EMISION |
 | `JIFT6203071N7` | Factura | Pendiente | Pendiente | Pendiente |
-| `JIFJ4704238T5` | Factura | Pendiente | Pendiente | Bloqueado por cuenta hasta revalidación |
+| `JIFJ4704238T5` | Factura | Pendiente | Pendiente | En espera por titular; bloqueado por cuenta hasta confirmación y revalidación |
 | RFC autorizado por caso | NC / REP / cancelación, según alcance final | Pendiente | Pendiente | No asumir cobertura por pruebas de factura |
 
 No capturar contraseñas ni material privado en esta tabla. La reversa de código no elimina CFDI; cualquier recuperación o cancelación fiscal sigue el plan y autorización correspondiente.

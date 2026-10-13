@@ -211,3 +211,10 @@ El proyecto vive dentro de OneDrive, donde los avisos de cambio de archivo no so
 ## Quadrum producción (2026-10-12)
 
 Operación productiva exige `QUADRUM_PRODUCCION_HABILITADA`, RFC y flujos explícitos en `QUADRUM_RFC_HABILITADOS`/`QUADRUM_FLUJOS_HABILITADOS`. CSD/cuenta individual obligatorios; rutas sintéticas bloqueadas en producción. Emisión incierta o persistencia pendiente requiere reconciliación, no reenvío. Plan/seguimiento: `docs/modules/cfdi/QUADRUM_PRODUCCION_{PLAN,SEGUIMIENTO}.md`. No gastar timbres reales sin autorización del documento.
+
+
+## Edición de cuenta Quadrum y UAT (2026-10-12)
+
+PATCH /cfdi/csd/:rfc/quadrum exige JWT y AdminOnlyGuard; modifica sólo usuario/contraseña PAC del CSD activo. Contraseña omitida se conserva sólo con mismo usuario. Cambiar cuenta no habilita un RFC ni valida timbrado. UI CSD muestra Editar Quadrum y no consulta contraseña actual. No recargar CER/KEY ni escribir secretos en auditoría.
+
+JIFJ4704238T5 queda en espera y bloqueado por decisión del titular. Caso DF01-20261012-VF-0040 autorizado una vez fue rechazado por PAC 702, sin UUID; no reenviar sin resolver proveedor y nueva autorización. Consulta admitida no acredita permiso de timbrado. Acta en ioe-api/docs/modules/cfdi/QUADRUM_PRODUCCION_UAT.md.

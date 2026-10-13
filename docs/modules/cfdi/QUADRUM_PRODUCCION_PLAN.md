@@ -1,13 +1,13 @@
 # Plan de corrección y cierre de integración Quadrum en producción
 
-Fecha: 2026-10-12 (America/Mexico_City). Estado: corrección y release técnico completos; facturas activas para JICJ800630854/JIFT6203071N7, UAT fiscal pendiente.
+Fecha: 2026-10-12 (America/Mexico_City). Estado: base fiscal desplegada; FACTURA configurada para JICJ800630854/JIFT6203071N7. UAT de JICJ rechazada por PAC 702; edición de cuenta en preparación de release. JIFJ4704238T5 en espera, bloqueado.
 Seguimiento: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](QUADRUM_PRODUCCION_SEGUIMIENTO.md).
 
 ## Objetivo y alcance autorizado
 
 Preparar la emisión productiva de CFDI mediante Quadrum para los RFC comerciales de IOE, usando el CSD y la cuenta PAC del emisor correspondiente a cada documento. El cierre requiere configuración efectiva del proceso, autenticación por RFC, persistencia fiscal y UAT autorizada.
 
-La solicitud inicial autorizó los documentos. El 2026-10-12 el titular autorizó iniciar corrección y pase a producción: incluye implementación, publicación y despliegue acotados. No se autorizó un documento fiscal concreto, cambios de credenciales de terceros ni DDL. La activación parcial ante un RFC rechazado se consultó al titular; no se inferirá una respuesta por tiempo transcurrido.
+La solicitud inicial autorizó los documentos. El 2026-10-12 el titular autorizó iniciar corrección y pase a producción: incluye implementación, publicación y despliegue acotados. Posteriormente autorizó edición independiente de cuenta PAC, continuación del plan manteniendo JIFJ4704238T5 en espera, y timbrado único de DF01-20261012-VF-0040 tras revisar simulación. Ese intento fue rechazado por PAC 702; no autoriza reintentos ni documentos adicionales. No se autorizó DDL, reasignación de emisores ni rotación de credenciales por herramientas del agente.
 
 Alcance técnico previsto: `src/modules/cfdi/`, validación de entorno y, si resulta necesario, la pantalla Quadrum de `ioe_app`. Preservar Facturify (`src/modules/facturacion/`), datos comerciales, CRM retirado y cambios locales ajenos. Correo tiene su propio [plan](FACTURA_QUADRUM_CORREO_PLAN.md) y [seguimiento](FACTURA_QUADRUM_CORREO_SEGUIMIENTO.md); no habilitarlo automáticamente con este trabajo.
 

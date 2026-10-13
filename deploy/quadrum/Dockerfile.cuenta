@@ -1,0 +1,18 @@
+# Scoped API + precompiled Flutter release. Runtime config and persistent data stay external.
+ARG IOE_RUNTIME_IMAGE
+FROM node:20-alpine AS api_build
+WORKDIR /api
+COPY api/ ./
+RUN npm ci && npm run build
+
+FROM ${IOE_RUNTIME_IMAGE}
+ARG IOE_API_COMMIT
+ARG IOE_APP_COMMIT
+LABEL ioe.api.commit=$IOE_API_COMMIT ioe.app.commit=$IOE_APP_COMMIT
+WORKDIR /srv/api
+COPY --from=api_build /api/dist ./dist
+COPY --from=api_build /api/node_modules ./node_modules
+COPY --from=api_build /api/package.json /api/package-lock.json ./
+WORKDIR /srv/www/web
+RUN find . -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+COPY web/ ./

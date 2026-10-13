@@ -145,6 +145,53 @@ export class CsdService {
     return this.repo.listar();
   }
 
+  /** Modifica sólo cuenta PAC; no requiere archivos ni contraseña del CSD. */
+  async actualizarCuentaQuadrum(
+    rfc: string,
+    input: {
+      quadrumUsuario: string;
+      quadrumPassword?: string;
+    },
+  ) {
+    const clave = String(rfc ?? '')
+      .trim()
+      .toUpperCase();
+    if (!/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(clave))
+      throw new BadRequestException('RFC emisor inválido.');
+    const usuario = String(input.quadrumUsuario ?? '').trim();
+    if (!usuario)
+      throw new BadRequestException('Captura el usuario de Quadrum.');
+    const fila = await this.repo.cuentaActivaPorRfc(clave);
+    if (!fila)
+      throw new NotFoundException(`No hay CSD activo para el RFC ${clave}.`);
+    const password = input.quadrumPassword;
+    if (
+      password !== undefined &&
+      (typeof password !== 'string' || !password.length)
+    )
+      throw new BadRequestException(
+        'La contraseña nueva no puede estar vacía.',
+      );
+    if (
+      !password &&
+      (usuario !== fila.QUADRUM_USUARIO?.trim() || !fila.TIENE_PASSWORD)
+    ) {
+      throw new BadRequestException(
+        'Captura contraseña de Quadrum al cambiar usuario o configurar una cuenta nueva.',
+      );
+    }
+    await this.repo.actualizarCuentaQuadrum({
+      rfc: clave,
+      noCertificado: fila.NO_CERTIFICADO,
+      usuarioAnterior: fila.QUADRUM_USUARIO,
+      quadrumUsuario: usuario,
+      quadrumPasswordCifrada:
+        password !== undefined ? cifrar(password, this.secreto()) : undefined,
+    });
+    this.cache.delete(clave);
+    return { rfc: clave, quadrumUsuario: usuario, actualizada: true };
+  }
+
   /** El CSD con el que se debe sellar una factura de ese RFC. */
   async obtenerPorRfc(rfc: string): Promise<CsdEmisor> {
     const clave = String(rfc ?? '')
