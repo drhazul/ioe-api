@@ -1,6 +1,6 @@
 # Plan de corrección y cierre de integración Quadrum en producción
 
-Fecha: 2026-10-12 (America/Mexico_City). Estado: corrección implementada y validada; release en preparación, activación y UAT pendientes.
+Fecha: 2026-10-12 (America/Mexico_City). Estado: corrección implementada y validada; release técnico desplegado; activación fiscal y UAT pendientes.
 Seguimiento: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](QUADRUM_PRODUCCION_SEGUIMIENTO.md).
 
 ## Objetivo y alcance autorizado
