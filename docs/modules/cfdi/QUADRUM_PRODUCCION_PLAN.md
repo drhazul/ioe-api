@@ -1,6 +1,6 @@
 # Plan de corrección y cierre de integración Quadrum en producción
 
-Fecha: 2026-10-12 (America/Mexico_City). Estado: base fiscal y edición de cuenta desplegadas; FACTURA configurada para JICJ800630854/JIFT6203071N7. UAT de JICJ rechazada por PAC 702; pendiente solución del proveedor y aceptación fiscal. JIFJ4704238T5 en espera, bloqueado.
+Fecha: 2026-10-12 (America/Mexico_City). Estado: base fiscal y edición de cuenta desplegadas; FACTURA configurada para JICJ800630854/JIFT6203071N7. UAT de ambos emisores rechazadas por PAC 702; pendiente solución del proveedor y aceptación fiscal. JIFJ4704238T5 en espera, bloqueado.
 Seguimiento: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](QUADRUM_PRODUCCION_SEGUIMIENTO.md).
 
 ## Objetivo y alcance autorizado
@@ -178,3 +178,8 @@ El 2026-10-12 el titular autorizó activar sólo JICJ800630854 y JIFT6203071N7 y
 Titular posteriormente eligió y autorizó una emisión de DF01-20261012-VF-0040 después de simulación; PAC rechazó con 702, sin UUID. Esto supersede ausencia de documento UAT del párrafo histórico anterior, pero no cierra aceptación. No se reenviará automáticamente. Acta en [QUADRUM_PRODUCCION_UAT.md](QUADRUM_PRODUCCION_UAT.md); expediente del proveedor en [QUADRUM_SOPORTE_702.md](QUADRUM_SOPORTE_702.md).
 
 Edición independiente de usuario/contraseña PAC quedó desplegada con API 900b625 y App 9a72b96. No habilita emisores ni valida permisos de timbrado al guardar. JIFJ4704238T5 permanece diferido hasta confirmación del titular y nueva consulta de su cuenta; otros avances técnicos continúan sin cambiar sus credenciales o bloqueo. JICJ800630854 tiene consulta admitida pero timbrado rechazado, condición externa que requiere aclaración del proveedor antes de nueva autorización. JIFT6203071N7 aún requiere documento y UAT propia.
+
+
+### Segundo caso UAT autorizado
+
+El titular eligió DF04-20261012-VF-0004 de JIFT6203071N7 y autorizó un timbrado tras simulación validada. Rechazo PAC 702, sin UUID; acta en [QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md). Este corte supersede ausencia de caso JIFT de referencias históricas anteriores, sin cerrar aceptación fiscal. Ambos RFC configurados requieren solución del proveedor y nueva autorización concreta antes de reintentar. No usar consulta admitida como prueba de permiso de timbrado.

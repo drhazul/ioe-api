@@ -4,7 +4,7 @@ Estado: preparado para que el titular lo comparta por su canal de soporte. No se
 
 ## Hechos y solicitud
 
-En producción, cuenta asociada al emisor JICJ800630854 admite consulta con UUID ficticio, pero rechaza timbrado real autorizado de un documento. Solicitamos revisar vinculación y habilitación de distribuidor/usuario para Web Services productivos. Confirmar causa exacta de 702 y acción requerida; no asumir contraseña incorrecta, saldo insuficiente ni fallo XML sin validación del proveedor.
+En producción, las cuentas asociadas a JICJ800630854 y JIFT6203071N7 admiten consulta con UUID ficticio, pero rechazan timbrado real autorizado de sus documentos con 702. Solicitamos revisar vinculación y habilitación de distribuidor/usuario para Web Services productivos por cuenta/emisor. Confirmar causa exacta y acción requerida; no asumir contraseña incorrecta, saldo insuficiente ni fallo XML sin validación del proveedor.
 
 | Dato para rastreo | Valor |
 |---|---|
@@ -21,6 +21,21 @@ En producción, cuenta asociada al emisor JICJ800630854 admite consulta con UUID
 | UUID | Vacío en acuse; no confirmado |
 
 Pedir confirmación de que la cuenta seleccionada está vinculada al distribuidor correcto, activa para timbrado en WS de producción y autorizada para este emisor. Verificar requisitos contractuales o de saldo únicamente si el proveedor identifica esa causa.
+
+## Segundo caso: JIFT6203071N7
+
+| Dato para rastreo | Valor |
+|---|---|
+| Fecha del PAC | 2026-10-12T21:24:35 |
+| RFC emisor | JIFT6203071N7 |
+| Folio comercial IOE | DF04-20261012-VF-0004 |
+| Serie / folio enviados | JIFT / 02223 |
+| Código / mensaje | 702 / Sorry there was an error when validating the reseller and user |
+| IdIncidencia | 749527dc-03bb-488b-a523-2394bfad8e0a |
+| WorkProcessId | 5FA2F5C7-1D68-5E64-A2A1-F8CB912DEE6A |
+| UUID | Vacío en acuse; no confirmado |
+
+Acta: [QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md). Acuse privado: `/ArchivosUsuarios/respaldoCFDI/evidencia/20261013T032435_JIFT-02223/acuse.json`. Un intento autorizado tras simulación y sello verificado; sin reintento ni correo encolado. Estado ERROR / ERROR_EMISION. No asumir que rechazo compartido confirma misma causa hasta que Quadrum revise ambos identificadores de proceso.
 
 ## Evidencia y restricciones
 

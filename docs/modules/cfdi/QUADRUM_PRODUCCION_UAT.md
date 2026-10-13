@@ -35,4 +35,4 @@ Quadrum debe confirmar causa y resolver validación de distribuidor/usuario para
 
 Después de solución: releer estado fiscal y reserva, validar cuenta, repetir simulación con datos actuales y solicitar autorización nueva del documento antes de otro intento. No liberar ni borrar registros adicionales, no restaurar SQL y no usar Facturify como respaldo automático.
 
-UAT **no aprobada**. JIFT6203071N7 aún requiere caso autorizado; JIFJ4704238T5 queda en espera y bloqueado por decisión del titular. NC, REP y cancelación permanecen fuera de activación. Ninguna consulta admitida ni build verde cierra aceptación fiscal.
+UAT **no aprobada**. JIFT6203071N7 fue evaluado después en DF04-20261012-VF-0004 y también recibió 702; acta propia: [QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md). JIFJ4704238T5 queda en espera y bloqueado por decisión del titular. NC, REP y cancelación permanecen fuera de activación. Ninguna consulta admitida ni build verde cierra aceptación fiscal.
