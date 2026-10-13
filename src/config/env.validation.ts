@@ -14,6 +14,27 @@ export const envValidationSchema = Joi.object({
   JWT_EXPIRES_IN: Joi.string().default('15m'),
   REFRESH_EXPIRES_DAYS: Joi.number().default(30),
 
+  QUADRUM_ENDPOINT: Joi.string()
+    .valid(
+      'https://devws.cfdiquadrum.com.mx/timbrar',
+      'https://ws.cfdiquadrum.com.mx/timbrar',
+    )
+    .optional(),
+  QUADRUM_CANCELAR_ENDPOINT: Joi.string()
+    .valid(
+      'https://devws.cfdiquadrum.com.mx/cancelar',
+      'https://ws.cfdiquadrum.com.mx/cancelar',
+    )
+    .optional(),
+  QUADRUM_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .max(120000)
+    .default(60000),
+  QUADRUM_PRODUCCION_HABILITADA: Joi.boolean().default(false),
+  QUADRUM_RFC_HABILITADOS: Joi.string().allow('').default(''),
+  QUADRUM_FLUJOS_HABILITADOS: Joi.string().allow('').default(''),
+
   // Correo automático de FACTURA_QUADRUM. Se cargan solo al conectar Gmail.
   GOOGLE_OAUTH_CLIENT_ID: Joi.string().optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: Joi.string().optional(),

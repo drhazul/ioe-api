@@ -13,6 +13,7 @@ function configFalso(vars: Record<string, string> = {}) {
     QUADRUM_ENDPOINT: 'https://devws.cfdiquadrum.com.mx/timbrar',
     QUADRUM_USUARIO: 'usuario-prueba',
     QUADRUM_CONTRASENA: 'p4ssw0rd&<secreta>',
+    QUADRUM_CANCELAR_ENDPOINT: vars.QUADRUM_ENDPOINT === 'https://ws.cfdiquadrum.com.mx/timbrar' ? 'https://ws.cfdiquadrum.com.mx/cancelar' : 'https://devws.cfdiquadrum.com.mx/cancelar',
     ...vars,
   };
   return { get: (k: string) => base[k] } as unknown as ConfigService;

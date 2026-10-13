@@ -82,6 +82,10 @@ function armar(
   carpetas.push(dir);
 
   const repo = {
+    conEmisionExclusiva: jest.fn(
+      (_id: string, accion: () => Promise<unknown>) => accion(),
+    ),
+    estadoReserva: jest.fn().mockResolvedValue(''),
     assertColumnaPac: jest.fn().mockResolvedValue(undefined),
     folio: jest.fn().mockResolvedValue(filasVenta(opciones.header)),
     reservarSerie: jest.fn().mockResolvedValue({
@@ -116,6 +120,7 @@ function armar(
     csdService,
   );
   const timbrado = {
+    validarEmision: jest.fn().mockResolvedValue(undefined),
     timbrarVenta,
     comprobanteDeVenta: (
       datos: Parameters<TimbradoService['comprobanteDeVenta']>[0],
@@ -283,5 +288,53 @@ describe('EmisionService.probar (simulacion)', () => {
 
     await expect(service.probar('F-001')).rejects.toThrow(/UsoCfdi/);
     expect(repo.marcarError).not.toHaveBeenCalled();
+  });
+});
+
+describe('Emisión: protección antes de PAC y después de aceptación', () => {
+  it('cancelación pendiente no permite reemisión con UUID vigente', async () => {
+    const { service, repo, timbrarVenta } = armar({
+      header: {
+        CFDI_UUID: UUID,
+        CFDI_CANCEL_STATUS: 'CANCELACION_PENDIENTE',
+        CFDI_STATUS: 'TIMBRADO',
+      },
+    });
+    await expect(service.emitir('F-001')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(repo.reservarSerie).not.toHaveBeenCalled();
+    expect(timbrarVenta).not.toHaveBeenCalled();
+  });
+  it('bloquea reserva que puede corresponder a una emisión incierta', async () => {
+    const { service, repo, timbrarVenta } = armar();
+    repo.estadoReserva.mockResolvedValue('RESERVADO');
+    await expect(service.emitir('F-001')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(timbrarVenta).not.toHaveBeenCalled();
+  });
+  it('persistencia fallida tras aceptación no libera ni reenvía', async () => {
+    const { service, repo, timbrarVenta } = armar();
+    repo.marcarTimbrado.mockRejectedValue(new Error('SQL no disponible'));
+    await expect(service.emitir('F-001')).rejects.toBeInstanceOf(
+      BadGatewayException,
+    );
+    expect(timbrarVenta).toHaveBeenCalledTimes(1);
+    expect(repo.marcarError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mensaje: expect.stringContaining('PERSISTENCIA PENDIENTE'),
+      }),
+    );
+    expect(repo.actualizarEstadoSerie).not.toHaveBeenCalledWith(
+      expect.objectContaining({ estado: 'ERROR_EMISION' }),
+    );
+  });
+  it('rechaza conflicto RFC sucursal/documento antes de reservar', async () => {
+    const { service, repo } = armar({ header: { RfcEmisor: 'JIFT6203071N7' } });
+    await expect(service.emitir('F-001')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(repo.reservarSerie).not.toHaveBeenCalled();
   });
 });

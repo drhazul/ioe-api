@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { endpointQuadrum, quadrumProduccion } from './quadrum-config';
 import { elementos, escaparTexto, existe, valor } from './soap-xml';
 
 /**
@@ -91,24 +92,31 @@ export class QuadrumClient {
 
   constructor(private readonly config: ConfigService) {}
 
+  onModuleInit(): void {
+    this.getEndpoint();
+  }
+
   getEndpoint(): string {
-    return (
-      this.config.get<string>('QUADRUM_ENDPOINT') ||
-      'https://devws.cfdiquadrum.com.mx/timbrar'
-    );
+    return endpointQuadrum(this.config, 'timbrar');
   }
 
   private getUsuario(cuenta?: CuentaPac): string {
     return (
       cuenta?.usuario?.trim() ||
-      this.config.get<string>('QUADRUM_USUARIO') ||
+      (!this.esProduccion() && !cuenta
+        ? this.config.get<string>('QUADRUM_USUARIO')
+        : '') ||
       ''
     );
   }
 
   private getContrasena(cuenta?: CuentaPac): string {
     return (
-      cuenta?.contrasena || this.config.get<string>('QUADRUM_CONTRASENA') || ''
+      cuenta?.contrasena ||
+      (!this.esProduccion() && !cuenta
+        ? this.config.get<string>('QUADRUM_CONTRASENA')
+        : '') ||
+      ''
     );
   }
 
@@ -124,7 +132,7 @@ export class QuadrumClient {
    * en `devws.`. Sirve para que los logs digan en que ambiente se timbro.
    */
   esProduccion(): boolean {
-    return !/dev/i.test(this.getEndpoint());
+    return quadrumProduccion(this.config);
   }
 
   hasCredentials(cuenta?: CuentaPac): boolean {
@@ -308,9 +316,14 @@ export class QuadrumClient {
     if (existe(xml, 'Fault')) {
       const code = valor(xml, 'faultcode') ?? '';
       const str = valor(xml, 'faultstring') ?? '';
-      // Un Fault es una respuesta del PAC, no una interrupcion: se sabe que
-      // no timbro, asi que reintentar tras corregir es seguro.
-      throw new PacError(`SOAP Fault del PAC: ${code} - ${str}`.trim(), false);
+      const incierto =
+        nombreResultado === 'timbrarResult' &&
+        /server/i.test(code) &&
+        !/usuario|contrasena|contraseña|XML invalido/i.test(str);
+      throw new PacError(
+        `SOAP Fault del PAC: ${code} - ${str}`.trim(),
+        incierto,
+      );
     }
 
     if (!existe(xml, nombreResultado)) {
@@ -336,6 +349,9 @@ export class QuadrumClient {
       }),
     );
 
+    const error = valor(resultado, 'error');
+    if (error?.trim())
+      throw new PacError(`El PAC respondió: ${error.trim()}`, false);
     const uuid = valor(resultado, 'UUID') ?? valor(resultado, 'uuid');
 
     return {
@@ -360,7 +376,7 @@ export class QuadrumClient {
    */
   static censurar(xml: string): string {
     return xml.replace(
-      /(<(?:[\w.-]+:)?(?:contrasena|usuario)>)([\s\S]*?)(<\/)/gi,
+      /(<(?:[\w.-]+:)?(?:contrasena|usuario|username|password|key|cer)>)([\s\S]*?)(<\/)/gi,
       '$1***$3',
     );
   }

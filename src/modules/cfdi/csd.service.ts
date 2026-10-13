@@ -6,6 +6,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { quadrumProduccion, validarRfcEmisor } from './quadrum-config';
 import { cargarCsd, Csd, CsdInvalidoError } from './cfdi-sellador';
 import { cifrar, CifradoInvalidoError, descifrar } from './cripto';
 import { CsdRepositorio, FilaCsd, ResumenFilaCsd } from './csd.repositorio';
@@ -153,7 +154,11 @@ export class CsdService {
       throw new BadRequestException('Falta el RFC emisor.');
     }
 
-    const enCache = this.cache.get(clave);
+    validarRfcEmisor(clave);
+    // Producción consulta siempre el registro actual: cambios de cuenta no quedan en caché.
+    const enCache = quadrumProduccion(this.config)
+      ? undefined
+      : this.cache.get(clave);
     if (enCache && new Date() <= enCache.csd.validoHasta) return enCache;
     this.cache.delete(clave);
 
@@ -189,6 +194,15 @@ export class CsdService {
       throw e;
     }
 
+    if (csd.rfc?.toUpperCase() !== clave)
+      throw new ServiceUnavailableException(
+        'RFC del CSD no coincide con el emisor solicitado.',
+      );
+    if (quadrumProduccion(this.config) && csd.noCertificado.startsWith('300'))
+      throw new ServiceUnavailableException(
+        'CSD de pruebas no permitido en producción.',
+      );
+
     const emisor: CsdEmisor = {
       csd,
       cer: fila.CER,
@@ -205,15 +219,21 @@ export class CsdService {
   /**
    * Cuenta del PAC de ese RFC, si se capturo.
    *
-   * Si la contrasena no se puede descifrar no se tumba el timbrado: se
-   * avisa y se cae a la cuenta del .env, que es el comportamiento previo.
+   * Producción exige par individual descifrable; sólo pruebas conservan
+   * compatibilidad con la cuenta global.
    */
   private credencialesDe(
     fila: FilaCsd,
     clave: string,
   ): CredencialesPac | undefined {
     const usuario = fila.QUADRUM_USUARIO?.trim();
-    if (!usuario || !fila.QUADRUM_PASSWORD_CIFRADA) return undefined;
+    if (!usuario || !fila.QUADRUM_PASSWORD_CIFRADA) {
+      if (quadrumProduccion(this.config))
+        throw new ServiceUnavailableException(
+          `RFC ${clave} sin cuenta PAC individual completa.`,
+        );
+      return undefined;
+    }
 
     try {
       return {
@@ -221,6 +241,10 @@ export class CsdService {
         contrasena: descifrar(fila.QUADRUM_PASSWORD_CIFRADA, this.secreto()),
       };
     } catch (e) {
+      if (quadrumProduccion(this.config))
+        throw new ServiceUnavailableException(
+          `No se pudo descifrar la cuenta PAC del RFC ${clave}.`,
+        );
       const detalle = e instanceof Error ? e.message : String(e);
       this.logger.warn(
         `No se pudo descifrar la contrasena de Quadrum de ${clave}: ${detalle}. ` +

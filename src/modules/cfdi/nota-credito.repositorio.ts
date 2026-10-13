@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { conBloqueoCfdi } from './cfdi-lock';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
 function texto(valor: unknown): string {
@@ -36,6 +37,24 @@ export interface NotaRegistrada {
 @Injectable()
 export class NotaCreditoRepositorio {
   constructor(private readonly dataSource: DataSource) {}
+
+  conOperacionExclusiva<T>(
+    idFol: string,
+    tipo: 'NC' | 'PG',
+    accion: () => Promise<T>,
+  ): Promise<T> {
+    return conBloqueoCfdi(this.dataSource, idFol, async () => {
+      const pendientes = await this.dataSource.query(
+        "SELECT TOP 1 ID FROM dbo.FACT_CFDI_FOLIOS_DIARIOS WHERE IDFOL=@0 AND ESTADO='RESERVADO'",
+        [`${idFol}-${tipo}`],
+      );
+      if (pendientes.length)
+        throw new ConflictException(
+          'Documento relacionado con resultado pendiente; reconciliar antes de emitir otro.',
+        );
+      return accion();
+    });
+  }
 
   async reservarFolio(input: {
     idFolOrigen: string;

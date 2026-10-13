@@ -218,3 +218,7 @@ Una factura cancelada deja el folio en `ESTATUS='PENDIENTE'` para poder rehacerl
 - Mantén este índice y los README/AGENTS de módulo actualizados con cada cambio de contrato o proceso.
 - Ordenes de trabajo / Cambio material y Merma (2026-07-24): `PV_ORD_CAMBIO_MERMA_PRECIO` conserva base económica propia por ORD derivada; API sella diferencia prorrateada y fiscal antes de ejecutar SP.
 
+
+## Preparación productiva Quadrum
+
+[Plan de corrección](docs/modules/cfdi/QUADRUM_PRODUCCION_PLAN.md) y [seguimiento por RFC](docs/modules/cfdi/QUADRUM_PRODUCCION_SEGUIMIENTO.md). Producción requiere endpoints oficiales y habilitación explícita por RFC/flujo; `.env` local no equivale a entorno desplegado.

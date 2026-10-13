@@ -207,3 +207,7 @@ El proyecto vive dentro de OneDrive, donde los avisos de cambio de archivo no so
 - Punto de venta / Caja General - Entrega OPV (2026-06-18): `sp_cg_sync_entrega_opv_abierta`, `sp_cg_cerrar_entrega_opv` y `sp_cg_reactivar_entrega_opv` se serializan por sucursal/fecha/OPV con `sp_getapplock` y limpian `DAT_FORM_ENTR_OPV_SVR` por `IDE` + contexto antes de reinsertar, para evitar duplicados sobre `PK_DATFORMENTROPVSVR`.
 - Ordenes de trabajo / Cambio material y Merma (2026-07-24): cada ORD derivada debe persistir snapshot propio `PVTA_UNITARIO/PVTAT_BASE`; diferencia sellada usa fracción `CTD_C_M`, catálogo actual para nueva ORD e IVA según `DAT_SUC`/folio. Misma ART está permitida.
 
+
+## Quadrum producción (2026-10-12)
+
+Operación productiva exige `QUADRUM_PRODUCCION_HABILITADA`, RFC y flujos explícitos en `QUADRUM_RFC_HABILITADOS`/`QUADRUM_FLUJOS_HABILITADOS`. CSD/cuenta individual obligatorios; rutas sintéticas bloqueadas en producción. Emisión incierta o persistencia pendiente requiere reconciliación, no reenvío. Plan/seguimiento: `docs/modules/cfdi/QUADRUM_PRODUCCION_{PLAN,SEGUIMIENTO}.md`. No gastar timbres reales sin autorización del documento.

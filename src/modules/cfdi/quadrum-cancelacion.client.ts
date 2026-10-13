@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { endpointQuadrum, quadrumProduccion } from './quadrum-config';
 import { PacError } from './quadrum.client';
 import { elementos, escaparTexto, existe, valor } from './soap-xml';
 import { CuentaPac } from './quadrum.client';
@@ -94,16 +95,11 @@ export class QuadrumCancelacionClient {
   constructor(private readonly config: ConfigService) {}
 
   getEndpoint(): string {
-    const propio = this.config.get<string>('QUADRUM_CANCELAR_ENDPOINT');
-    if (propio) return propio;
-    // El de timbrado y el de cancelacion son el mismo host con otra ruta.
-    const timbrar = this.config.get<string>('QUADRUM_ENDPOINT');
-    if (timbrar) return timbrar.replace(/\/timbrar\/?$/i, '/cancelar');
-    return 'https://devws.cfdiquadrum.com.mx/cancelar';
+    return endpointQuadrum(this.config, 'cancelar');
   }
 
   esProduccion(): boolean {
-    return !/dev/i.test(this.getEndpoint());
+    return quadrumProduccion(this.config);
   }
 
   hasCredentials(cuenta?: CuentaPac): boolean {
@@ -155,6 +151,16 @@ export class QuadrumCancelacionClient {
       estatusCancelacion: valor(resultado, 'EstatusCancelacion'),
       error: valor(resultado, 'error'),
     };
+  }
+
+  async consultar(uuid: string, cuenta?: CuentaPac): Promise<void> {
+    this.assertCredentials(cuenta);
+    const cuerpo =
+      `<can:consulta xmlns:can="${NS_CANCELAR}">` +
+      `<can:usuario>${escaparTexto(this.getUsuario(cuenta))}</can:usuario>` +
+      `<can:contrasena>${escaparTexto(this.getContrasena(cuenta))}</can:contrasena>` +
+      `<can:uuid>${escaparTexto(uuid)}</can:uuid></can:consulta>`;
+    await this.enviar('consulta', cuerpo, 'consultaResult');
   }
 
   /** Solicita la cancelacion de un CFDI. Usa el CSD del emisor. */
@@ -239,14 +245,20 @@ export class QuadrumCancelacionClient {
   private getUsuario(cuenta?: CuentaPac): string {
     return (
       cuenta?.usuario?.trim() ||
-      this.config.get<string>('QUADRUM_USUARIO') ||
+      (!this.esProduccion() && !cuenta
+        ? this.config.get<string>('QUADRUM_USUARIO')
+        : '') ||
       ''
     );
   }
 
   private getContrasena(cuenta?: CuentaPac): string {
     return (
-      cuenta?.contrasena || this.config.get<string>('QUADRUM_CONTRASENA') || ''
+      cuenta?.contrasena ||
+      (!this.esProduccion() && !cuenta
+        ? this.config.get<string>('QUADRUM_CONTRASENA')
+        : '') ||
+      ''
     );
   }
 
@@ -312,6 +324,9 @@ export class QuadrumCancelacionClient {
       );
     }
     const [resultado] = elementos(texto, nombreResultado);
+    const error = valor(resultado, 'error');
+    if (error?.trim())
+      throw new PacError(`El PAC respondió: ${error.trim()}`, false);
     return resultado;
   }
 }

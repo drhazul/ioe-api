@@ -43,6 +43,9 @@ import {
   QuadrumClient,
 } from './quadrum.client';
 import { decodificarXmlEmbebido } from './soap-xml';
+import { assertOperacionQuadrum, OperacionQuadrum } from './quadrum-config';
+import { VentaRepositorio } from './venta.repositorio';
+import { QuadrumCancelacionClient } from './quadrum-cancelacion.client';
 
 export const OPCIONES_XML_CFDI40: SerializarOpciones = {
   namespaces: {
@@ -134,9 +137,8 @@ export interface ResultadoTimbrado {
 /**
  * Sella y timbra con Quadrum.
  *
- * Esta etapa solo timbra el comprobante de prueba y se niega a hacerlo contra
- * produccion. Conectarlo a `facturacion.service.ts` (con `toComprobante()` y
- * la bandera `CFDI_PAC`) es el paso siguiente.
+ * Documentos reales usan CSD/cuenta por RFC y habilitación explícita.
+ * Rutas sintéticas de prueba permanecen bloqueadas en producción.
  */
 @Injectable()
 export class TimbradoService {
@@ -147,6 +149,7 @@ export class TimbradoService {
     private readonly csdStore: CsdStore,
     private readonly config: ConfigService,
     private readonly csdService: CsdService,
+    private readonly repo?: VentaRepositorio,
   ) {}
 
   ambiente(): Ambiente {
@@ -154,6 +157,31 @@ export class TimbradoService {
   }
 
   async estado() {
+    if (this.quadrum.esProduccion()) {
+      const filas = await this.csdService.listar();
+      const rfcs: Awaited<ReturnType<TimbradoService['diagnosticarRfc']>>[] =
+        [];
+      for (const fila of filas.filter((f) => f.activo))
+        rfcs.push(await this.diagnosticarRfc(fila.rfc));
+      return {
+        csd: { fuente: 'FACT_CSD' },
+        pac: {
+          endpoint: this.quadrum.getEndpoint(),
+          ambiente: this.ambiente(),
+          credenciales: rfcs.length > 0 && rfcs.every((r) => r.ok),
+          conexion: {
+            ok: rfcs.length > 0 && rfcs.every((r) => r.ok),
+            mensaje: 'Validación por RFC; consultar rfcs',
+            ms: 0,
+          },
+          habilitada:
+            String(
+              this.config.get('QUADRUM_PRODUCCION_HABILITADA'),
+            ).toLowerCase() === 'true',
+          rfcs,
+        },
+      };
+    }
     let csd: ResumenCsd | { error: string };
     try {
       csd = this.csdStore.resumen();
@@ -191,6 +219,13 @@ export class TimbradoService {
     } catch (e) {
       throw new BadRequestException(e instanceof Error ? e.message : e);
     }
+  }
+
+  private assertPruebas(): void {
+    if (this.quadrum.esProduccion())
+      throw new ForbiddenException(
+        'Rutas sintéticas de prueba bloqueadas en producción.',
+      );
   }
 
   private datosPrueba(ahora: Date) {
@@ -258,15 +293,17 @@ export class TimbradoService {
     };
   }
 
-  timbrarPrueba(): Promise<ResultadoTimbrado> {
+  async timbrarPrueba(): Promise<ResultadoTimbrado> {
+    this.assertPruebas();
     return this.timbrar(this.comprobanteDePrueba());
   }
 
   /** Timbra una nota de credito de prueba contra la factura indicada. */
-  timbrarNotaCreditoPrueba(
+  async timbrarNotaCreditoPrueba(
     uuidRelacionado: string,
     cantidadDevuelta?: number,
   ): Promise<ResultadoTimbrado> {
+    this.assertPruebas();
     return this.timbrar(
       this.notaCreditoDePrueba(uuidRelacionado, cantidadDevuelta),
     );
@@ -280,7 +317,8 @@ export class TimbradoService {
     });
   }
 
-  timbrarFacturaPpdPrueba(): Promise<ResultadoTimbrado> {
+  async timbrarFacturaPpdPrueba(): Promise<ResultadoTimbrado> {
+    this.assertPruebas();
     return this.timbrar(this.facturaPpdDePrueba());
   }
 
@@ -300,7 +338,10 @@ export class TimbradoService {
     }
   }
 
-  timbrarReciboPagoPrueba(pago: DatosPagoPrueba): Promise<ResultadoTimbrado> {
+  async timbrarReciboPagoPrueba(
+    pago: DatosPagoPrueba,
+  ): Promise<ResultadoTimbrado> {
+    this.assertPruebas();
     return this.timbrar(this.reciboPagoDePrueba(pago));
   }
 
@@ -382,11 +423,15 @@ export class TimbradoService {
     rfcEmisor: string,
   ): Promise<ResultadoTimbrado> {
     const emisor = await this.csdService.obtenerPorRfc(rfcEmisor);
-    return this.timbrar(comprobante, {
-      csd: emisor.csd,
-      cer: emisor.cer,
-      cuentaPac: emisor.credencialesPac,
-    });
+    return this.timbrar(
+      comprobante,
+      {
+        csd: emisor.csd,
+        cer: emisor.cer,
+        cuentaPac: emisor.credencialesPac,
+      },
+      'COMPLEMENTO_PAGO',
+    );
   }
 
   /**
@@ -458,28 +503,35 @@ export class TimbradoService {
       throw e;
     }
 
-    const resultado = await this.timbrar(comprobante, {
-      csd: emisor.csd,
-      cer: emisor.cer,
-      cuentaPac: emisor.credencialesPac,
-    });
+    const resultado = await this.timbrar(
+      comprobante,
+      {
+        csd: emisor.csd,
+        cer: emisor.cer,
+        cuentaPac: emisor.credencialesPac,
+      },
+      'NOTA_CREDITO',
+    );
     return { ...resultado, total: comprobante.attrs.get('Total') ?? '' };
   }
 
   /** Sella con el CSD del emisor de la venta y timbra. */
   async timbrarVenta(datos: DatosVenta): Promise<ResultadoTimbrado> {
     const { comprobante, credenciales } = await this.comprobanteDeVenta(datos);
-    return this.timbrar(comprobante, credenciales);
+    return this.timbrar(comprobante, credenciales, 'FACTURA');
   }
 
   async timbrar(
     comprobante: CfdiNode,
     credenciales?: CredencialesSellado,
+    operacion?: OperacionQuadrum,
   ): Promise<ResultadoTimbrado> {
     if (this.quadrum.esProduccion()) {
-      throw new ForbiddenException(
-        'QUADRUM_ENDPOINT apunta a produccion. Este camino solo timbra en el ambiente de pruebas.',
-      );
+      if (!operacion || !credenciales?.csd.rfc || !credenciales.cuentaPac)
+        throw new ForbiddenException(
+          'Rutas de prueba o CSD/cuenta global no permitidos en producción.',
+        );
+      assertOperacionQuadrum(this.config, credenciales.csd.rfc, operacion);
     }
 
     const listo = this.sellarComprobante(comprobante, credenciales);
@@ -509,37 +561,57 @@ export class TimbradoService {
       });
     }
 
-    const xmlTimbrado = acuse.xml
-      ? decodificarXmlEmbebido(acuse.xml)
-      : undefined;
-    if (xmlTimbrado) {
-      writeFileSync(join(carpeta, 'timbrado.xml'), aUtf8SinBom(xmlTimbrado));
+    try {
+      const xmlTimbrado = acuse.xml
+        ? decodificarXmlEmbebido(acuse.xml)
+        : undefined;
+      if (xmlTimbrado) {
+        writeFileSync(join(carpeta, 'timbrado.xml'), aUtf8SinBom(xmlTimbrado));
+      }
+      writeFileSync(
+        join(carpeta, 'acuse.json'),
+        JSON.stringify({ ...acuse, xml: undefined }, null, 2),
+      );
+
+      this.logger.log(
+        `Timbrado ${acuse.exitoso ? 'OK' : 'con incidencias'} en ${this.ambiente()}: ` +
+          `uuid=${acuse.uuid ?? '-'} evidencia=${carpeta}`,
+      );
+
+      return {
+        exitoso: acuse.exitoso,
+        uuid: acuse.uuid,
+        fecha: acuse.fecha,
+        codEstatus: acuse.codEstatus,
+        incidencias: acuse.incidencias,
+        ambiente: this.ambiente(),
+        evidencia: carpeta,
+        xmlTimbrado,
+      };
+    } catch {
+      throw new BadGatewayException({
+        message:
+          'El PAC respondió pero falló guardar evidencia. Reconciliar antes de reintentar.',
+        resultadoIncierto: true,
+        uuid: acuse.uuid,
+        evidencia: carpeta,
+      });
     }
-    writeFileSync(
-      join(carpeta, 'acuse.json'),
-      JSON.stringify({ ...acuse, xml: undefined }, null, 2),
-    );
-
-    this.logger.log(
-      `Timbrado ${acuse.exitoso ? 'OK' : 'con incidencias'} en ${this.ambiente()}: ` +
-        `uuid=${acuse.uuid ?? '-'} evidencia=${carpeta}`,
-    );
-
-    return {
-      exitoso: acuse.exitoso,
-      uuid: acuse.uuid,
-      fecha: acuse.fecha,
-      codEstatus: acuse.codEstatus,
-      incidencias: acuse.incidencias,
-      ambiente: this.ambiente(),
-      evidencia: carpeta,
-      xmlTimbrado,
-    };
   }
 
   async consultar(uuid: string) {
     try {
-      return await this.quadrum.consultar(uuid);
+      let cuenta: CuentaPac | undefined;
+      if (this.quadrum.esProduccion()) {
+        const folio = await this.repo?.folioPorUuid(uuid);
+        if (!folio || String(folio.CFDI_PAC).toUpperCase() !== 'QUADRUM')
+          throw new NotFoundException(
+            'UUID no pertenece a un documento Quadrum de IOE.',
+          );
+        cuenta = (await this.csdService.obtenerPorRfc(String(folio.RfcEmisor)))
+          .credencialesPac;
+      }
+      return await this.quadrum.consultar(uuid, cuenta);
     } catch (e) {
       if (e instanceof PacError && !e.resultadoIncierto) {
         throw new NotFoundException(e.message);
@@ -552,6 +624,63 @@ export class TimbradoService {
       }
       throw e;
     }
+  }
+
+  async diagnosticarRfc(rfc: string) {
+    const t0 = Date.now();
+    try {
+      const emisor = await this.csdService.obtenerPorRfc(rfc);
+      if (!emisor.credencialesPac)
+        throw new ServiceUnavailableException('Sin cuenta PAC propia.');
+      try {
+        await new QuadrumCancelacionClient(this.config).consultar(
+          UUID_INEXISTENTE,
+          emisor.credencialesPac,
+        );
+        return {
+          rfc,
+          ok: false,
+          mensaje: 'Respuesta sin confirmación de autenticación',
+          ms: Date.now() - t0,
+        };
+      } catch (e) {
+        if (
+          e instanceof PacError &&
+          /UUID does not exist|no\s+e?ncontre|no\s+encontrad|Could not get invoice/i.test(
+            e.message,
+          )
+        ) {
+          return {
+            rfc,
+            ok: true,
+            mensaje:
+              'Cuenta admitida por consulta; UUID ficticio inexistente. No prueba timbrado.',
+            ms: Date.now() - t0,
+          };
+        }
+        throw e;
+      }
+    } catch (e) {
+      return {
+        rfc,
+        ok: false,
+        mensaje: e instanceof Error ? e.message : 'Validación fallida',
+        ms: Date.now() - t0,
+      };
+    }
+  }
+
+  async validarEmision(rfc: string, operacion: OperacionQuadrum = 'FACTURA') {
+    const emisor = await this.csdService.obtenerPorRfc(rfc);
+    assertOperacionQuadrum(this.config, rfc, operacion);
+    if (this.quadrum.esProduccion()) {
+      const diagnostico = await this.diagnosticarRfc(rfc);
+      if (!diagnostico.ok)
+        throw new ServiceUnavailableException(
+          `RFC ${rfc} sin acceso PAC validado: ${diagnostico.mensaje}`,
+        );
+    }
+    return emisor;
   }
 
   // ---------------------------------------------------------------------

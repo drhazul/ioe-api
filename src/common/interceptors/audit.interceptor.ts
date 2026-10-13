@@ -32,6 +32,10 @@ export class AuditInterceptor implements NestInterceptor {
     // Sanitizar body (evitar passwords/tokens)
     const body = { ...(req.body ?? {}) };
     for (const k of [
+      'cerBase64',
+      'keyBase64',
+      'quadrumPassword',
+      'quadrumUsuario',
       'password',
       'PASSWORD',
       'PASSWORD_HASH',

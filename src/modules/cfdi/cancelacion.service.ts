@@ -10,6 +10,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertOperacionQuadrum } from './quadrum-config';
 import { aUtf8SinBom } from './cfdi-node';
 import { CsdService } from './csd.service';
 import { CuentaPac } from './quadrum.client';
@@ -85,9 +86,7 @@ export class CancelacionService {
   /** Solo lectura: dice si el CFDI se puede cancelar y como. */
   async estatus(input: { uuid: string; rfcReceptor: string; total: string }) {
     const folio = await this.repo.folioPorUuid(input.uuid);
-    const rfcEmisor = folio
-      ? columna(folio, 'RfcEmisor').toUpperCase() || this.rfcEmisor()
-      : this.rfcEmisor();
+    const rfcEmisor = this.emisorDelFolio(folio);
     const cuentaPac = await this.cuentaDe(rfcEmisor);
 
     const estatus = await this.ejecutar(() =>
@@ -111,6 +110,17 @@ export class CancelacionService {
   }
 
   async cancelar(input: CancelarCfdiInput): Promise<ResultadoCancelacion> {
+    const folio = await this.repo.folioPorUuid(input.uuid);
+    if (folio)
+      return this.repo.conEmisionExclusiva(columna(folio, 'IDFOL'), () =>
+        this.cancelarExclusivo(input),
+      );
+    return this.cancelarExclusivo(input);
+  }
+
+  private async cancelarExclusivo(
+    input: CancelarCfdiInput,
+  ): Promise<ResultadoCancelacion> {
     let validado: MotivoValidado;
     try {
       validado = validarMotivo(input.motivo, input.folioSustitucion);
@@ -121,18 +131,11 @@ export class CancelacionService {
       throw e;
     }
 
-    if (this.cliente.esProduccion()) {
-      throw new ForbiddenException(
-        'El endpoint de cancelacion apunta a produccion. Este camino solo cancela en el ambiente de pruebas.',
-      );
-    }
-
     // El folio manda: se cancela con el CSD de SU razon social. Si el UUID
     // no es de aqui se cae al CSD del .env, que es el caso de las pruebas.
     const folio = await this.repo.folioPorUuid(input.uuid);
-    const rfcEmisor = folio
-      ? columna(folio, 'RfcEmisor').toUpperCase() || this.rfcEmisor()
-      : this.rfcEmisor();
+    const rfcEmisor = this.emisorDelFolio(folio);
+    assertOperacionQuadrum(this.config, rfcEmisor, 'CANCELACION');
     const cuentaPac = await this.cuentaDe(rfcEmisor);
 
     const estatusPrevio = await this.ejecutar(() =>
@@ -209,6 +212,7 @@ export class CancelacionService {
           this.cliente.estatusSat({
             uuid: input.uuid,
             rfcEmisor,
+            cuenta: cuentaPac,
             rfcReceptor: input.rfcReceptor,
             total: input.total,
           }),
@@ -256,7 +260,7 @@ export class CancelacionService {
 
   /** Acuse del SAT de una cancelacion ya solicitada. */
   async acuse(uuid: string) {
-    const rfcEmisor = this.rfcEmisor();
+    const rfcEmisor = this.emisorDelFolio(await this.repo.folioPorUuid(uuid));
     const cuenta = await this.cuentaDe(rfcEmisor);
     return this.ejecutar(() => this.cliente.acuse({ uuid, rfcEmisor, cuenta }));
   }
@@ -290,7 +294,8 @@ export class CancelacionService {
           'utf8',
         ),
       };
-    } catch {
+    } catch (e) {
+      if (this.cliente.esProduccion()) throw e;
       return {
         cer: this.csdStore.certificadoPem(),
         key: this.csdStore.llavePrivadaPem(),
@@ -307,9 +312,28 @@ export class CancelacionService {
   private async cuentaDe(rfcEmisor: string): Promise<CuentaPac | undefined> {
     try {
       return (await this.csdService.obtenerPorRfc(rfcEmisor)).credencialesPac;
-    } catch {
+    } catch (e) {
+      if (this.cliente.esProduccion()) throw e;
       return undefined;
     }
+  }
+
+  private emisorDelFolio(folio: Record<string, unknown> | null): string {
+    if (this.cliente.esProduccion()) {
+      if (
+        !folio ||
+        columna(folio, 'CFDI_PAC').toUpperCase() !== 'QUADRUM' ||
+        !columna(folio, 'RfcEmisor')
+      ) {
+        throw new ForbiddenException(
+          'UUID sin documento Quadrum y RFC emisor verificables en IOE.',
+        );
+      }
+      return columna(folio, 'RfcEmisor').toUpperCase();
+    }
+    return folio
+      ? columna(folio, 'RfcEmisor').toUpperCase() || this.rfcEmisor()
+      : this.rfcEmisor();
   }
 
   private rfcEmisor(): string {

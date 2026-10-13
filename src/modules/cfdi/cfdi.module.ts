@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CfdiSucursalGuard } from './cfdi-sucursal.guard';
 import { CancelacionService } from './cancelacion.service';
 import { ComplementoPagoService } from './complemento-pago.service';
 import { CfdiController } from './cfdi.controller';
@@ -30,6 +31,7 @@ import { CFDI_CORREO_PROVIDER } from './correo/proveedor-correo';
     GoogleOAuthCallbackController,
   ],
   providers: [
+    CfdiSucursalGuard,
     QuadrumClient,
     QuadrumCancelacionClient,
     CsdStore,

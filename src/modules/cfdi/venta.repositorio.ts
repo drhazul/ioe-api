@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { conBloqueoCfdi } from './cfdi-lock';
 import { columna, Fila, FilasVenta } from './venta.mapper';
 
 export interface SerieReservada {
@@ -27,6 +28,18 @@ export interface SerieReservada {
 @Injectable()
 export class VentaRepositorio {
   constructor(private readonly dataSource: DataSource) {}
+
+  conEmisionExclusiva<T>(idFol: string, accion: () => Promise<T>): Promise<T> {
+    return conBloqueoCfdi(this.dataSource, idFol, accion);
+  }
+
+  async estadoReserva(idFol: string): Promise<string> {
+    const rows = await this.dataSource.query(
+      'SELECT TOP 1 ESTADO FROM dbo.FACT_CFDI_FOLIOS_DIARIOS WHERE IDFOL=@0 ORDER BY REEMISION DESC',
+      [idFol],
+    );
+    return String(rows?.[0]?.ESTADO ?? '').toUpperCase();
+  }
 
   /** Cabecera, detalle, cliente fiscal y sucursal de un folio. */
   async folio(idFol: string): Promise<FilasVenta> {
@@ -195,12 +208,8 @@ export class VentaRepositorio {
   /**
    * Cancelacion pedida al SAT y aceptada por el, pero aun sin confirmar.
    *
-   * El folio queda disponible desde que el SAT acepta la solicitud: una
-   * factura se cancela por error y hay que poder rehacerla en el momento,
-   * sin esperar a que el SAT la de por concluida (puede tardar).
-   *
-   * El CFDI sigue TIMBRADO y la cancelacion sigue PENDIENTE a proposito:
-   * es CFDI_CANCEL_STATUS, no ESTATUS, quien dice si ya esta cerrada.
+   * La solicitud pendiente no habilita reemisión: se requiere cancelación
+   * confirmada ante SAT y sincronizada en CFDI_STATUS.
    */
   async marcarCancelacionSolicitada(idFol: string): Promise<void> {
     await this.dataSource.query(

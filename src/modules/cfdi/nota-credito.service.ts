@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  BadGatewayException,
   ConflictException,
   Injectable,
   Logger,
@@ -147,12 +148,24 @@ export class NotaCreditoService {
     };
   }
 
-  async emitir(
+  emitir(
+    idFol: string,
+    seleccion: SeleccionConcepto[],
+    opciones: { usuario?: string } = {},
+  ): Promise<ResultadoNotaCredito> {
+    return this.repo.conOperacionExclusiva(idFol, 'NC', () =>
+      this.emitirExclusivo(idFol, seleccion, opciones),
+    );
+  }
+
+  private async emitirExclusivo(
     idFol: string,
     seleccion: SeleccionConcepto[],
     opciones: { usuario?: string } = {},
   ): Promise<ResultadoNotaCredito> {
     const armado = await this.armarDatos(idFol, seleccion);
+
+    await this.timbrado.validarEmision(armado.rfcEmisor, 'NOTA_CREDITO');
 
     const reserva = await this.repo.reservarFolio({
       idFolOrigen: idFol,
@@ -175,6 +188,15 @@ export class NotaCreditoService {
         armado.rfcEmisor,
       );
     } catch (e) {
+      if (
+        (e as { response?: { resultadoIncierto?: boolean } })?.response
+          ?.resultadoIncierto
+      ) {
+        this.logger.error(
+          `Resultado PAC incierto para ${reserva.idFol}; conservar reserva y reconciliar.`,
+        );
+        throw e;
+      }
       await this.repo.marcarError(
         reserva.idFol,
         e instanceof Error ? e.message : String(e),
@@ -196,19 +218,30 @@ export class NotaCreditoService {
       });
     }
 
-    const xmlPath = this.documentos.guardarXmlDeNota({
-      rfcEmisor: armado.rfcEmisor,
-      serie: reserva.serie,
-      folio: reserva.folio,
-      uuid: resultado.uuid!,
-      xml: resultado.xmlTimbrado,
-    });
+    let xmlPath: string;
+    try {
+      if (!resultado.xmlTimbrado) throw new Error('PAC aceptó sin XML');
+      xmlPath = this.documentos.guardarXmlDeNota({
+        rfcEmisor: armado.rfcEmisor,
+        serie: reserva.serie,
+        folio: reserva.folio,
+        uuid: resultado.uuid!,
+        xml: resultado.xmlTimbrado,
+      });
 
-    await this.repo.marcarTimbrada({
-      idFol: reserva.idFol,
-      uuid: resultado.uuid!,
-      usuario: opciones.usuario,
-    });
+      await this.repo.marcarTimbrada({
+        idFol: reserva.idFol,
+        uuid: resultado.uuid!,
+        usuario: opciones.usuario,
+      });
+    } catch {
+      throw new BadGatewayException({
+        message: `Persistencia pendiente para ${reserva.idFol}; no reenviar.`,
+        resultadoIncierto: true,
+        uuid: resultado.uuid,
+        evidencia: resultado.evidencia,
+      });
+    }
 
     this.logger.log(
       `Nota de credito ${reserva.serie}-${reserva.folio} timbrada para ${idFol}: ` +

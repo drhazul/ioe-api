@@ -6,9 +6,11 @@ import {
   Injectable,
   Logger,
   UnprocessableEntityException,
+  BadGatewayException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { aUtf8SinBom } from './cfdi-node';
+import { validarRfcEmisor } from './quadrum-config';
 import { fechaCfdi } from './fecha-expedicion';
 import { Incidencia } from './quadrum.client';
 import {
@@ -140,7 +142,16 @@ export class EmisionService {
     };
   }
 
-  async emitir(
+  emitir(
+    idFol: string,
+    opciones: { usuario?: string } = {},
+  ): Promise<ResultadoEmision> {
+    return this.repo.conEmisionExclusiva(idFol, () =>
+      this.emitirExclusivo(idFol, opciones),
+    );
+  }
+
+  private async emitirExclusivo(
     idFol: string,
     opciones: { usuario?: string } = {},
   ): Promise<ResultadoEmision> {
@@ -150,11 +161,9 @@ export class EmisionService {
     const header = filas.header;
 
     const uuidPrevio = columna(header, 'CFDI_UUID');
-    // Vale tanto la cancelacion ya confirmada como la que sigue en tramite:
-    // en ambos casos el SAT acepto la solicitud y la factura dejo de servir.
+    // Solicitud pendiente no equivale a cancelación fiscal confirmada.
     const cfdiPrevioCancelado =
-      columna(header, 'CFDI_STATUS').toUpperCase() === 'CANCELADO' ||
-      columna(header, 'CFDI_CANCEL_STATUS').trim() !== '';
+      columna(header, 'CFDI_STATUS').toUpperCase() === 'CANCELADO';
 
     // Un folio con CFDI vivo no se vuelve a timbrar: serian dos facturas
     // validas de la misma venta. Pero si el anterior quedo cancelado: se
@@ -180,6 +189,25 @@ export class EmisionService {
         `El folio ${idFol} no tiene RFC emisor ni en el folio ni en su sucursal.`,
       );
     }
+
+    validarRfcEmisor(rfcEmisor);
+    const sucRfc = columna(filas.sucursal, 'RFC').trim().toUpperCase();
+    if (sucRfc && sucRfc !== rfcEmisor)
+      throw new ConflictException(
+        'RFC del documento no coincide con su sucursal.',
+      );
+    const reservaPrevia = await this.repo.estadoReserva(idFol);
+    if (
+      reservaPrevia === 'RESERVADO' ||
+      /RESULTADO INCIERTO|PERSISTENCIA PENDIENTE/i.test(
+        columna(header, 'CFDI_ERROR_MSG'),
+      )
+    ) {
+      throw new ConflictException(
+        'Documento con resultado pendiente o incierto; reconciliar antes de emitir.',
+      );
+    }
+    await this.timbrado.validarEmision(rfcEmisor);
 
     const ahora = new Date();
     const serie = await this.repo.reservarSerie({
@@ -216,26 +244,42 @@ export class EmisionService {
       });
     }
 
-    const xmlPath = this.guardarXml({
-      idFol,
-      rfcEmisor,
-      serie: serie.serie,
-      folio: serie.folio,
-      uuid: resultado.uuid!,
-      xml: resultado.xmlTimbrado,
-    });
+    let xmlPath: string;
+    try {
+      xmlPath = this.guardarXml({
+        idFol,
+        rfcEmisor,
+        serie: serie.serie,
+        folio: serie.folio,
+        uuid: resultado.uuid!,
+        xml: resultado.xmlTimbrado,
+      });
 
-    await this.repo.marcarTimbrado({
-      idFol,
-      uuid: resultado.uuid!,
-      xmlPath,
-    });
-    await this.repo.actualizarEstadoSerie({
-      idFol,
-      estado: 'TIMBRADO',
-      uuid: resultado.uuid,
-      usuario: opciones.usuario,
-    });
+      await this.repo.marcarTimbrado({
+        idFol,
+        uuid: resultado.uuid!,
+        xmlPath,
+      });
+      await this.repo.actualizarEstadoSerie({
+        idFol,
+        estado: 'TIMBRADO',
+        uuid: resultado.uuid,
+        usuario: opciones.usuario,
+      });
+    } catch {
+      const mensaje = `PERSISTENCIA PENDIENTE: PAC aceptó UUID ${resultado.uuid}; reconciliar desde evidencia ${resultado.evidencia}. No reenviar.`;
+      try {
+        await this.repo.marcarError({ idFol, mensaje });
+      } catch {
+        this.logger.error(mensaje);
+      }
+      throw new BadGatewayException({
+        message: mensaje,
+        resultadoIncierto: true,
+        uuid: resultado.uuid,
+        evidencia: resultado.evidencia,
+      });
+    }
     try {
       await this.correo.encolarEmision({
         idFol,
@@ -351,6 +395,8 @@ export class EmisionService {
       carpeta,
       `${input.serie}-${input.folio}_${input.uuid}.xml`,
     );
+    if (!input.xml)
+      throw new Error('PAC aceptó sin XML fiscal; requiere recuperación.');
     if (input.xml) {
       // El XML timbrado es el que se conserva 5 anios.
       writeFileSync(destino, aUtf8SinBom(input.xml));

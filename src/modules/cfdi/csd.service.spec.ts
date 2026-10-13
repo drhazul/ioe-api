@@ -4,7 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { descifrar } from './cripto';
+import { cifrar, descifrar } from './cripto';
 import {
   CsdRepositorio,
   FilaCsd,
@@ -178,12 +178,72 @@ describe('CsdService — uso al timbrar', () => {
     const otro = new CsdService(
       repo as unknown as CsdRepositorio,
       {
-        get: () => 'llave-distinta',
+        get: (k: string) =>
+          k === 'CSD_CIFRADO_LLAVE' ? 'llave-distinta' : undefined,
       } as unknown as ConfigService,
     );
 
     await expect(otro.obtenerPorRfc(RFC)).rejects.toThrow(
       /no se pudo descifrar/i,
     );
+  });
+});
+
+describe('CSD producción: identidad y renovación de cuenta', () => {
+  function prod(fila: FilaCsd) {
+    const repo = { activoPorRfc: jest.fn().mockResolvedValue(fila) };
+    const cfg = new ConfigService({
+      QUADRUM_ENDPOINT: 'https://ws.cfdiquadrum.com.mx/timbrar',
+      QUADRUM_CANCELAR_ENDPOINT: 'https://ws.cfdiquadrum.com.mx/cancelar',
+      CSD_CIFRADO_LLAVE: SECRETO,
+    });
+    return {
+      repo,
+      service: new CsdService(repo as unknown as CsdRepositorio, cfg),
+    };
+  }
+  function fila() {
+    const g = generarCsdDePrueba({ noCertificado: '00001000000719639496' });
+    return {
+      RFC,
+      CER: g.cer,
+      LLAVE: g.key,
+      PASSWORD_CIFRADA: cifrar(g.password, SECRETO),
+      REGIMEN_FISCAL: '612',
+      CODIGO_POSTAL: '39000',
+      QUADRUM_USUARIO: 'cuenta-ficticia',
+      QUADRUM_PASSWORD_CIFRADA: cifrar('password-ficticio', SECRETO),
+    } as FilaCsd;
+  }
+  it('sin cuenta propia no usa respaldo global', async () => {
+    const f = fila();
+    f.QUADRUM_USUARIO = null;
+    await expect(prod(f).service.obtenerPorRfc(RFC)).rejects.toThrow(
+      /individual completa/,
+    );
+  });
+  it('contraseña PAC corrupta bloquea en lugar de fallback', async () => {
+    const f = fila();
+    f.QUADRUM_PASSWORD_CIFRADA = 'dato-corrupto';
+    await expect(prod(f).service.obtenerPorRfc(RFC)).rejects.toThrow(
+      /descifrar la cuenta/,
+    );
+  });
+  it('RFC del certificado debe coincidir con registro solicitado', async () => {
+    await expect(
+      prod(fila()).service.obtenerPorRfc('JICJ800630854'),
+    ).rejects.toThrow(/no coincide/);
+  });
+  it('lectura posterior usa cuenta renovada sin caché de otra cuenta', async () => {
+    const f = fila();
+    const { service, repo } = prod(f);
+    expect((await service.obtenerPorRfc(RFC)).credencialesPac?.usuario).toBe(
+      'cuenta-ficticia',
+    );
+    f.QUADRUM_USUARIO = 'cuenta-renovada-ficticia';
+    expect((await service.obtenerPorRfc(RFC)).credencialesPac?.usuario).toBe(
+      'cuenta-renovada-ficticia',
+    );
+    expect(repo.activoPorRfc).toHaveBeenCalledTimes(2);
   });
 });

@@ -36,11 +36,12 @@ import {
   TimbrarReciboPagoPruebaDto,
 } from './dto/timbrar-prueba.dto';
 import { MOTIVOS_CANCELACION } from './motivo-cancelacion';
+import { CfdiSucursalGuard } from './cfdi-sucursal.guard';
 import { TimbradoService } from './timbrado.service';
 
 @ApiTags('cfdi')
 @ApiBearerAuth('jwt-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CfdiSucursalGuard)
 @Controller('cfdi')
 export class CfdiController {
   constructor(

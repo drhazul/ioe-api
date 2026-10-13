@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  BadGatewayException,
   ConflictException,
   Injectable,
   Logger,
@@ -132,12 +133,24 @@ export class ComplementoPagoService {
     };
   }
 
-  async emitir(
+  emitir(
+    idFol: string,
+    pago: DatosDelPago,
+    opciones: { usuario?: string } = {},
+  ): Promise<ResultadoComplementoPago> {
+    return this.repo.conOperacionExclusiva(idFol, 'PG', () =>
+      this.emitirExclusivo(idFol, pago, opciones),
+    );
+  }
+
+  private async emitirExclusivo(
     idFol: string,
     pago: DatosDelPago,
     opciones: { usuario?: string } = {},
   ): Promise<ResultadoComplementoPago> {
     const previo = await this.armar(idFol, pago);
+
+    await this.timbrado.validarEmision(previo.rfcEmisor, 'COMPLEMENTO_PAGO');
 
     const reserva = await this.repo.reservarFolio({
       idFolOrigen: idFol,
@@ -160,6 +173,15 @@ export class ComplementoPagoService {
         armado.rfcEmisor,
       );
     } catch (e) {
+      if (
+        (e as { response?: { resultadoIncierto?: boolean } })?.response
+          ?.resultadoIncierto
+      ) {
+        this.logger.error(
+          `Resultado PAC incierto para ${reserva.idFol}; conservar reserva y reconciliar.`,
+        );
+        throw e;
+      }
       await this.repo.marcarError(
         reserva.idFol,
         e instanceof Error ? e.message : String(e),
@@ -181,19 +203,30 @@ export class ComplementoPagoService {
       });
     }
 
-    const xmlPath = this.documentos.guardarXmlDeNota({
-      rfcEmisor: armado.rfcEmisor,
-      serie: reserva.serie,
-      folio: reserva.folio,
-      uuid: resultado.uuid!,
-      xml: resultado.xmlTimbrado,
-    });
+    let xmlPath: string;
+    try {
+      if (!resultado.xmlTimbrado) throw new Error('PAC aceptó sin XML');
+      xmlPath = this.documentos.guardarXmlDeNota({
+        rfcEmisor: armado.rfcEmisor,
+        serie: reserva.serie,
+        folio: reserva.folio,
+        uuid: resultado.uuid!,
+        xml: resultado.xmlTimbrado,
+      });
 
-    await this.repo.marcarTimbrada({
-      idFol: reserva.idFol,
-      uuid: resultado.uuid!,
-      usuario: opciones.usuario,
-    });
+      await this.repo.marcarTimbrada({
+        idFol: reserva.idFol,
+        uuid: resultado.uuid!,
+        usuario: opciones.usuario,
+      });
+    } catch {
+      throw new BadGatewayException({
+        message: `Persistencia pendiente para ${reserva.idFol}; no reenviar.`,
+        resultadoIncierto: true,
+        uuid: resultado.uuid,
+        evidencia: resultado.evidencia,
+      });
+    }
 
     this.logger.log(
       `Complemento de pago ${reserva.serie}-${reserva.folio} timbrado para ${idFol}: ` +
