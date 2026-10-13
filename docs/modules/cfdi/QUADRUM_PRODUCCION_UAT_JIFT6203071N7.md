@@ -1,8 +1,8 @@
 # UAT Quadrum — JIFT6203071N7 / DF04-20261012-VF-0004
 
-Fecha: 2026-10-12, America/Mexico_City. Resultado: **no aprobada**, rechazo PAC 702. Se realizó una emisión autorizada, sin reintento automático.
+Actualizado: 2026-10-13, America/Mexico_City. Resultado actual: **no aprobada**, reintento solicitado rechazado con CFDI40147 sobre DomicilioFiscalReceptor. Sin UUID, XML/PDF timbrados ni correo. El 702 del primer intento queda como antecedente histórico. Una nueva emisión en esta solicitud, sin reintento automático.
 
-## Alcance y preflight
+## Alcance y preflight del primer intento — 2026-10-12
 
 Titular solicitó mismo proceso de UAT para este emisor/folio y autorizó expresamente un timbrado después de revisar simulación, receptor e importes. Ejecución con clases compiladas de API 900b625 dentro del contenedor productivo `ioe`, imagen `sha256:d6ad51c0ec473c6e5b423118fedc74638e88f8c451fdf4d3e24756b42449812f`. No se inició otro backend ni worker.
 
@@ -23,7 +23,7 @@ Titular solicitó mismo proceso de UAT para este emisor/folio y autorizó expres
 
 La simulación se registró a las 21:22:46. El preflight se repitió inmediatamente antes de emitir, comprobando mismos RFC, receptor, importes, moneda, uso, régimen/CP y estado sin UUID/reserva.
 
-## Intento autorizado y postflight
+## Primer intento autorizado y postflight — 2026-10-12
 
 | Dato | Resultado |
 |---|---|
@@ -62,3 +62,33 @@ El mismo 702 ya ocurrió con JICJ800630854; ambos admiten consulta y rechazan ti
 Expediente conjunto: [QUADRUM_SOPORTE_702.md](QUADRUM_SOPORTE_702.md). Después de solución: nuevo preflight, consulta y simulación; autorización nueva antes de reenviar. Mantener ERROR_EMISION y evidencia; no liberar, borrar ni reasignar registros manualmente, no restaurar SQL ni usar Facturify como respaldo automático.
 
 JIFJ4704238T5 sigue en espera y bloqueado, sin volver a probar su cuenta. NC, REP y cancelación no fueron activados ni ejecutados. La aceptación fiscal permanece pendiente para ambos RFC configurados; consulta admitida no sustituye una factura timbrada y aceptada.
+
+## Reintento expreso — 2026-10-13
+
+Titular solicitó repetir intento para JIFT6203071N7 con el mismo folio DF04-20261012-VF-0004. La instrucción aporta nueva autorización para un intento si conserva datos revisados y no hay UUID ni incertidumbre; no autoriza cambiar datos fiscales ni otros documentos. No se informó ni presumió solución confirmada de proveedor.
+
+Preflight de las 10:28:43: RFC coincidente folio/sucursal; sin UUID, cancelación ni marca incierta; ERROR / ERROR_EMISION previo conocido. Simulación y sello verificados; mismos dos conceptos, subtotal 56.03, impuestos 8.97 y total 65.00 MXN, PUE/03, uso S01 y datos del receptor aprobados. Consulta de cuenta admitida. Se releyeron datos antes de emitir dentro de ventana del preflight; un marcador privado impide reutilizar autorización de esa ejecución.
+
+| Resultado del nuevo intento | Evidencia |
+|---|---|
+| Fecha PAC | 2026-10-13T10:29:40 |
+| Emisor / folio comercial | JIFT6203071N7 / DF04-20261012-VF-0004 |
+| Serie / folio / reemisión | JIFT / 02223 / 1 |
+| Código actual | CFDI40147 |
+| Mensaje PAC | El campo DomicilioFiscalReceptor del receptor, debe encontrarse en la lista de RFC inscritos no cancelados en el SAT. |
+| C.P. receptor enviado | 94330; identidad completa del receptor en preflight privado |
+| IdIncidencia | 866e5ec2-9046-455b-bc0d-35254c2f233c |
+| WorkProcessId | E0C3D14F-FF81-5EEC-8703-89076F913198 |
+| UUID | Ninguno confirmado |
+| FAC_SVR_SHAP | ESTATUS=PENDIENTE, CFDI_STATUS=ERROR, PAC=QUADRUM; UUID/XML_PATH/PDF_PATH nulos |
+| Control de folios | ERROR_EMISION, sin UUID |
+| Correo / PDF de CFDI | Sin outbox ni PDF/ XML timbrados |
+| Cambios de datos / reintentos automáticos | Ninguno |
+
+Postflight de las 10:30:25 mediante SELECT confirma esos estados. Evidencia privada: `evidencia/20261013T162940_JIFT-02223/` (XML enviado, cadena y acuse) y `evidencia/uat-DF04-20261012-VF-0004/reintento-1791908923675/` (simulación, preflight, autorización, resultado y postflight) dentro del montaje existente. No sobrescribir evidencia del 12/10.
+
+En este ensayo ya no se recibió 702: el rechazo se desplazó a validación fiscal del receptor. Esto no determina por sí solo causa del anterior 702 ni acredita timbrado de una factura válida. No adivinar otro C.P., cambiar RFC, régimen o uso para evitar validación.
+
+Siguiente acción: contrastar C.P. fiscal y datos del receptor con información que tenga registrada ante SAT. El mapper obtiene DomicilioFiscalReceptor del registro de cliente fiscal (CODIGOPOSTALRECEPTOR / CODIGOPOSTAL / CP), no del C.P. de expedición del emisor. [Referencia oficial SAT sobre datos del receptor](https://www.sat.gob.mx/minisitio/Factura/documentos/Infografia_FacturaElectronica_Datos_Receptor.pdf). Corrección de datos requiere valor verificado, preflight exacto y autorización propia; después nueva simulación y autorización concreta antes de emitir otra vez.
+
+Sin cambios de código, entorno, cuentas PAC ni datos fiscales por herramientas del agente. JICJ ya tiene UUID timbrado y no fue reenviado; JIFJ sigue diferido y bloqueado.

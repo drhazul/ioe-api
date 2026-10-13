@@ -62,6 +62,6 @@ Preflight de las 10:04:37, America/Mexico_City: emisor coincide en folio/sucursa
 
 Postflight de las 10:07:28 verifica XML, firma, SQL y PDF. Evidencia privada nueva: `evidencia/20261013T160542_JICJ-01120/` y `evidencia/uat-DF01-20261012-VF-0040/reintento-1791907477283/` dentro del montaje existente. Archivos XML/PDF fiscales persistidos bajo `JICJ800630854/2026/10/`. Carpetas usan UTC; horas de acta usan America/Mexico_City. No copiar XML/PDF fiscal o datos privados de receptor al Git.
 
-No hubo cancelación, cambio de emisor, rotación de credenciales ni modificación de entorno. JIFT conserva último resultado 702 sin otro ensayo; JIFJ continúa diferido y bloqueado.
+No hubo cancelación, cambio de emisor, rotación de credenciales ni modificación de entorno. JIFT fue evaluado después y recibió CFDI40147; consultar su acta propia. JIFJ continúa diferido y bloqueado.
 
 Pendientes: revisar permisos/cuenta Gmail 403 sin tocar validez de CFDI, ajustar presentación de sellos/cadena del PDF, confirmar consulta SAT y aceptación funcional del titular. **Nunca volver a timbrar este folio mientras UUID permanezca vigente**; un fallo de PDF/correo no habilita reemisión. Este éxito acredita un documento de FACTURA para JICJ, no NC/REP/cancelación ni todos los emisores.

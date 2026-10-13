@@ -1,6 +1,6 @@
 # Plan de corrección y cierre de integración Quadrum en producción
 
-Actualizado: 2026-10-13 (America/Mexico_City). Estado: FACTURA de JICJ800630854 timbrada tras reintento solicitado, XML/UUID/SQL verificados. Cierre funcional pendiente de PDF, correo Gmail 403, consulta SAT y aceptación. Último intento JIFT conserva rechazo 702; JIFJ4704238T5 en espera, bloqueado. Configuración productiva sin cambios.
+Actualizado: 2026-10-13 (America/Mexico_City). Estado: FACTURA de JICJ800630854 timbrada tras reintento solicitado, XML/UUID/SQL verificados. Cierre funcional pendiente de PDF, correo Gmail 403, consulta SAT y aceptación. Reintento JIFT rechazado con CFDI40147 sobre domicilio fiscal del receptor; JIFJ4704238T5 en espera, bloqueado. Configuración productiva sin cambios.
 Seguimiento: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](QUADRUM_PRODUCCION_SEGUIMIENTO.md).
 
 ## Objetivo y alcance autorizado
@@ -188,3 +188,8 @@ El titular eligió DF04-20261012-VF-0004 de JIFT6203071N7 y autorizó un timbrad
 ### Estado después del nuevo intento solicitado el 2026-10-13
 
 JICJ800630854 ya tiene factura timbrada y persistida de DF01-20261012-VF-0040 con UUID 899F7CC4-A545-5FFE-9BA2-3E4A62FDAB7B. Simulación confirmó mismos datos y titular autorizó expresamente repetir; no se presumió solución confirmada del proveedor. Se mantiene plan para corregir PDF (sellos/cadena recortados), revisar correo Gmail 403 y confirmar consulta SAT/aceptación funcional. No volver a emitir por fallos de presentación o correo. Este corte supersede el 702 vigente de JICJ de secciones anteriores, sin acreditar otros emisores/flujos.
+
+
+### Estado después del nuevo intento JIFT del 2026-10-13
+
+Nuevo intento expresamente solicitado de DF04-20261012-VF-0004 conservó datos aprobados tras preflight/simulación, pero fue rechazado con CFDI40147 sobre domicilio fiscal del receptor. C.P. enviado 94330; no se cambian datos por adivinación ni por autorización de timbrado. Verificar información fiscal del receptor antes de preparar corrección exacta, nueva simulación y autorización de otra emisión. 702 de JIFT queda histórico. JICJ conserva su UUID timbrado y JIFJ continúa diferido/bloqueado.
