@@ -125,4 +125,4 @@ Build API y suite completa pasaron: 52 suites, 254 pruebas. Pruebas locales mock
 
 Ventana: sin nuevas emisiones de este pase. Si hace falta reversa, detener y renombrar el contenedor nuevo conservando sus datos, devolver nombre `ioe` al contenedor anterior y arrancarlo con su entorno original; restaurar alias de imagen anterior. El release dejó sólo los valores públicos anteriores de las siete variables modificadas en `/root/ioe_stack/releases/quadrum-5042fbfec28ea594bcf40e8dab470987702c0920/previous-quadrum-public-settings.json`; restaurar exclusivamente esas variables mediante procedimiento privado, sin copiar ni reemplazar otros secretos. Revalidar health y destino SQL. Ninguna reversa de software elimina CFDI ante SAT.
 
-Frontend verificado por hash agregado de todos sus archivos: anterior y nuevo coinciden (3573186d272deeba41b18e02b21c017a20917e980947cc09c890d9687b8f5e6).
+Frontend verificado por hash agregado de todos sus archivos: anterior y nuevo coinciden (`e3573186d272deeba41b18e02b21c017a20917e980947cc09c890d9687b8f5e6`).
