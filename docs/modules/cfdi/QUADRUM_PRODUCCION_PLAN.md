@@ -1,6 +1,6 @@
 # Plan de corrección y cierre de integración Quadrum en producción
 
-Fecha: 2026-10-12 (America/Mexico_City). Estado: base fiscal y edición de cuenta desplegadas; FACTURA configurada para JICJ800630854/JIFT6203071N7. UAT de ambos emisores rechazadas por PAC 702; pendiente solución del proveedor y aceptación fiscal. JIFJ4704238T5 en espera, bloqueado.
+Actualizado: 2026-10-13 (America/Mexico_City). Estado: FACTURA de JICJ800630854 timbrada tras reintento solicitado, XML/UUID/SQL verificados. Cierre funcional pendiente de PDF, correo Gmail 403, consulta SAT y aceptación. Último intento JIFT conserva rechazo 702; JIFJ4704238T5 en espera, bloqueado. Configuración productiva sin cambios.
 Seguimiento: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](QUADRUM_PRODUCCION_SEGUIMIENTO.md).
 
 ## Objetivo y alcance autorizado
@@ -183,3 +183,8 @@ Edición independiente de usuario/contraseña PAC quedó desplegada con API 900b
 ### Segundo caso UAT autorizado
 
 El titular eligió DF04-20261012-VF-0004 de JIFT6203071N7 y autorizó un timbrado tras simulación validada. Rechazo PAC 702, sin UUID; acta en [QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7.md). Este corte supersede ausencia de caso JIFT de referencias históricas anteriores, sin cerrar aceptación fiscal. Ambos RFC configurados requieren solución del proveedor y nueva autorización concreta antes de reintentar. No usar consulta admitida como prueba de permiso de timbrado.
+
+
+### Estado después del nuevo intento solicitado el 2026-10-13
+
+JICJ800630854 ya tiene factura timbrada y persistida de DF01-20261012-VF-0040 con UUID 899F7CC4-A545-5FFE-9BA2-3E4A62FDAB7B. Simulación confirmó mismos datos y titular autorizó expresamente repetir; no se presumió solución confirmada del proveedor. Se mantiene plan para corregir PDF (sellos/cadena recortados), revisar correo Gmail 403 y confirmar consulta SAT/aceptación funcional. No volver a emitir por fallos de presentación o correo. Este corte supersede el 702 vigente de JICJ de secciones anteriores, sin acreditar otros emisores/flujos.
