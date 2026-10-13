@@ -1,6 +1,6 @@
 # Plan de corrección y cierre de integración Quadrum en producción
 
-Fecha: 2026-10-12 (America/Mexico_City). Estado: corrección implementada y validada; release técnico desplegado; activación fiscal y UAT pendientes.
+Fecha: 2026-10-12 (America/Mexico_City). Estado: corrección y release técnico completos; facturas activas para JICJ800630854/JIFT6203071N7, UAT fiscal pendiente.
 Seguimiento: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](QUADRUM_PRODUCCION_SEGUIMIENTO.md).
 
 ## Objetivo y alcance autorizado
@@ -167,3 +167,8 @@ Una cuenta rechazada debe quedar fuera de la lista hasta corregirla y validar ac
 El pase usa `deploy/quadrum/Dockerfile`: compila API desde snapshot de Git sin secretos y toma como base la imagen conjunta desplegada, conservando exactamente Flutter/Nginx. No incorpora cambios locales de la App. Variables y evidencia se provisionan separadamente en servidor; no se transfieren `.env` locales ni claves. Cargar configuración mediante recreación autorizada conservando puertos, restart policy y montaje existentes. Clave CSD y variables OAuth permanecen intactas.
 
 Recuperación: localizar reserva y carpeta de evidencia; confirmar resultado con PAC por datos del documento antes de liberar nada. Si existe XML/UUID aceptado con persistencia pendiente, reconciliar ese documento con plan SQL exacto autorizado; no emitir otro ni aplicar reparación genérica. Histórico de reservas abiertas se revisa separadamente: este pase no las libera.
+
+
+### Decisión productiva vigente tras autorización parcial
+
+El 2026-10-12 el titular autorizó activar sólo JICJ800630854 y JIFT6203071N7 y bloquear JIFJ4704238T5. Se aplicó lista explícita de esos dos RFC y flujo FACTURA; otros flujos y certificados de pruebas permanecen bloqueados. La configuración y postflight quedaron en seguimiento. No se autoriza ni ejecuta una factura de UAT por esta mera activación: falta documento real concreto. Las referencias anteriores a decisión pendiente son históricas y quedan supersedidas por esta autorización.

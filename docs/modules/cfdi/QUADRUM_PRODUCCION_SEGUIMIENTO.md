@@ -1,7 +1,7 @@
 # Seguimiento de corrección Quadrum para producción
 
 Actualizado: 2026-10-12 (America/Mexico_City).
-Estado general: corrección implementada y validada; despliegue técnico completo, emisión deshabilitada; decisión de activación y UAT fiscal pendientes. No activar producción por la sola captura de variables.
+Estado general: corrección desplegada; facturas habilitadas exclusivamente para JICJ800630854 y JIFT6203071N7. JIFJ4704238T5 y demás flujos bloqueados. UAT fiscal pendiente. No activar producción por la sola captura de variables.
 Plan: [QUADRUM_PRODUCCION_PLAN.md](QUADRUM_PRODUCCION_PLAN.md).
 
 ## Regla de evidencia
@@ -126,3 +126,30 @@ Build API y suite completa pasaron: 52 suites, 254 pruebas. Pruebas locales mock
 Ventana: sin nuevas emisiones de este pase. Si hace falta reversa, detener y renombrar el contenedor nuevo conservando sus datos, devolver nombre `ioe` al contenedor anterior y arrancarlo con su entorno original; restaurar alias de imagen anterior. El release dejó sólo los valores públicos anteriores de las siete variables modificadas en `/root/ioe_stack/releases/quadrum-5042fbfec28ea594bcf40e8dab470987702c0920/previous-quadrum-public-settings.json`; restaurar exclusivamente esas variables mediante procedimiento privado, sin copiar ni reemplazar otros secretos. Revalidar health y destino SQL. Ninguna reversa de software elimina CFDI ante SAT.
 
 Frontend verificado por hash agregado de todos sus archivos: anterior y nuevo coinciden (`e3573186d272deeba41b18e02b21c017a20917e980947cc09c890d9687b8f5e6`).
+
+
+## Activación parcial autorizada y aplicada el 2026-10-12
+
+El titular respondió: “Activar sólo JICJ800630854 y JIFT6203071N7; bloquear JIFJ4704238T5”. Esta autorización supersede la espera de respuesta y el gate global apagado registrados en los cortes anteriores. Se habilita únicamente el flujo FACTURA; NC, REP y cancelación conservan bloqueo hasta validar sus casos y alcance.
+
+Preflight nuevo antes de activar: ambos RFC autorizados volvieron a pasar consulta autenticada usando sus registros de FACT_CSD; JIFJ4704238T5 continuó con rechazo explícito. Destino confirmado IOELOCAL en 192.168.10.234. No se actualizaron cuentas ni registros fiscales.
+
+| Variable efectiva del proceso productivo | Valor aplicado |
+|---|---|
+| QUADRUM_PRODUCCION_HABILITADA | true |
+| QUADRUM_RFC_HABILITADOS | JICJ800630854,JIFT6203071N7 |
+| QUADRUM_FLUJOS_HABILITADOS | FACTURA |
+
+Sólo esas tres variables públicas cambiaron en el archivo privado de entorno. Se recreó contenedor con la misma imagen de código `5042fbf`, mismos puertos, bind persistente y restart unless-stopped. Credenciales, clave CSD, OAuth, endpoints y configuración de correo se conservaron. Env sigue modo 0600. No hubo rebuild ni cambios de código para activar.
+
+Postflight ejecutado desde clases compiladas y entorno del nuevo proceso:
+
+- `validarEmision` admite ambos RFC habilitados tras comprobar CSD/cuenta y consulta PAC; no reserva serie, no emite XML ni timbra.
+- Gate devuelve 403 para FACTURA de JIFJ4704238T5 y XIQB891116QE4, y para NOTA_CREDITO, COMPLEMENTO_PAGO y CANCELACION incluso con RFC habilitado.
+- Rutas sintéticas de prueba siguen bloqueadas antes de contactar PAC.
+- API health, DB health, web y HTTPS público DB health: HTTP 200. Imagen `sha256:264c6d3626e14b38a72000891b5e35c3ece1f5cf3030b147f6edb2b6754cb8f8`, running/unless-stopped.
+- Correo AUTOMATICO=true preservado. No se ejecutó prueba de correo ni operación fiscal real.
+
+Reversa de esta activación: contenedor detenido `ioe-before-activation-20261012` conserva configuración previa con emisión apagada. Valores públicos previos de las tres variables quedaron en `before-partial-activation-public-settings.json`, dentro del directorio privado de release previamente registrado. Reversa no requiere restaurar SQL ni rotar secretos. Mantener además reversa de versión anterior del pase técnico.
+
+QPROD-08 sigue pendiente: elegir documento real necesario para negocio, autorizar su RFC/folio exactos, simular y validar primera factura productiva. Activación de gate y consultas autenticadas no acreditan emisión fiscal real, saldo/contrato ni aceptación funcional. Cuenta JIFJ4704238T5 sigue pendiente de corrección; datos discrepantes históricos no se reasignan automáticamente.
