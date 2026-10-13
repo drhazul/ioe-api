@@ -1,6 +1,6 @@
 # Plan de corrección y cierre de integración Quadrum en producción
 
-Actualizado: 2026-10-13 (America/Mexico_City). Estado: una FACTURA de JICJ800630854 y una de JIFT6203071N7 timbradas, XML/UUID/SQL verificados. Cierre funcional pendiente de PDF, correo Gmail 403, consulta SAT y aceptación. Folio JIFT VF0004 permanece sin UUID por CFDI40147, independiente de éxito en VF0030. JIFJ4704238T5 en espera, bloqueado. Configuración productiva sin cambios.
+Actualizado: 2026-10-13 (America/Mexico_City). Estado: FACTURA habilitada para tres RFC comerciales y un caso timbrado/persistido por emisor, incluido JIFJ4704238T5 tras solicitud expresa. Cierre funcional pendiente de PDF, correo, consulta SAT y aceptación. Folio JIFT VF0004 conserva error de receptor; NC/REP/cancelación y RFC de pruebas bloqueados. Sólo lista RFC cambió al habilitar JIFJ.
 Seguimiento: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](QUADRUM_PRODUCCION_SEGUIMIENTO.md).
 
 ## Objetivo y alcance autorizado
@@ -198,3 +198,8 @@ Nuevo intento expresamente solicitado de DF04-20261012-VF-0004 conservó datos a
 ### Segundo RFC con factura timbrada — caso VF0030
 
 JIFT6203071N7 timbró DF04-20261012-VF-0030 tras preflight/simulación y solicitud expresa de un intento. UUID CD32676E-C226-505C-B452-27B53DFBC07C, JIFT/02224. XML/UUID/SQL verificados; acta propia [QUADRUM_PRODUCCION_UAT_JIFT6203071N7_VF0030.md](QUADRUM_PRODUCCION_UAT_JIFT6203071N7_VF0030.md). Ambos RFC configurados tienen un caso de FACTURA timbrado; PDF/correo/SAT y aceptación funcional pendientes. VF0004 permanece con error de receptor y sin UUID, sin extrapolar datos fiscales del nuevo cliente. JIFJ y otros flujos mantienen bloqueo; ningún cambio de activación por este ensayo.
+
+
+### Activación de tercer emisor por solicitud expresa
+
+El 2026-10-13 titular autorizó retirar restricción de JIFJ4704238T5 para FACTURA y emitir DF05-20261013-VF-0008. Consulta de cuenta admitida, preflight/simulación y emisión única aceptada, UUID 3C10A6D3-5BF0-57CE-9BCB-CF6BB2EBE494. Acta [QUADRUM_PRODUCCION_UAT_JIFJ4704238T5.md](QUADRUM_PRODUCCION_UAT_JIFJ4704238T5.md). Lista RFC ahora incluye los tres emisores comerciales, sin habilitar otros flujos ni certificados de pruebas. Código/imagen, credenciales y demás entorno intactos. Esta autorización supersede espera y bloqueo de JIFJ de cortes anteriores. PDF/correo/SAT y aceptación funcional pendientes no habilitan reemisión de documentos timbrados.

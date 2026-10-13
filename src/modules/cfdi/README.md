@@ -6,7 +6,7 @@
 
 Plan de corrección y criterios de activación: [QUADRUM_PRODUCCION_PLAN.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_PLAN.md). Estado por RFC, configuración y UAT: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_SEGUIMIENTO.md). La captura de endpoints en `.env` local no acredita su carga en el proceso productivo ni habilita los caminos fiscales bloqueados por código.
 
-Acta de primer caso autorizado: [QUADRUM_PRODUCCION_UAT.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_UAT.md). DF01-20261012-VF-0040 fue rechazado por PAC 702, sin UUID; consulta admitida no prueba permiso de timbrado. JIFJ4704238T5 permanece en espera y bloqueado hasta verificar credenciales.
+Acta JICJ: [QUADRUM_PRODUCCION_UAT.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_UAT.md); JIFT: [caso VF0030](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_UAT_JIFT6203071N7_VF0030.md); JIFJ: [caso VF0008](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_UAT_JIFJ4704238T5.md). Los tres RFC comerciales tienen un caso FACTURA timbrado y persistido. JIFJ se habilitó expresamente el 2026-10-13 tras consulta admitida. PDF, correo, consulta SAT y aceptación funcional pendientes; NC/REP/cancelación y certificado de pruebas siguen bloqueados. Consultar seguimiento actual, conservando rechazos anteriores como historial.
 
 ## Edición independiente de cuenta PAC
 
