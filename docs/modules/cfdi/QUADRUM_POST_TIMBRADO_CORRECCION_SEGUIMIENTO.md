@@ -1,5 +1,25 @@
 # Seguimiento independiente de correo PDF y consulta SAT Quadrum
 
+## Validación posterior a reconexión OAuth productiva — 2026-10-13
+
+Titular confirma reconexión y prueba en Gmail Enviados. Auditoría productiva
+registra POST /cfdi/correo/oauth/iniciar a las 21:26:25 y prueba exitosa
+/cfdi/correo/prueba a las 21:27:34 (horas almacenadas por SQL). AUTOMATICO=true,
+worker=true, publicación declarada PRODUCTION y refresh token cifrado presente.
+Lectura ULTIMA_CONEXION verifica callback de reconexión. Logs filtrados del
+contenedor de últimos 30 minutos no presentan errores de correo coincidentes.
+
+Outbox 1/2/3 conserva ENVIADO, un intento cada uno y messageId confirmado.
+La nueva prueba es texto sin adjuntos; no crea fila de outbox ni acredita aún
+timbrado nuevo con disparo automático. Bandeja Enviados confirmada por titular;
+recepción y apertura de adjuntos por destinatarios siguen sin confirmación.
+
+Flujo esperado: guardar XML/UUID timbrado, encolar con EMAILRECEPTOR válido/no
+ambiguo, preparar/reutilizar PDF y consumir en siguiente ciclo del worker.
+Fallos de correo no autorizan timbrar nuevamente. Pendientes: UAT de nuevo
+folio comercial de punta a punta, verificación de marca/scopes Google, corrección
+de PDF recortado, consulta SAT independiente y operación de conservación de datos.
+
 ## Publicación legal y OAuth — 2026-10-13
 
 HTML públicos de presentación, privacidad y términos en /legal/index.html,
