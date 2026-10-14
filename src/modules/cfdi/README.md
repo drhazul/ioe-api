@@ -49,3 +49,8 @@ mensajes crudos de Google. Límites por usuario/tasa son reintentables; respuest
 5xx, timeout y fallos desconocidos durante envío conservan resultado INCIERTO.
 Preparación XML/PDF identifica la etapa sin copiar excepciones sensibles.
 
+
+
+## Identidad fiscal sin restricción por sucursal — 2026-10-14
+
+El titular autoriza excepción específica de FACTURA_QUADRUM: sucursal no limita operación ni determina la identidad del emisor. Guard de documentos conserva autenticación, existencia y RFC emisor válido, pero deja de consultar USR_MOD_SUC o comparar SUC del usuario. Simulación/emisión exigen RfcEmisor en cabecera, sin inferirlo de DAT_SUC ni comparar con RFC actual de sucursal. CSD y cuenta propios, habilitación RFC/flujo, restricciones de pruebas y protección contra duplicidad/incertidumbre continúan. Permisos administrativos de CSD/correo y reglas de otros módulos sin cambios. Los criterios anteriores de bloqueo fiscal por sucursal quedan supersedidos sólo para este módulo. Acta de diagnóstico/intento: docs/modules/cfdi/QUADRUM_DF06_VF0007_20261014.md.

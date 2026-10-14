@@ -99,11 +99,9 @@ describe('mapearVenta', () => {
     expect(datos.conceptos[0].descuento).toBe(20);
   });
 
-  it('toma el RFC emisor de la sucursal si el folio no lo trae', () => {
+  it('exige RFC emisor del documento aunque la sucursal tenga RFC', () => {
     const header = { ...filas().header, RfcEmisor: '' };
-    expect(mapearVenta(filas({ header }), CONTEXTO).rfcEmisor).toBe(
-      'JIFJ4704238T5',
-    );
+    expect(() => mapearVenta(filas({ header }), CONTEXTO)).toThrow(/RFC emisor/);
   });
 
   it('usa FormaPago cuando FormaPagoSAT viene vacia', () => {
