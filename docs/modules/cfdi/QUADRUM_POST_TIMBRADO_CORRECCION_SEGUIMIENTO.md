@@ -1,5 +1,22 @@
 # Seguimiento independiente de correo PDF y consulta SAT Quadrum
 
+## Despliegue de corrección ID — 2026-10-13
+
+API f3b82597788e03877e58bf887d38a7ba8e9b204a y App
+a05d46258c857ff7467139e016bed25a9025ac86 publicados y desplegados en .234.
+Flutter analyze limpio, 20 pruebas Flutter PASS; API 21 suites/215 pruebas PASS
+y build PASS. Build conjunto remoto correcto; imagen final
+sha256:cc19a56e38b2321e7b590c2fabda47ca269bd349269f03cbac74a4557da0dff3,
+contenedor ioe e8ab61af4e94. Entorno privado y storage preservados,
+worker true; anterior detenido ioe-before-idfix-20261013 disponible para rollback.
+
+Postflight DB ok y HTTPS público 200/TLS verificado. Lectura de outbox real y
+ejecución aislada de resumen compilado (sin bootstrap ni worker) confirma ID
+numérico 1/2/3. Filas siguen ERROR_FINAL históricas sin nuevo intento por agente.
+Usuario debe recargar aplicación (Ctrl+F5) y reintentar una sola fila; confirmar
+POST/auditoría, transición y envío antes de cerrar UAT. Sin timbrado ni correo
+provocado durante verificación de esta corrección.
+
 ## Corrección del contrato ID de reintento — 2026-10-13
 
 API convierte BIGINT ID a entero positivo seguro en respuesta pública; rechaza
