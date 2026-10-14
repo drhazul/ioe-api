@@ -1,5 +1,31 @@
 # Seguimiento independiente de correo PDF y consulta SAT Quadrum
 
+## Publicación legal y OAuth — 2026-10-13
+
+HTML públicos de presentación, privacidad y términos en /legal/index.html,
+/legal/privacidad.html y /legal/terminos.html, HTTP 200/text-html, publicados
+desde frontend de Coolify. Enlaces versionados en Home/Login, App b8ff8e3;
+frontend igual desplegado en .234 preservando API y storage.
+
+URLs guardadas en marca Google del proyecto poised-tenure-511219-r0. Titular
+confirmó publicación en el momento de cambio de audiencia; Google muestra
+En producción. Advertencia actual: marca y acceso a datos todavía no verificados,
+requiere verificar/publicar marca antes de solicitar revisión de scopes.
+Publicación no equivale a verificación ni a token de vigencia ilimitada.
+
+Backend .234 alineado GOOGLE_OAUTH_PUBLISHING_STATUS=PRODUCTION en entornos
+privados original/release, permisos 0600; worker true y montaje conservados.
+Imagen misma legal-20261013, anterior detenido ioe-before-oauth-production-20261013.
+Se requiere nueva autorización Gmail del titular desde panel para sustituir
+token previamente emitido en Testing; pendiente comprobar autorización renovada
+y prueba controlada. No se provocó envío ni timbrado durante publicación.
+
+Política de conservación publicada se gestiona por responsable: no existe
+purga automática general en código. Programar implementación de conservación
+sin eliminar XML/UUID fiscales ni trabajos inciertos ni cambiar silenciosamente
+compromisos públicos. Evidencia visual privada en outputs/legal-release-20261013
+del workspace principal; no publicar capturas ni entornos como artefactos Git.
+
 ## Despliegue de corrección ID — 2026-10-13
 
 API f3b82597788e03877e58bf887d38a7ba8e9b204a y App

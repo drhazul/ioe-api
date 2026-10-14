@@ -1,5 +1,23 @@
 # Coolify: front standby privado
 
+## Documentos públicos y enlaces UI — 2026-10-13
+
+App b8ff8e3 agrega LegalLinks a Home/Login y HTML estático web/legal. API 3d9b9dc
+versiona contenido aprobado del operador JOEL JIMENEZ CRUZ. Coolify construye
+desde GitHub; /legal/ del vhost TLS .3 se enruta a .40:18085 con fragmento
+legal-proxy-location.conf. ERP/API conserva upstream .2:8085 hacia .234.
+Respaldo de vhost en .3: erp.ioebusiness.com.mx.conf.before-legal-20261013.
+nginx -t PASS, reload aplicado, tres páginas públicas HTML HTTP 200.
+
+El frontend compilado por Coolify se incorporó también a imagen runtime .234,
+con API previa y configuración privada preservadas. Imagen legal-20261013:
+sha256:9af55e7043f773c7727ec7bd7b3f3da28dc7dad00a12fdc0101cccd22e581c7b.
+Archive del frontend transferido sin secretos y con SHA256 verificado;
+rollback detenido ioe-before-legal-20261013. Login público inspeccionado:
+ambos enlaces visibles sin autenticación. Home tiene mismo componente; su
+validación visual autenticada queda pendiente. Flutter analyze limpio y
+20 tests PASS. No se activó API/worker de Coolify.
+
 `standby-front.compose.yaml` inicia solo Nginx/Flutter. No inicia API, jobs ni conexiones SQL. La imagen antigua enviada desde `.234` intentaba enviar `/api/` a `127.0.0.1:3001` dentro del contenedor; la imagen automática responde `503` para dejar explícito que API standby está inactiva. Este recurso sirve únicamente para comprobar front estático en sombra.
 
 La imagen previa `ioe-allinone:master-crm-retired-20261007` se importó al Docker de `ioevps` como punto de retorno. Imagen de origen: `192.168.10.234`, ID `sha256:dc7440ee7c2e0212802720c91e6d5635aee78d0aef10fabc760f3542bfbf1047`, HEAD de build API `4f501807e6271b6e8441ba4885799ad2d53624d8` y App `463a3c1f6c739e8e89b9ff2921c06dd3f34789d1`. Tras `docker save`/`docker load`, el almacén OCI de Docker 29 en `.40` presenta ID `sha256:4dc2ef1fd07b08100187aadfc68520e0396fd93f70c484f882bee85d996b894d`; configuración e índice de 13 capas coinciden por SHA-256 con origen.
