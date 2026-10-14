@@ -1,5 +1,34 @@
 # Seguimiento independiente de correo PDF y consulta SAT Quadrum
 
+## Release completo API/App — 2026-10-13
+
+Titular autorizó commits de todos los cambios actuales y despliegue de ambos
+repositorios en .234. Commits publicados: API 76fa500bbbc75a91286e21aecd698fe991f97a1e,
+App 4020c72a2314358f153bac0cbe56dbae9c9f1dbf. Árboles comparados sin diferencia
+contra snapshot local completo. Historial anterior preservado en cada repo
+en archive/local-before-full-release-20261013 para evitar republicar XML fiscales
+que existen en commits locales antiguos. Ambos working trees limpios.
+
+Flutter analyze limpio, Flutter test 18 PASS; CFDI 21 suites/214 pruebas PASS
+y build API PASS. Build conjunto remoto Flutter/Nest PASS. Runtime final conserva
+base productiva anterior y actualiza API/App; imagen
+sha256:50db6723e0fc67da2e3ff835f3ab78ad4b346c6acc4b53ff6758186ad5b523a1,
+contenedor ioe dad42b9d75ca, puertos 8085/3001, unless-stopped,
+montaje RW /ArchivosUsuarios/respaldoCFDI. Rollback detenido preservado:
+ioe-rollback-20261013-mail; imagen ioe-allinone:rollback-20261013-mail.
+
+Entorno original intacto; entorno efectivo previo preservado sólo en archivo
+privado .234 /root/ioe_stack/deploy/ioe-api.env.release-20261013, modo 0600.
+CFDI_EMAIL_WORKER_ENABLED=false durante postflight: SQL AUTOMATICO no cambia.
+Recreaciones futuras deben mantener storage y seleccionar explícitamente estado
+del worker. No activar true antes de revisar toda cola elegible y alcance de envío.
+
+Postflight API health y DB ok, front local/público HTTP 200, DB público HTTP 200,
+TLS verificado. Esto no confirma Gmail ni recepción. Sin timbrado, reintento,
+consulta SAT real o envío invocado durante release. Pendientes: detalle 403 real,
+validación OAuth y prueba autorizada de XML/PDF existentes con fila/destinatario
+confirmados; worker se mantiene pausado hasta esa preparación.
+
 ## Preparación de reintento con documentos existentes — 2026-10-13
 
 Código local validado: 21 suites / 214 pruebas PASS y npm run build PASS.
