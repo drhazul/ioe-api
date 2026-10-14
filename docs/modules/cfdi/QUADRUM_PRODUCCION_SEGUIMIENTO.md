@@ -233,3 +233,8 @@ Integración fiscal FACTURA verificada con tres casos productivos aceptados. VF0
 ## Identidad fiscal sin restricción por sucursal — 2026-10-14
 
 El titular autoriza excepción específica de FACTURA_QUADRUM: sucursal no limita operación ni determina la identidad del emisor. Guard de documentos conserva autenticación, existencia y RFC emisor válido, pero deja de consultar USR_MOD_SUC o comparar SUC del usuario. Simulación/emisión exigen RfcEmisor en cabecera, sin inferirlo de DAT_SUC ni comparar con RFC actual de sucursal. CSD y cuenta propios, habilitación RFC/flujo, restricciones de pruebas y protección contra duplicidad/incertidumbre continúan. Permisos administrativos de CSD/correo y reglas de otros módulos sin cambios. Los criterios anteriores de bloqueo fiscal por sucursal quedan supersedidos sólo para este módulo. Acta de diagnóstico/intento: docs/modules/cfdi/QUADRUM_DF06_VF0007_20261014.md.
+
+
+## DF06 sin límite de sucursal y timbrado aceptado — 2026-10-14
+
+Titular autoriza retirar restricción de sucursal en Quadrum. API valida identidad RFC del documento, sin comparar SUC del usuario ni RFC actual de DAT_SUC; cuenta/CSD y gates productivos conservados. API bca75ff desplegada sin cambiar frontend/env. Un intento de DF06-20261001-VF-0007 aceptado 15:13:05, JIFJ/03032, UUID 018F1D8B-4CAD-5DE5-A0EE-B28C2D1717E9, total 405.03. XML/sello/SQL/control verificados; CFDI40147 histórico no se reprodujo con C.P. 08830 sin modificar cliente. Correo/PDF bajo proceso automático independiente. [Acta](QUADRUM_DF06_VF0007_20261014.md).
