@@ -1,5 +1,15 @@
 # Seguimiento independiente de correo PDF y consulta SAT Quadrum
 
+## Activación autorizada del worker — 2026-10-13
+
+Titular autoriza activar consumo y solicita aviso para reintento. Preflight:
+outbox 1,2,3 en ERROR_FINAL/GMAIL_HTTP_403, sin ENVIADO_EN; ningún trabajo
+PENDIENTE/REINTENTABLE observado. Se establece CFDI_EMAIL_WORKER_ENABLED=true
+en archivos privados original y release de .234, permisos 0600; contenedor
+recreado con misma imagen y storage RW. No se reencoló ninguna fila desde agente.
+Usuario puede solicitar reintento individual desde panel; cron cada minuto.
+Confirmar ENVIADO/messageId y recepción adjuntos antes de cerrar UAT.
+
 ## Release completo API/App — 2026-10-13
 
 Titular autorizó commits de todos los cambios actuales y despliegue de ambos
