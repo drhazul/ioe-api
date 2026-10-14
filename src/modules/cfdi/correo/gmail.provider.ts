@@ -87,14 +87,28 @@ export class GmailProvider implements ProveedorCorreo {
     }
 
     if (!response.ok) {
-      const retryable = response.status === 429;
+      const body = await response.json().catch(() => null) as {
+        error?: { errors?: { reason?: unknown }[] };
+      } | null;
+      // Only known provider codes are retained. Never persist raw Google
+      // messages, which can contain account addresses or request data.
+      const permitidos = new Set(['rateLimitExceeded', 'userRateLimitExceeded',
+        'dailyLimitExceeded', 'domainPolicy', 'insufficientPermissions',
+        'forbidden', 'accessNotConfigured', 'authError']);
+      const razones = (Array.isArray(body?.error?.errors) ? body.error.errors : [])
+        .map(item => item?.reason)
+        .filter((reason): reason is string => typeof reason === 'string' && permitidos.has(reason));
+      const detalle = [...new Set(razones)].slice(0, 4).join(',');
+      const retryable = response.status === 429 || razones.some(reason =>
+        ['rateLimitExceeded', 'userRateLimitExceeded'].includes(reason));
       const uncertain = response.status === 408 || response.status >= 500;
       throw new ErrorEntregaCorreo(
         retryable
           ? 'Gmail no aceptó el envío por una falla temporal.'
           : uncertain
             ? 'Gmail devolvió un resultado incierto. Revisar antes de reenviar.'
-            : 'Gmail rechazó el envío; revisar cuenta y permisos.',
+            : 'Gmail rechazó el envío; revisar cuenta y permisos.' +
+              (detalle ? ' Motivo Google: ' + detalle + '.' : ''),
         'GMAIL_HTTP_' + response.status,
         retryable ? 'REINTENTABLE' : uncertain ? 'INCIERTO' : 'ERROR_FINAL',
       );

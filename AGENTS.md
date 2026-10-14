@@ -212,9 +212,21 @@ El proyecto vive dentro de OneDrive, donde los avisos de cambio de archivo no so
 
 Operación productiva exige `QUADRUM_PRODUCCION_HABILITADA`, RFC y flujos explícitos en `QUADRUM_RFC_HABILITADOS`/`QUADRUM_FLUJOS_HABILITADOS`. CSD/cuenta individual obligatorios; rutas sintéticas bloqueadas en producción. Emisión incierta o persistencia pendiente requiere reconciliación, no reenvío. Plan/seguimiento: `docs/modules/cfdi/QUADRUM_PRODUCCION_{PLAN,SEGUIMIENTO}.md`. No gastar timbres reales sin autorización del documento.
 
+## Edición de cuenta Quadrum por RFC (2026-10-12)
 
-## Edición de cuenta Quadrum y UAT (2026-10-12)
+Pantalla CSD incorpora acción Editar Quadrum sobre certificado activo. API `PATCH /cfdi/csd/:rfc/quadrum` exige JWT y AdminOnlyGuard, modifica sólo usuario/contraseña PAC, cifra contraseña y limpia caché del RFC. Contraseña omitida se conserva sólo con mismo usuario; cambiar usuario exige contraseña nueva. No recargar CER/KEY ni activar un RFC al editar cuenta. No registrar secretos en auditoría/respuestas. Desplegado en API 900b625 / App 9a72b96; UAT administrativa de guardado pendiente para cuenta verificada.
 
-PATCH /cfdi/csd/:rfc/quadrum exige JWT y AdminOnlyGuard; modifica sólo usuario/contraseña PAC del CSD activo. Contraseña omitida se conserva sólo con mismo usuario. Cambiar cuenta no habilita un RFC ni valida timbrado. UI CSD muestra Editar Quadrum y no consulta contraseña actual. No recargar CER/KEY ni escribir secretos en auditoría.
+
+## Activación JIFJ y UAT vigente (2026-10-13)
 
 Actualización 2026-10-13: titular autorizó habilitar JIFJ4704238T5 para FACTURA; cuenta admitida y DF05-20261013-VF-0008 timbrado. Tres RFC comerciales habilitados sólo para FACTURA, con un caso timbrado por emisor; NC/REP/cancelación y RFC de pruebas bloqueados. No reenviar documentos con UUID por errores de PDF/correo. Pendientes de representación, entrega, consulta SAT y aceptación funcional; seguir QUADRUM_PRODUCCION_SEGUIMIENTO.md y actas del módulo. Rechazos históricos no describen estado vigente de JIFJ.
+
+
+## Alcance vigente Quadrum y seguimiento independiente (2026-10-13)
+
+Por decisión del titular, VF0004/CFDI40147 es incidencia de datos del cliente y queda fuera del resultado/bloqueadores de integración. FACTURA acredita tres documentos productivos, uno por RFC. NC/REP/cancelación se revisarán durante operación; restricción actual es de API (lista FACTURA), no ausencia de UI. Endpoints/contrato base contrastados con WSDL; obtiene_status_sat requiere corregir usario/password a usuario/contrasena. Correo, PDF y consulta SAT tienen plan/seguimiento independientes en docs/modules/cfdi/QUADRUM_POST_TIMBRADO_CORRECCION_{PLAN,SEGUIMIENTO}.md. Diagnosticar consumidor de correo desarrollo vs producción y reason Google antes de atribuir 403 a IP. No reenviar al PAC un documento con UUID por problemas auxiliares. Revisión actual documental, sin habilitar flujos ni cambiar entorno/SQL/secretos.
+
+
+## Consulta SAT Quadrum por ambiente (2026-10-13)
+
+WSDLs difieren: obtiene_status_sat exige usuario/contrasena en ws y usario/password en devws. Corrección local selecciona campos por endpoint validado. Pruebas de contrato y build PASS; despliegue/SAT real pendientes. No unificar nombres de desarrollo con producción ni declarar Vigente sólo por build. No cambiaron otros métodos SOAP.

@@ -222,3 +222,12 @@ Una factura cancelada deja el folio en `ESTATUS='PENDIENTE'` para poder rehacerl
 ## Preparación productiva Quadrum
 
 [Plan de corrección](docs/modules/cfdi/QUADRUM_PRODUCCION_PLAN.md) y [seguimiento por RFC](docs/modules/cfdi/QUADRUM_PRODUCCION_SEGUIMIENTO.md). Producción requiere endpoints oficiales y habilitación explícita por RFC/flujo; `.env` local no equivale a entorno desplegado.
+
+### Edición de cuenta Quadrum
+
+Administración puede editar usuario/contraseña PAC por RFC desde Certificados (CSD), sin renovar certificado. Endpoint protegido `PATCH /cfdi/csd/:rfc/quadrum`; contraseña actual nunca se devuelve. Guardar cuenta no timbra ni habilita emisores bloqueados. Implementación local del 2026-10-12; ver documentación del módulo para validación y alcance de publicación.
+
+
+### Corrección de consulta SAT Quadrum (2026-10-13)
+
+API selecciona nombres SOAP de credenciales por ambiente para obtiene_status_sat: producción usuario/contrasena, desarrollo usario/password. Corrección local validada; despliegue y consulta real pendientes. Seguimiento: [expediente independiente](docs/modules/cfdi/QUADRUM_POST_TIMBRADO_CORRECCION_SEGUIMIENTO.md).

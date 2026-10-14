@@ -1,0 +1,18 @@
+[
+  [
+    {
+      "IDMOD_FRONT": 20008,
+      "CODIGO": "FACTURA_PRUEBAS",
+      "NOMBRE": "FACTURACION QUADRUM",
+      "ACTIVO": true,
+      "FCNR": "2026-09-28T14:59:58.000Z",
+      "DEPTO": "Facturacion"
+    }
+  ],
+  [
+    {
+      "IDGRUPMOD_FRONT": 8003,
+      "IDMOD_FRONT": 20008
+    }
+  ]
+]

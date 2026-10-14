@@ -19,6 +19,7 @@ import { CuentaPac } from './quadrum.client';
  *   cancelar(UUIDS, usuario, contrasena, rfc, cer, key, reintentar)
  *   cancelar_con_certificados(UUIDS, usuario, contrasena, rfc, serial, reintentar)
  *   obtiene_status_sat(usario, password, taxpayer_id, rtaxpayer_id, uuid, total)
+ *     en desarrollo; producción exige usuario y contrasena como primeros campos.
  *   acuse(usuario, contrasena, rfc, uuid, tipo)
  *   consulta(usuario, contrasena, uuid)
  *
@@ -129,10 +130,14 @@ export class QuadrumCancelacionClient {
     cuenta?: CuentaPac;
   }): Promise<EstatusSat> {
     this.assertCredentials(input.cuenta);
+    // Los WSDL oficiales de producción y desarrollo usan nombres distintos.
+    const [campoUsuario, campoContrasena] = this.esProduccion()
+      ? ['usuario', 'contrasena']
+      : ['usario', 'password'];
     const cuerpo =
       `<can:obtiene_status_sat xmlns:can="${NS_CANCELAR}">` +
-      `<can:usario>${escaparTexto(this.getUsuario(input.cuenta))}</can:usario>` +
-      `<can:password>${escaparTexto(this.getContrasena(input.cuenta))}</can:password>` +
+      `<can:${campoUsuario}>${escaparTexto(this.getUsuario(input.cuenta))}</can:${campoUsuario}>` +
+      `<can:${campoContrasena}>${escaparTexto(this.getContrasena(input.cuenta))}</can:${campoContrasena}>` +
       `<can:taxpayer_id>${escaparTexto(input.rfcEmisor)}</can:taxpayer_id>` +
       `<can:rtaxpayer_id>${escaparTexto(input.rfcReceptor)}</can:rtaxpayer_id>` +
       `<can:uuid>${escaparTexto(input.uuid)}</can:uuid>` +

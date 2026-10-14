@@ -43,6 +43,7 @@ export const envValidationSchema = Joi.object({
     .valid('TESTING', 'PRODUCTION')
     .default('TESTING'),
   CFDI_EMAIL_TOKEN_ENCRYPTION_KEY: Joi.string().min(32).optional(),
+  CFDI_EMAIL_WORKER_ENABLED: Joi.string().valid('true', 'false').default('false'),
 
   // Alias de variables usadas por .env de despliegues IOE existentes.
   GOOGLE_CLIENT_ID: Joi.string().optional(),

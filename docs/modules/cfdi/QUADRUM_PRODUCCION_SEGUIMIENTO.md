@@ -1,7 +1,7 @@
 # Seguimiento de corrección Quadrum para producción
 
 Actualizado: 2026-10-13 (America/Mexico_City).
-Estado general: los tres RFC comerciales habilitados para FACTURA y un documento timbrado/persistido por emisor. Casos: DF01-20261012-VF-0040, DF04-20261012-VF-0030 y DF05-20261013-VF-0008. PDF, correo y consulta SAT pendientes; DF04-VF0004 conserva CFDI40147 de receptor, sin UUID. JIFJ habilitado expresamente por titular el 13/10; NC/REP/cancelación y RFC de pruebas siguen bloqueados. Integración funcional completa no acreditada.
+Estado general: integración fiscal FACTURA validada con un documento timbrado/persistido por cada uno de los tres RFC comerciales. Casos: DF01-20261012-VF-0040, DF04-20261012-VF-0030 y DF05-20261013-VF-0008. Por decisión del titular, VF0004/CFDI40147 es incidencia operativa de cliente y queda fuera del resultado de integración. NC/REP/cancelación se revisarán durante operación; restricción actual es de API, no ausencia de UI. Correo, PDF y consulta SAT pasan al [plan independiente](QUADRUM_POST_TIMBRADO_CORRECCION_PLAN.md) y su [seguimiento](QUADRUM_POST_TIMBRADO_CORRECCION_SEGUIMIENTO.md). No se declara UAT de flujos no ejecutados.
 Plan: [QUADRUM_PRODUCCION_PLAN.md](QUADRUM_PRODUCCION_PLAN.md).
 
 ## Regla de evidencia
@@ -13,14 +13,14 @@ Registrar cada actividad con fecha, entorno, versión, resultado y evidencia seg
 | ID | Actividad | Estado | Dependencia / criterio de cierre |
 |---|---|---|---|
 | QPROD-00 | Plan y seguimiento | Completo | Archivos creados y enlazados; alcance documental actual explícito |
-| QPROD-01 | Preflight actualizado de fuente y servidor | Completo | Revalidación de servidor y cuentas el 2026-10-12; cuenta JIFJ4704238T5 sigue rechazada |
+| QPROD-01 | Preflight actualizado de fuente y servidor | Completo | Tres emisores con cuenta/CSD propios y caso FACTURA aceptado; rechazo anterior de JIFJ es histórico |
 | QPROD-02 | Separar pruebas y operación productiva | Completo desplegado | Rutas de prueba bloqueadas; documento real requiere flag, RFC y flujo explícitos |
 | QPROD-03 | Cuenta/CSD estrictos por RFC | Completo técnico para tres RFC habilitados | Sin fallback productivo ni caché antigua; cada RFC tiene un caso timbrado. JIFJ ahora admitido por consulta y emisión |
 | QPROD-04 | Diagnóstico por RFC y parser de errores | Completo desplegado | Interpreta error con HTTP 200; consulta admitida no acredita autorización del timbrado |
 | QPROD-05 | Persistencia y recuperación fiscal | Técnico completo; recuperación fiscal pendiente de UAT | Evidencia persistente escribible y legado preservado; reservas no se liberan automáticamente |
 | QPROD-06 | Pruebas y build de corrección | Completo técnico | Release aislado de edición: build API PASS, 53 suites / 260 pruebas PASS; 2 widgets PASS; CSD analyze sin incidencias |
 | QPROD-07 | Release, entorno efectivo y postflight | Completo técnico | API 900b625 / App 9a72b96 desplegadas; edición y guard JWT verificados, entorno sin cambios; gate parcial FACTURA efectivo |
-| QPROD-08 | UAT por RFC y flujo; aceptación | Tres RFC fiscalmente verificados por documento; cierre funcional parcial | DF01-VF0040, DF04-VF0030 y DF05-VF0008 timbrados. PDF/correo/SAT y aceptación pendientes; VF0004 con error de receptor |
+| QPROD-08 | UAT fiscal FACTURA por RFC | Completo para tres documentos | DF01-VF0040, DF04-VF0030 y DF05-VF0008 timbrados/persistidos. VF0004 excluido como incidencia de cliente; auxiliares y flujos futuros con seguimiento separado |
 
 ## Configuración local frente a servidor — corte histórico anterior al despliegue
 
@@ -43,13 +43,13 @@ Fuente del último diagnóstico: consultas desde contenedor `ioe`, datos `IOELOC
 | RFC | CSD/RFC/descifrado del último diagnóstico | Consulta productiva sin emisión | Estado de preparación |
 |---|---|---|---|
 | `JICJ800630854` | Válidos; vence 2029-10-18 | Consulta admitida; reintento de DF01-20261012-VF-0040 timbrado el 13/10 | XML/UUID/SQL verificados; cierre funcional de PDF/correo/SAT pendiente |
-| `JIFT6203071N7` | Válidos; vence 2028-07-08 | Consulta admitida; DF04-VF0030 timbrado, VF0004 conserva CFDI40147 | XML/UUID/SQL verificados en VF0030; receptor de VF0004 requiere revisión propia |
+| `JIFT6203071N7` | Válidos; vence 2028-07-08 | Consulta admitida; DF04-VF0030 timbrado | XML/UUID/SQL verificados; VF0004 es incidencia de cliente fuera de evaluación de integración |
 | `JIFJ4704238T5` | Válidos; vence 2028-03-08 | Consulta admitida y DF05-VF0008 timbrado el 13/10 | Habilitado FACTURA por titular; XML/UUID/SQL verificados; cierre funcional pendiente |
 | `XIQB891116QE4` | CSD de pruebas; vence 2027-05-15 | No se envió consulta con cuenta propia: no existe | Excluir de activación productiva |
 
 Control negativo del diagnóstico: cuenta ficticia recibió rechazo explícito en consulta del servicio de cancelación productivo. En demo, rechazo apareció dentro de `consultaResult` con HTTP 200. No tomar estos indicadores de transporte como autenticación.
 
-No hay UAT de producción acreditada para los tres RFC comerciales en este expediente. El titular informa que desarrollo ya pasó; conservar ese antecedente sin trasladarlo a aceptación productiva. Confirmar saldo/contrato y autorización de timbrado de cada RFC antes de emitir.
+Hay un caso FACTURA productivo aceptado y persistido por cada RFC comercial, con acta propia. Ese resultado acredita los tres documentos concretos; no extrapolar a otros flujos o a toda operación futura. Los estados de rechazo en cortes anteriores son históricos.
 
 ## Riesgos detectados en preflight inicial — historial
 
@@ -77,19 +77,19 @@ No hay UAT de producción acreditada para los tres RFC comerciales en este exped
 
 ## Próxima ejecución
 
-1. Release de edición publicado y verificado. UAT administrativa de nuevo guardado desde navegador sólo cuando titular tenga cuenta verificada; no modificar secretos para demostrar una ruta.
-2. JICJ ya tiene factura timbrada: revisar PDF, correo Gmail 403 y consulta SAT sin emitir otro CFDI. No borrar UUID ni liberar control de folio.
-3. JICJ acredita un documento; obtener aceptación del titular sobre representación/entrega y conservar evidencia. No considerar pendientes no fiscales como motivo para reenviar al PAC.
-4. Verificar domicilio fiscal del receptor de DF04 para resolver CFDI40147; no inventar ni modificar datos sin autorización. Nueva simulación/autorización antes de reenviar. NC/REP/cancelación siguen fuera de activación.
-5. JIFJ habilitado y VF0008 timbrado: revisar correo/PDF/SAT sin otra emisión. No cambiar credenciales ni reasignar emisores históricos.
+1. Conservar configuración fiscal FACTURA validada y actas de los tres RFC. UAT administrativa de guardado desde UI se realiza cuando corresponda, sin modificar secretos para demostrar una ruta.
+2. Continuar correo, PDF y consulta SAT exclusivamente en el plan independiente y su tablero; no volver a timbrar documentos con UUID.
+3. Tratar VF0004/CFDI40147 dentro de operación de datos fiscales del cliente; no incorporarlo como bloqueo ni pendiente de cierre de integración.
+4. Revisar NC/REP/cancelación conforme surjan casos. Transporte y campos base contrastados con WSDL; su activación requiere incluir flujo exacto en lista de API. Consulta SAT presenta desajuste de dos etiquetas, documentado en expediente independiente.
+5. Conservar cambios locales, credenciales, emisores históricos y reservas; esta reclasificación documental no cambia entorno ni datos.
 
-## Registro de UAT pendiente
+## Registro de UAT fiscal y casos operativos
 
 | RFC | Flujo | Documento autorizado | UUID / evidencia privada | Resultado / aceptación |
 |---|---|---|---|---|
 | `JICJ800630854` | Factura | DF01-20261012-VF-0040; reintento solicitado expresamente 13/10 | 899F7CC4-A545-5FFE-9BA2-3E4A62FDAB7B; evidencia privada 20261013T160542_JICJ-01120 | TIMBRADO / FACTURADO; PDF/correo/SAT y aceptación pendientes |
 | `JIFT6203071N7` | Factura | DF04-20261012-VF-0030, solicitado expresamente 13/10 | CD32676E-C226-505C-B452-27B53DFBC07C; evidencia privada 20261013T163857_JIFT-02224 | TIMBRADO / FACTURADO; PDF/correo/SAT y aceptación pendientes |
-| `JIFT6203071N7` | Factura, caso anterior | DF04-20261012-VF-0004; no reenviado con esta solicitud | Sin UUID; evidencia privada 20261013T162940_JIFT-02223 | Rechazo CFDI40147 del receptor; ERROR / ERROR_EMISION |
+| `JIFT6203071N7` | Incidencia operativa de cliente, fuera de integración | DF04-20261012-VF-0004; no reenviado con esta solicitud | Sin UUID; evidencia privada 20261013T162940_JIFT-02223 | CFDI40147; conservar historial, no afecta resultado de integración |
 | `JIFJ4704238T5` | Factura | DF05-20261013-VF-0008, desbloqueo/intento solicitados 13/10 | 3C10A6D3-5BF0-57CE-9BCB-CF6BB2EBE494; evidencia privada 20261013T211451_JIFJ-03120 | TIMBRADO / FACTURADO; PDF/correo/SAT y aceptación pendientes |
 | RFC autorizado por caso | NC / REP / cancelación, según alcance final | Pendiente | Pendiente | No asumir cobertura por pruebas de factura |
 
@@ -223,3 +223,8 @@ Tres RFC habilitados con un caso FACTURA timbrado por emisor; cierre funcional y
 
 
 Último corte de correo 2026-10-13 15:23:54 America/Mexico_City: outbox ID 3 sigue REINTENTABLE, 3 intentos automáticos, ERROR_PROCESAMIENTO, ENVIADO_EN nulo. No se hizo reintento manual; estado puede evolucionar por worker existente. Timbrado permanece confirmado con UUID, sin otra emisión.
+
+
+## Separación de alcance solicitada — 2026-10-13
+
+Integración fiscal FACTURA verificada con tres casos productivos aceptados. VF0004/CFDI40147 se excluye como problema de integración por ser dato operativo de cliente. NC/REP/cancelación pasan a validación durante operación; restricción de API actual se conserva y no significa ausencia de UI. Correo/PDF/SAT se trasladan al [expediente independiente](QUADRUM_POST_TIMBRADO_CORRECCION_PLAN.md), con [tablero propio](QUADRUM_POST_TIMBRADO_CORRECCION_SEGUIMIENTO.md). Lectura 15:43: correo JICJ/JIFT ERROR_FINAL/GMAIL_HTTP_403; JIFJ REINTENTABLE/ERROR_PROCESAMIENTO, cuatro intentos; ningún envío registrado. Consulta SAT usa dos nombres incompatibles con WSDL vigente, cambio pendiente. Sin intervención Google ni cambios funcionales/productivos. Los cortes anteriores son historial y no deben reintroducir los bloqueadores excluidos por el titular.

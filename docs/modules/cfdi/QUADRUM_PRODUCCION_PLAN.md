@@ -1,6 +1,6 @@
 # Plan de corrección y cierre de integración Quadrum en producción
 
-Actualizado: 2026-10-13 (America/Mexico_City). Estado: FACTURA habilitada para tres RFC comerciales y un caso timbrado/persistido por emisor, incluido JIFJ4704238T5 tras solicitud expresa. Cierre funcional pendiente de PDF, correo, consulta SAT y aceptación. Folio JIFT VF0004 conserva error de receptor; NC/REP/cancelación y RFC de pruebas bloqueados. Sólo lista RFC cambió al habilitar JIFJ.
+Actualizado: 2026-10-13 (America/Mexico_City). Estado: integración fiscal FACTURA validada por un documento productivo timbrado/persistido para cada uno de los tres RFC comerciales. Por decisión del titular, VF0004/CFDI40147 es incidencia operativa de datos del cliente, fuera del resultado y bloqueadores de integración. NC/REP/cancelación se validarán conforme aparezcan casos; su restricción actual pertenece a API y no constituye ausencia de UI. Correo, PDF y consulta SAT pasan al [plan independiente posterior al timbrado](QUADRUM_POST_TIMBRADO_CORRECCION_PLAN.md) y su [seguimiento](QUADRUM_POST_TIMBRADO_CORRECCION_SEGUIMIENTO.md).
 Seguimiento: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](QUADRUM_PRODUCCION_SEGUIMIENTO.md).
 
 ## Objetivo y alcance autorizado
@@ -122,7 +122,7 @@ No se prevé DDL. Si aparece una necesidad SQL, abrir plan exacto de cambio con 
 
 Autorizar explícitamente documento y RFC antes de una emisión real. Hacer simulación previa. Para cada RFC comercial, validar factura auténtica necesaria para negocio, UUID, emisor/receptor, serie/folio, importes/impuestos, XML firmado/timbrado, PDF correspondiente y estado SQL. Revisar persistencia tras el ciclo autorizado del contenedor y ausencia de secretos en evidencia.
 
-NC, REP y cancelación real requieren casos comerciales/documentos exactos y autorización propia; no cancelar una factura válida sólo para demostrar la integración. Si no existe caso autorizado, declarar pendiente ese flujo y limitar por escrito el alcance de activación. No declarar el módulo completo con sólo UAT de facturas.
+NC, REP y cancelación real se revisarán conforme aparezcan casos comerciales/documentos exactos y autorización propia; no cancelar una factura válida sólo para demostrar la integración. Su validación futura no bloquea el resultado del alcance FACTURA. Conservar alcance explícito: tres casos de factura no prueban operación fiscal real de los demás flujos. La lista de API admite hoy sólo FACTURA; no confundirla con visibilidad de botones. Transporte compartido y contrato base se revisaron conforme a WSDL, con diferencia en consulta SAT registrada en el plan independiente.
 
 Validar permisos, evitar duplicidad del mismo documento y comprobar que fallo de correo no altere resultado fiscal. Habilitación automática del correo sigue en su expediente independiente.
 
@@ -203,3 +203,10 @@ JIFT6203071N7 timbró DF04-20261012-VF-0030 tras preflight/simulación y solicit
 ### Activación de tercer emisor por solicitud expresa
 
 El 2026-10-13 titular autorizó retirar restricción de JIFJ4704238T5 para FACTURA y emitir DF05-20261013-VF-0008. Consulta de cuenta admitida, preflight/simulación y emisión única aceptada, UUID 3C10A6D3-5BF0-57CE-9BCB-CF6BB2EBE494. Acta [QUADRUM_PRODUCCION_UAT_JIFJ4704238T5.md](QUADRUM_PRODUCCION_UAT_JIFJ4704238T5.md). Lista RFC ahora incluye los tres emisores comerciales, sin habilitar otros flujos ni certificados de pruebas. Código/imagen, credenciales y demás entorno intactos. Esta autorización supersede espera y bloqueo de JIFJ de cortes anteriores. PDF/correo/SAT y aceptación funcional pendientes no habilitan reemisión de documentos timbrados.
+
+
+## Reclasificación de alcance y expediente independiente — 2026-10-13
+
+Por decisión del titular, VF0004/CFDI40147 queda fuera de problemas y criterios de cierre de integración: corresponde a datos fiscales del cliente. FACTURA tiene tres casos productivos aceptados y persistidos, uno por RFC. NC/REP/cancelación se validarán durante operación, sin condicionar este resultado; su restricción efectiva está en API (`QUADRUM_FLUJOS_HABILITADOS=FACTURA`), no en ausencia de botones. Endpoints, namespaces, SOAPAction y campos base de timbrado/cancelación contrastados con WSDL productivos HTTP 200. Consulta SAT presenta etiquetas `usario/password` frente a `usuario/contrasena` exigidas por WSDL vigente.
+
+Correo, PDF y consulta SAT continúan en [plan independiente](QUADRUM_POST_TIMBRADO_CORRECCION_PLAN.md) y [seguimiento](QUADRUM_POST_TIMBRADO_CORRECCION_SEGUIMIENTO.md). Se documentan hipótesis de consumidor en desarrollo vs .234, error Google sin detalle, callback HTTPS, estado TESTING por contrastar en Cloud y corrección de nombres SOAP. Esta decisión supersede criterios anteriores que trataban VF0004, auxiliares u otros flujos como bloqueadores del resultado FACTURA; conserva actas y cortes históricos. Sin cambio de código, entorno, SQL, credenciales ni operación fiscal.

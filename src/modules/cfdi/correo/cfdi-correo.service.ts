@@ -7,6 +7,8 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { hostname } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { cifrar, descifrar } from '../cripto';
 import { DocumentosService } from '../documentos.service';
 import { VentaRepositorio } from '../venta.repositorio';
@@ -249,6 +251,9 @@ export class CfdiCorreoService {
     cuenta: string,
     nombreRemitente: string,
   ): Promise<void> {
+    const intento = { intentoId: randomUUID(), outboxId: trabajo.ID,
+      host: hostname(), pid: process.pid, intento: trabajo.INTENTOS };
+    this.logger.log(JSON.stringify({ ...intento, etapa: 'INICIO' }));
     const destinatario = this.descifrarEmail(
       trabajo.DESTINATARIO_CIFRADO,
     );
@@ -264,9 +269,12 @@ export class CfdiCorreoService {
     }
 
     let messageId: string;
+    let etapa = 'XML';
     try {
       const xml = await this.documentos.xml(trabajo.IDFOL);
+      etapa = 'PDF';
       const pdf = await this.documentos.pdf(trabajo.IDFOL);
+      etapa = 'ENVIO';
       const idSeguro = trabajo.IDFOL.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
       const uuidSeguro = trabajo.CFDI_UUID.replace(/[^A-Fa-f0-9-]/g, '');
       messageId = await this.proveedorCorreo.enviar({
@@ -298,9 +306,9 @@ export class CfdiCorreoService {
         error instanceof ErrorEntregaCorreo
           ? error
           : new ErrorEntregaCorreo(
-              'No se pudieron preparar los documentos o enviar el correo.',
-              'ERROR_PROCESAMIENTO',
-              'REINTENTABLE',
+              'Falló la etapa ' + etapa + ' del envío de CFDI.',
+              'ERROR_PROCESAMIENTO_' + etapa,
+              etapa === 'ENVIO' ? 'INCIERTO' : 'REINTENTABLE',
             );
       await this.repo.marcarFallo({
         id: trabajo.ID,
@@ -310,19 +318,14 @@ export class CfdiCorreoService {
         intentos: trabajo.INTENTOS,
       });
       this.logger.warn(
-        'Falló envío CFDI ' +
-          trabajo.IDFOL +
-          ' (' +
-          fallo.codigo +
-          ', estado ' +
-          fallo.tipo +
-          ').',
+        JSON.stringify({ ...intento, etapa, codigo: fallo.codigo, estado: fallo.tipo }),
       );
       return;
     }
 
     try {
       await this.repo.marcarEnviado({ id: trabajo.ID, messageId });
+      this.logger.log(JSON.stringify({ ...intento, etapa: 'PERSISTENCIA', estado: 'ENVIADO' }));
     } catch {
       // Gmail ya aceptó el mensaje: conservar PROCESANDO para revisión como
       // INCIERTO y no programar un reenvío que podría duplicar el correo.
