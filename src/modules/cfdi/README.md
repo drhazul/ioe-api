@@ -21,7 +21,7 @@ Release acotado API/App: `deploy/quadrum/Dockerfile.cuenta` recibe API exportada
 - `EmisionService` encola después de persistir UUID/XML/estado. La falla de email no cambia el resultado fiscal.
 - `CfdiCorreoWorker` procesa outbox y reconcilia CFDI nuevos; `DocumentosService` aporta XML original y PDF.
 - `GoogleOAuthService` gestiona consentimiento/callback y cifra refresh token. `GmailProvider` envía MIME con ambos adjuntos. `ProveedorCorreo` desacopla la cola del transporte; Microsoft Graph no está implementado en v1.
-- `CfdiCorreoController` ofrece configuración, conexión OAuth, prueba, historial y reintento. Rutas protegidas por `JwtAuthGuard` + `AdminOnlyGuard`; callback Google es público y requiere HTTPS.
+- `CfdiCorreoController` ofrece configuración, conexión OAuth, prueba, historial y reintento. Rutas protegidas por `JwtAuthGuard` + `CfdiCorreoAccessGuard`, que admite administración o `IDROL=8002` (`facturacion - FACTURACION DE TIENDAS`); callback Google es público y requiere HTTPS.
 - `FACT_CFDI_EMAIL_CONFIG`, `FACT_CFDI_EMAIL_OUTBOX` y `FACT_CFDI_EMAIL_OAUTH_STATE` se crearon mediante `sql/2026-10-10_cfdi_correo.sql` en `IOELOCAL` producción el 2026-10-10. Corte vigente del 2026-10-13: automático activo, cuenta/token cifrado presentes, envíos sin éxito; estado inicial apagado es histórico. Consultar seguimiento independiente antes de actuar.
 - OAuth acepta nombres preferidos `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI` y aliases existentes `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`.
 - `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY` es secreto externo al repositorio y debe permanecer estable para descifrar refresh tokens y destinatarios. El refresh token se obtiene por OAuth y se guarda cifrado; no se captura manualmente en `.env`.
@@ -49,3 +49,8 @@ mensajes crudos de Google. Límites por usuario/tasa son reintentables; respuest
 5xx, timeout y fallos desconocidos durante envío conservan resultado INCIERTO.
 Preparación XML/PDF identifica la etapa sin copiar excepciones sensibles.
 
+
+
+## Identidad fiscal sin restricción por sucursal — 2026-10-14
+
+El titular autoriza excepción específica de FACTURA_QUADRUM: sucursal no limita operación ni determina la identidad del emisor. Guard de documentos conserva autenticación, existencia y RFC emisor válido, pero deja de consultar USR_MOD_SUC o comparar SUC del usuario. Simulación/emisión exigen RfcEmisor en cabecera, sin inferirlo de DAT_SUC ni comparar con RFC actual de sucursal. CSD y cuenta propios, habilitación RFC/flujo, restricciones de pruebas y protección contra duplicidad/incertidumbre continúan. Permisos administrativos de CSD/correo y reglas de otros módulos sin cambios. Los criterios anteriores de bloqueo fiscal por sucursal quedan supersedidos sólo para este módulo. Acta de diagnóstico/intento: docs/modules/cfdi/QUADRUM_DF06_VF0007_20261014.md.

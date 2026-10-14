@@ -10,8 +10,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { AdminOnlyGuard } from '../../../common/guards/admin-only.guard';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
+import { CfdiCorreoAccessGuard } from './cfdi-correo-access.guard';
 import { ActualizarCorreoConfigDto } from './dto/actualizar-correo-config.dto';
 import { ProbarCorreoDto } from './dto/probar-correo.dto';
 import { CfdiCorreoService } from './cfdi-correo.service';
@@ -19,7 +19,7 @@ import { GoogleOAuthService } from './google-oauth.service';
 
 @ApiTags('cfdi-correo')
 @ApiBearerAuth('jwt-auth')
-@UseGuards(JwtAuthGuard, AdminOnlyGuard)
+@UseGuards(JwtAuthGuard, CfdiCorreoAccessGuard)
 @Controller('cfdi/correo')
 export class CfdiCorreoController {
   constructor(

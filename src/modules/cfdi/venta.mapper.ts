@@ -167,7 +167,7 @@ export function mapearVenta(
   filas: FilasVenta,
   contexto: ContextoVenta,
 ): DatosVenta {
-  const { header, cliente, sucursal } = filas;
+  const { header, cliente } = filas;
   const idFol = columna(header, 'IDFOL') || 'N/A';
 
   if (!filas.detalle?.length) {
@@ -176,7 +176,7 @@ export function mapearVenta(
 
   // El RFC del emisor decide con que certificado se sella.
   const rfcEmisor = exigir(
-    columna(header, 'RfcEmisor') || columna(sucursal, 'RFC'),
+    columna(header, 'RfcEmisor'),
     'RFC emisor',
     idFol,
   ).toUpperCase();

@@ -124,7 +124,7 @@ Segundo camino de timbrado, **separado del de Facturify**. Los dos conviven y ni
 - `timbrado.service.ts`: sella y timbra. `emision.service.ts`: folios reales (reserva, timbra, marca).
 - `cancelacion.service.ts`, `nota-credito.service.ts`, `complemento-pago.service.ts`: los tres flujos que cuelgan de una factura.
 - `csd.service.ts` / `csd.repositorio.ts` / `cripto.ts`: custodia de certificados y cuentas del PAC.
-- `correo/`: envío de XML/PDF posterior a timbrado Quadrum con Gmail API, OAuth en backend, outbox y worker. Rutas de configuración/reintento usan JWT + `AdminOnlyGuard`; guardar client secret y `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY` solo en secretos del servidor.
+- `correo/`: envío de XML/PDF posterior a timbrado Quadrum con Gmail API, OAuth en backend, outbox y worker. Rutas de configuración/reintento usan JWT + guard de correo: administración o `IDROL=8002` (`facturacion - FACTURACION DE TIENDAS`); guardar client secret y `CFDI_EMAIL_TOKEN_ENCRYPTION_KEY` solo en secretos del servidor.
 - DDL `sql/2026-10-10_cfdi_correo.sql` aplicado transaccionalmente en `IOELOCAL` producción el 2026-10-10 después de backup verificado; postflight confirmó tablas/índices y `AUTOMATICO=0`. En otro entorno, confirmar base, hacer preflight y respaldo y obtener autorización antes de DDL. Plan/seguimiento en `docs/modules/cfdi/FACTURA_QUADRUM_CORREO_*.md`.
 - `cadena-original.ts`, `cfdi-sellador.ts`, `comprobante.ts`, `recibo-pago.ts`: el motor. `cfdi-lector.ts` lee un CFDI timbrado; `representacion-impresa.service.ts` lo imprime.
 - `quadrum.client.ts` y `quadrum-cancelacion.client.ts`: los dos servicios SOAP, con namespace y contrato distintos.
@@ -230,3 +230,13 @@ Por decisión del titular, VF0004/CFDI40147 es incidencia de datos del cliente y
 ## Consulta SAT Quadrum por ambiente (2026-10-13)
 
 WSDLs difieren: obtiene_status_sat exige usuario/contrasena en ws y usario/password en devws. Corrección local selecciona campos por endpoint validado. Pruebas de contrato y build PASS; despliegue/SAT real pendientes. No unificar nombres de desarrollo con producción ni declarar Vigente sólo por build. No cambiaron otros métodos SOAP.
+
+
+## Identidad fiscal sin restricción por sucursal — 2026-10-14
+
+El titular autoriza excepción específica de FACTURA_QUADRUM: sucursal no limita operación ni determina la identidad del emisor. Guard de documentos conserva autenticación, existencia y RFC emisor válido, pero deja de consultar USR_MOD_SUC o comparar SUC del usuario. Simulación/emisión exigen RfcEmisor en cabecera, sin inferirlo de DAT_SUC ni comparar con RFC actual de sucursal. CSD y cuenta propios, habilitación RFC/flujo, restricciones de pruebas y protección contra duplicidad/incertidumbre continúan. Permisos administrativos de CSD/correo y reglas de otros módulos sin cambios. Los criterios anteriores de bloqueo fiscal por sucursal quedan supersedidos sólo para este módulo. Acta de diagnóstico/intento: docs/modules/cfdi/QUADRUM_DF06_VF0007_20261014.md.
+
+
+## Despliegue conjunto con todos los cambios (2026-10-14)
+
+Instrucción del titular: cada pase productivo debe incluir backend y frontend juntos, con commits de todos los cambios de fuente/documentación pendientes en ambos repositorios. Integrar historias locales/remotas/servidor sin descartar modificaciones; preservar secretos/entornos y respaldos fuera de Git. Validar y registrar ambas versiones en imagen/postflight. No hacer un pase sólo de API como sustituto del despliegue conjunto.

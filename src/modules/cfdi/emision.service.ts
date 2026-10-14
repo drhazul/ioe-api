@@ -95,15 +95,14 @@ export class EmisionService {
   async probar(idFol: string): Promise<ResultadoSimulacion> {
     const filas = await this.repo.folio(idFol);
     const header = filas.header;
-    const rfcEmisor = (
-      columna(header, 'RfcEmisor') || columna(filas.sucursal, 'RFC')
-    ).toUpperCase();
+    const rfcEmisor = columna(header, 'RfcEmisor').toUpperCase();
     if (!rfcEmisor) {
       throw new BadRequestException(
-        `El folio ${idFol} no tiene RFC emisor ni en el folio ni en su sucursal.`,
+        `El folio ${idFol} no tiene RFC emisor registrado.`,
       );
     }
 
+    validarRfcEmisor(rfcEmisor);
     const ahora = new Date();
     let datos: DatosVenta;
     try {
@@ -181,21 +180,14 @@ export class EmisionService {
       );
     }
 
-    const rfcEmisor = (
-      columna(header, 'RfcEmisor') || columna(filas.sucursal, 'RFC')
-    ).toUpperCase();
+    const rfcEmisor = columna(header, 'RfcEmisor').toUpperCase();
     if (!rfcEmisor) {
       throw new BadRequestException(
-        `El folio ${idFol} no tiene RFC emisor ni en el folio ni en su sucursal.`,
+        `El folio ${idFol} no tiene RFC emisor registrado.`,
       );
     }
 
     validarRfcEmisor(rfcEmisor);
-    const sucRfc = columna(filas.sucursal, 'RFC').trim().toUpperCase();
-    if (sucRfc && sucRfc !== rfcEmisor)
-      throw new ConflictException(
-        'RFC del documento no coincide con su sucursal.',
-      );
     const reservaPrevia = await this.repo.estadoReserva(idFol);
     if (
       reservaPrevia === 'RESERVADO' ||

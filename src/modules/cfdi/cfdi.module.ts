@@ -16,6 +16,7 @@ import { RepresentacionImpresaService } from './representacion-impresa.service';
 import { TimbradoService } from './timbrado.service';
 import { VentaRepositorio } from './venta.repositorio';
 import { CfdiCorreoController } from './correo/cfdi-correo.controller';
+import { CfdiCorreoAccessGuard } from './correo/cfdi-correo-access.guard';
 import { GoogleOAuthCallbackController } from './correo/google-oauth-callback.controller';
 import { CfdiCorreoRepositorio } from './correo/cfdi-correo.repositorio';
 import { CfdiCorreoService } from './correo/cfdi-correo.service';
@@ -23,6 +24,7 @@ import { CfdiCorreoWorker } from './correo/cfdi-correo.worker';
 import { GmailProvider } from './correo/gmail.provider';
 import { GoogleOAuthService } from './correo/google-oauth.service';
 import { CFDI_CORREO_PROVIDER } from './correo/proveedor-correo';
+import { AdminOnlyGuard } from '../../common/guards/admin-only.guard';
 
 @Module({
   controllers: [
@@ -32,6 +34,8 @@ import { CFDI_CORREO_PROVIDER } from './correo/proveedor-correo';
   ],
   providers: [
     CfdiSucursalGuard,
+    AdminOnlyGuard,
+    CfdiCorreoAccessGuard,
     QuadrumClient,
     QuadrumCancelacionClient,
     CsdStore,

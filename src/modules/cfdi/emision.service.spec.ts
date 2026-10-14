@@ -330,11 +330,31 @@ describe('Emisión: protección antes de PAC y después de aceptación', () => {
       expect.objectContaining({ estado: 'ERROR_EMISION' }),
     );
   });
-  it('rechaza conflicto RFC sucursal/documento antes de reservar', async () => {
-    const { service, repo } = armar({ header: { RfcEmisor: 'JIFT6203071N7' } });
-    await expect(service.emitir('F-001')).rejects.toBeInstanceOf(
-      ConflictException,
+  it('emite con RFC del documento aunque RFC de sucursal sea distinto', async () => {
+    const { service, repo, timbrarVenta } = armar({
+      header: { RfcEmisor: 'JIFT6203071N7' },
+    });
+    await expect(service.emitir('F-001')).resolves.toMatchObject({
+      uuid: UUID,
+    });
+    expect(repo.reservarSerie).toHaveBeenCalledWith(
+      expect.objectContaining({ rfcEmisor: 'JIFT6203071N7' }),
     );
-    expect(repo.reservarSerie).not.toHaveBeenCalled();
+    expect(timbrarVenta).toHaveBeenCalledWith(
+      expect.objectContaining({ rfcEmisor: 'JIFT6203071N7' }),
+    );
   });
+  it.each(['probar', 'emitir'] as const)(
+    'sin RFC en documento no usa RFC de sucursal para %s',
+    async (operacion) => {
+      const { service, repo, timbrarVenta } = armar({
+        header: { RfcEmisor: '' },
+      });
+      await expect(service[operacion]('F-001')).rejects.toThrow(
+        /no tiene RFC emisor registrado/,
+      );
+      expect(repo.reservarSerie).not.toHaveBeenCalled();
+      expect(timbrarVenta).not.toHaveBeenCalled();
+    },
+  );
 });
