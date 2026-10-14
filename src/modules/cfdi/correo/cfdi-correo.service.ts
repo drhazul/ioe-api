@@ -338,8 +338,12 @@ export class CfdiCorreoService {
   }
 
   private resumen(fila: TrabajoCorreo) {
+    const id = Number(fila.ID);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new ServiceUnavailableException('Identificador de envío fuera del rango admitido.');
+    }
     return {
-      id: fila.ID,
+      id,
       idFol: fila.IDFOL,
       uuid: fila.CFDI_UUID,
       destinatario: this.enmascarar(

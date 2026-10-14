@@ -1,5 +1,36 @@
 # Plan independiente de corrección posterior al timbrado Quadrum
 
+## Causa concreta del botón Reintentar — 2026-10-13
+
+Diagnóstico sólo lectura posterior a activación del worker: outbox ID 1/2/3
+permanece ERROR_FINAL con intentos 1/1/5 y fechas históricas; ninguna fecha de
+envío. Consulta TypeORM productiva devuelve ID como string. INFORMATION_SCHEMA
+confirma BIGINT. CfdiCorreoService.resumen devuelve fila.ID sin conversión;
+Flutter cfdi_correo_page.dart convierte con (envio['id'] as num).toInt() en
+onPressed antes de llamar _reintentar y fuera de su try/catch. ID textual causa
+TypeError y aborta antes del POST. Por eso no se resetean intentos ni se encola.
+
+Auditoría reciente de cfdi registra cinco POST /cfdi/correo/prueba y OAuth,
+sin reintento exitoso. AuditInterceptor registra respuestas exitosas únicamente:
+su ausencia aislada no acredita ausencia de petición; aquí converge con contrato
+ID textual y cast frontend. Logs filtrados no muestran procesamiento de outbox
+en contenedor activo. No hay evidencia de nuevo rechazo Gmail en este intento;
+el 403 mostrado es histórico. Pruebas de texto aceptadas no acreditan adjuntos.
+
+Plan de corrección autorizado para revisión, sin implementación en diagnóstico:
+1. API: normalizar ID BIGINT de outbox a número entero positivo seguro en DTO
+   público; declarar tipo real recibido del driver y rechazar overflow explícito.
+2. Flutter: aceptar ID textual o numérico de forma controlada; llevar validación
+   al try/catch del handler y mostrar error si ID inválido. Eliminar cast directo.
+3. Pruebas: ID "3", ID 3, inválido, overflow y doble clic; demostrar POST de ID
+   correcto y transición PENDIENTE. Mantener bloqueo ENVIADO/INCIERTO.
+4. Publicar corrección API/App y reconstruir .234 conservando worker habilitado,
+   claves, storage y entorno; comprobar contrato del listado autenticado.
+5. Usuario reintenta una fila existente. Verificar auditoría de POST exitoso,
+   intentos reiniciados, log de consumidor/etapa y ENVIADO/messageId. Si Gmail
+   devuelve nuevo error, usar motivo seguro actual. Confirmar bandeja Enviados y
+   recepción XML/PDF. No timbrar ni modificar manualmente outbox para ocultar bug.
+
 Fecha: 2026-10-13. Diagnóstico base: 15:43 America/Mexico_City. Estado: corrección SAT-01 implementada localmente y validada; despliegue y consulta real SAT pendientes. Correo/PDF continúan en seguimiento independiente.
 
 ## Objetivo y separación de alcance

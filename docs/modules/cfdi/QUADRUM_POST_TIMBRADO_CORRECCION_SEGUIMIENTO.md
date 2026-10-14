@@ -1,5 +1,24 @@
 # Seguimiento independiente de correo PDF y consulta SAT Quadrum
 
+## Corrección del contrato ID de reintento — 2026-10-13
+
+API convierte BIGINT ID a entero positivo seguro en respuesta pública; rechaza
+overflow. Flutter acepta ID textual legado o entero y valida dentro del try/catch
+del handler, antes de POST. Cast directo de botón eliminado. Pruebas numérico,
+texto, inválidos y overflow añadidas. API 215 pruebas/21 suites PASS, build PASS;
+Flutter 20 pruebas PASS. Release conjunto autorizado por titular, en preparación.
+No reencolado, timbrado ni envío ejecutado por agente para esta corrección.
+
+## Diagnóstico de reintento sin petición — 2026-10-13
+
+Confirmado contrato incompatible: driver SQL entrega BIGINT ID como string,
+API conserva string y botón Flutter realiza cast directo a num antes de handler.
+Outbox no cambia fechas/contadores; auditoría sólo acredita cinco pruebas de
+texto recientes, no reintento exitoso. Worker true ya fue confirmado; no hay
+trabajos reencolados para consumir. Gmail 403 visible corresponde a intentos
+históricos. Plan detallado añadido al plan de este expediente. Sin corrección
+funcional, reencolado, envío, SQL o cambio runtime durante este diagnóstico.
+
 ## Activación autorizada del worker — 2026-10-13
 
 Titular autoriza activar consumo y solicita aviso para reintento. Preflight:

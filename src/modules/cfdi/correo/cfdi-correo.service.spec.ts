@@ -7,6 +7,11 @@ import { GoogleOAuthService } from './google-oauth.service';
 import { cifrar } from '../cripto';
 
 describe('Existing CFDI email retry', () => {
+  it('normalizes SQL BIGINT strings in the public response and rejects overflow', () => {
+    const f = fixture();
+    expect((f.service as any).resumen({ ...f.trabajo, ID: '3' }).id).toBe(3);
+    expect(() => (f.service as any).resumen({ ...f.trabajo, ID: '9007199254740992' })).toThrow();
+  });
   const key = 'offline-test-encryption-key-not-production';
   function fixture(estado = 'ERROR_FINAL') {
     const trabajo = { ID: 1, IDFOL: 'TEST-FOLIO', CFDI_UUID: 'TEST-UUID',
