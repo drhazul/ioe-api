@@ -4,6 +4,7 @@ services:
   erp-api:
     image: ${IOE_IMAGE:?Set IOE_IMAGE to a built candidate image}
     pull_policy: never
+    container_name: erp-api-tysuzjl0xcdbhfje49pbcqyg
     entrypoint: ["node"]
     command: ["/srv/api/dist/main.js"]
     working_dir: /srv/api
@@ -50,6 +51,7 @@ services:
   standby-front:
     image: ${IOE_IMAGE:?Set IOE_IMAGE to a built candidate image}
     pull_policy: never
+    container_name: standby-front-tysuzjl0xcdbhfje49pbcqyg
     entrypoint: ["/usr/sbin/nginx"]
     command: ["-g", "daemon off;"]
     restart: unless-stopped
