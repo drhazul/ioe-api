@@ -117,6 +117,7 @@ Enlaces relacionados:
 - `POST /pv/devoluciones/:idfolDev/pago/preview`
 - `POST /pv/devoluciones/:idfolDev/pago/finalizar`
 - `GET /pv/devoluciones/:idfolDev/print-preview`
+- Fecha operativa de devolución (2026-10-15): usa UTC convertido con `AT TIME ZONE 'Central Standard Time (Mexico)'`; no cambies TZ global ni reinicies SQL para corregir zona de proceso. Fallos de `detalle/preparar` se registran como `PV_DEV_PREPARE_ERROR` tras rollback sin body de solicitud.
 - Reglas devolución simplificada (2026-05-22):
 - devolución parcial solo cuando el ticket origen tiene una sola forma y es `EFECTIVO`.
 - si ticket origen tiene forma mixta o no-efectivo, devolución debe ser total y respetar cada forma/referencia de origen.

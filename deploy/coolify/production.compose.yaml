@@ -1,0 +1,102 @@
+# Production API + Flutter Web services only. SQL stays in its existing containers.
+# Build candidate separately, then set IOE_IMAGE to its API/App-SHA tag.
+services:
+  erp-api:
+    image: ${IOE_IMAGE:?Set IOE_IMAGE to a built candidate image}
+    pull_policy: never
+    entrypoint: ["node"]
+    command: ["/srv/api/dist/main.js"]
+    working_dir: /srv/api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      ADMS_PORT: "8081"
+      DB_HOST: ioe-sql-standby
+      DB_PORT: "1433"
+      DB_NAME: IOELOCAL
+      DB_USER: ${DB_USER:?Set existing DB_USER in Coolify}
+      DB_PASS: ${DB_PASS:?Set existing DB_PASS in Coolify}
+      JWT_SECRET: ${JWT_SECRET:?Set existing JWT_SECRET in Coolify}
+      JWT_EXPIRES: ${JWT_EXPIRES:?Set existing JWT_EXPIRES in Coolify}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set existing CORS_ORIGINS in Coolify}
+      CSD_CIFRADO_LLAVE: ${CSD_CIFRADO_LLAVE:?Set existing CSD_CIFRADO_LLAVE in Coolify}
+      CFDI_EMAIL_TOKEN_ENCRYPTION_KEY: ${CFDI_EMAIL_TOKEN_ENCRYPTION_KEY:?Set existing CFDI_EMAIL_TOKEN_ENCRYPTION_KEY in Coolify}
+      CFDI_EMAIL_WORKER_ENABLED: ${CFDI_EMAIL_WORKER_ENABLED:?Set existing CFDI_EMAIL_WORKER_ENABLED in Coolify}
+      CFDI_EVIDENCIA_DIR: ${CFDI_EVIDENCIA_DIR:?Set existing CFDI_EVIDENCIA_DIR in Coolify}
+      CFDI_STORAGE_BASE_PATH: ${CFDI_STORAGE_BASE_PATH:?Set existing CFDI_STORAGE_BASE_PATH in Coolify}
+      FACTURIFY_API_KEY: ${FACTURIFY_API_KEY:?Set existing FACTURIFY_API_KEY in Coolify}
+      FACTURIFY_API_SECRET: ${FACTURIFY_API_SECRET:?Set existing FACTURIFY_API_SECRET in Coolify}
+      FACTURIFY_AUTO_EMAIL_ON_SUCCESS: ${FACTURIFY_AUTO_EMAIL_ON_SUCCESS:?Set existing FACTURIFY_AUTO_EMAIL_ON_SUCCESS in Coolify}
+      FACTURIFY_BASE_URL: ${FACTURIFY_BASE_URL:?Set existing FACTURIFY_BASE_URL in Coolify}
+      FACTURIFY_CANCEL_PATH: ${FACTURIFY_CANCEL_PATH:?Set existing FACTURIFY_CANCEL_PATH in Coolify}
+      FACTURIFY_EMAIL_PATH: ${FACTURIFY_EMAIL_PATH:?Set existing FACTURIFY_EMAIL_PATH in Coolify}
+      FACTURIFY_STAMP_PATH: ${FACTURIFY_STAMP_PATH:?Set existing FACTURIFY_STAMP_PATH in Coolify}
+      GOOGLE_GMAIL_SCOPE: ${GOOGLE_GMAIL_SCOPE:?Set existing GOOGLE_GMAIL_SCOPE in Coolify}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:?Set existing GOOGLE_OAUTH_CLIENT_ID in Coolify}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:?Set existing GOOGLE_OAUTH_CLIENT_SECRET in Coolify}
+      GOOGLE_OAUTH_PUBLISHING_STATUS: ${GOOGLE_OAUTH_PUBLISHING_STATUS:?Set existing GOOGLE_OAUTH_PUBLISHING_STATUS in Coolify}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:?Set existing GOOGLE_OAUTH_REDIRECT_URI in Coolify}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:?Set existing GOOGLE_REFRESH_TOKEN in Coolify}
+      GOOGLE_SENDER_EMAIL: ${GOOGLE_SENDER_EMAIL:?Set existing GOOGLE_SENDER_EMAIL in Coolify}
+      QUADRUM_CANCELAR_ENDPOINT: ${QUADRUM_CANCELAR_ENDPOINT:?Set existing QUADRUM_CANCELAR_ENDPOINT in Coolify}
+      QUADRUM_ENDPOINT: ${QUADRUM_ENDPOINT:?Set existing QUADRUM_ENDPOINT in Coolify}
+      QUADRUM_FLUJOS_HABILITADOS: ${QUADRUM_FLUJOS_HABILITADOS:?Set existing QUADRUM_FLUJOS_HABILITADOS in Coolify}
+      QUADRUM_PRODUCCION_HABILITADA: ${QUADRUM_PRODUCCION_HABILITADA:?Set existing QUADRUM_PRODUCCION_HABILITADA in Coolify}
+      QUADRUM_RFC_HABILITADOS: ${QUADRUM_RFC_HABILITADOS:?Set existing QUADRUM_RFC_HABILITADOS in Coolify}
+      QUADRUM_TIMEOUT_MS: ${QUADRUM_TIMEOUT_MS:?Set existing QUADRUM_TIMEOUT_MS in Coolify}
+    volumes:
+      - type: bind
+        source: /srv/ioe/erp/uploads
+        target: /srv/api/uploads
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /ArchivosUsuarios/respaldoCFDI
+        target: /ArchivosUsuarios/respaldoCFDI
+        bind:
+          create_host_path: false
+    networks:
+      app: {}
+      ioe_ha: {}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/health/db').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  standby-front:
+    image: ${IOE_IMAGE:?Set IOE_IMAGE to a built candidate image}
+    pull_policy: never
+    entrypoint: ["/usr/sbin/nginx"]
+    command: ["-g", "daemon off;"]
+    restart: unless-stopped
+    depends_on:
+      erp-api:
+        condition: service_healthy
+    ports:
+      - target: 8085
+        published: "18085"
+        host_ip: 172.16.100.40
+        protocol: tcp
+    networks:
+      app: {}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8085/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  app:
+    external: true
+    name: ${COOLIFY_APP_NETWORK:-tysuzjl0xcdbhfje49pbcqyg}
+  ioe_ha:
+    external: true
+    name: ioe_ha

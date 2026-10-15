@@ -327,6 +327,7 @@ Enlaces relacionados:
 - en detalle solo se edita `CTDD`; para líneas con ORD no bloqueante se exige devolución completa (`CTDD == CTD`).
 - `devolver-todo` aplica `CTDD=DIFD` y omite (null) líneas bloqueadas por ORD.
 - `detalle/preparar` valida selección e inserta en `PV_TICKET_LOG` del folio devolución solo artículos con `CTDD>0`.
+- fecha de proceso (2026-10-15): preparación y finalización derivan la hora de `SYSUTCDATETIME()` con `AT TIME ZONE 'Central Standard Time (Mexico)'`; no dependen del TZ del contenedor SQL. `PV_DEV_PREPARE_ERROR` registra tras rollback folio, sucursal, etapa, estado y tipo de error; solo incluye mensaje para conflictos de negocio y no guarda body.
 - trazabilidad UI (app, 2026-03): en `/punto-venta/devoluciones/:idfolDev/detalle`, `Ir a pago` se movió al `AppBar` con icono de caja (`Icons.point_of_sale`) y dejó de mostrarse en los botones del body.
 - trazabilidad UI (app, 2026-03): en la tarjeta de contexto de detalle devolución se ocultaron `AUT dev`, `AUT origen` y `Estado` (sin cambios de API).
 - preview reutiliza reglas de IVA del cierre (`DAT_SUC.IVA_INTEGRADO`, `REQF`, tipotran del origen) y sugiere formas.

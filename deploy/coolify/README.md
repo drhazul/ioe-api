@@ -1,4 +1,46 @@
-# Coolify: front standby privado
+# Coolify: fuente de despliegue IOE
+
+## Integración productiva API + Flutter Web — 2026-10-15
+
+Esta integración agrega fuente reproducible para reconstruir en conjunto el API y el front del recurso Coolify actual. **Archivos aún no desplegados**: el runtime observado sigue en imagen `ioe-allinone:primary-20261015`, con API `85fa560` y App `d4a2ba8`.
+
+### Contrato de base de datos y red
+
+- `production.compose.yaml` contiene solo `erp-api` y `standby-front`; no crea ni modifica SQL Server.
+- API y front comparten red privada Coolify; solo API se conecta además a `ioe_ha`.
+- API mantiene `DB_HOST=ioe-sql-standby`, `DB_PORT=1433` y `DB_NAME=IOELOCAL`. Alias `ioe-sql-standby` apunta a instancia IOELOCAL CU25 en `.40`; conservar alias mientras recurso use `ioe_ha`.
+- No confundir endpoints homónimos: `ioe-sql-standby:1433` dentro de red Docker `ioe_ha` es IOELOCAL; host `.40:1433` llega a instancia FEDERADA distinta. Ambas instancias permanecen separadas aunque SQL escuche `1433` dentro de cada contenedor.
+- FEDERADA sigue en instancia SQL separada. `.40:1433` continúa fuera de este Compose y no cambia. SQL IOELOCAL conserva Docker bind `127.0.0.1:1434`; además, socket systemd del host escucha en `172.16.100.40:1434` y reenvía TCP a ese bind. SSMS entra directo a `172.16.100.40,1434`, sin túnel SSH local. ACL nftables limita ese listener al gateway VPN `.2`; SQL conserva autenticación propia. API tampoco depende de este listener: usa `ioe_ha`/`ioe-sql-standby:1433`. Cualquier puerto futuro requiere publicación explícita e independiente; esta app Compose no administra puertos SQL.
+- Solo una API productiva: `ScheduleModule` inicia cron/workers al arrancar. No levantar candidato en red productiva para validar ni permitir réplicas en paralelo.
+- Front publica solo `172.16.100.40:18085`; Nginx entrega Flutter y envía `/api/*` al API. Nginx config ahora vive en Git/imágen, no en bind mount sin versionar.
+
+### Persistencia y secretos
+
+- Mantener `/srv/ioe/erp/uploads` → `/srv/api/uploads` sin cambiar propietario ni contenido.
+- Mantener `/ArchivosUsuarios/respaldoCFDI` en API. En host debe seguir montado por SMB desde almacenamiento persistente `.234`; no guardar respaldos CFDI en disco de `.40`, no quitar túnel SMB ni cambiar origen durante este cambio.
+- Compose usa `bind.create_host_path: false`, pero eso solo evita crear rutas ausentes. **Antes de recrear API**, validar en Proxmox que `findmnt -T /mnt/ioe-cfdi234` siga mostrando el CIFS esperado de `.234`, que el bind hacia CT `.40` llegue a `/ArchivosUsuarios/respaldoCFDI`, y que un CFDI existente sea visible desde `.40`. No arrancar si la cadena SMB/bind está caída: el directorio local vacío de `.40` no reemplaza almacenamiento persistente.
+- Variables de entorno actuales se referencian por nombre en Compose. Copiar/configurar los valores existentes de forma privada en el recurso Coolify; no pegarlos en YAML, commits, logs ni build args. Destino DB se fija en Compose, no se toma del entorno.
+- Dockerfile usa Node 24 LTS para API build/runtime; Node 20 terminó soporte el 2026-03-24. El candidato conjunto ejecuta compilación API y Flutter Web antes de activación; no mezclar el cambio de runtime con cambios de red/DB.
+
+### Construcción y activación
+
+1. Revisar y cerrar todos los cambios pendientes en `ioe-api` e `ioe_app`; crear commits coordinados conforme a instrucciones de workspace.
+2. Preparar checkouts limpios de ambos commits. Ejecutar `build-production-image.sh` con `API_REPO_DIR`, `APP_REPO_DIR`, `EXPECTED_API_SHA` y `EXPECTED_APP_SHA`. Script rechaza cambios sin commit, SHAs distintos, rutas CRM retiradas y archivos de secreto/respaldo; crea tag `ioe-allinone:production-<API>-<App>` y reporta image ID. No inicia servicios ni mueve tag `primary`; no reutilizar tag existente.
+3. En configuración de Coolify, establecer `IOE_IMAGE` al tag candidato y `COOLIFY_APP_NETWORK` al nombre de red de recurso vigente (`tysuzjl0xcdbhfje49pbcqyg` al observar runtime). Registrar image ID y confirmar variables privadas API sin imprimirlas.
+4. Activar únicamente en ventana coordinada. Compose reemplaza una API y un front en conjunto; no asumir actualización sin interrupción. Health de API consulta DB con `SELECT 1`; `depends_on` espera API saludable antes de arrancar front.
+5. Postflight: confirmar `DB_NAME()=IOELOCAL`, instancia ONLINE, front/API y proxy; comprobar `.40:1433` continúa hacia FEDERADA, el socket `.40:1434` filtra por gateway VPN y llega al bind local `127.0.0.1:1434`, SMB CFDI sigue en `.234`, y envío de logs `.40`→`.234` sigue con LSN/timers sanos. Completar UAT autenticada. Rollback ordinario vuelve a tag/config previos sin recuperar `.234` ni cambiar escritor SQL.
+
+La sintaxis Compose se valida con variables ficticias y el script construye una imagen candidata sin iniciar servicios. Este cambio de fuente no cambia firewall, Docker runtime, servicios, instancias DB, backups, Nginx `.3` ni DNS.
+
+El listener SSMS es configuración de host separada del Compose. Fue activado el 2026-10-15 sin reiniciar SQL ni API; la ruta TCP y el health de API/DB respondieron. La estación aparece en `.40` detrás del gateway VPN `172.16.100.2`; el firewall de `.40` limita a ese origen. Para limitar por cliente individual, aplicar ACL en el gateway antes de su NAT.
+
+### Integración del front
+
+`ioe_app` se compila como Flutter Web dentro de la imagen conjunta con `API_BASE_URL_WEB=/api`; Nginx reenvía `/api/` a servicio `erp-api:3001`. El navegador no se conecta directamente a SQL. El fallback de releases móviles es independiente y no cambia en este rebuild.
+
+---
+
+# Coolify: front standby privado (registro histórico)
 
 ## Documentos públicos y enlaces UI — 2026-10-13
 

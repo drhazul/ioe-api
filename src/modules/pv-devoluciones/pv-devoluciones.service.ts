@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -477,6 +478,8 @@ export class PvDevolucionesService {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
+    let failureStage = 'validar_contexto';
+    let auditSuc = this.normalizeText(user?.suc ?? '') || null;
 
     try {
       await this.ensureStagingTable(queryRunner);
@@ -485,9 +488,12 @@ export class PvDevolucionesService {
         idfolDev,
         true,
       );
+      auditSuc = context.suc;
+      failureStage = 'validar_acceso_y_estado';
       this.assertUserSucAccess(user, context.suc);
       this.assertDevolucionEditable(context);
 
+      failureStage = 'validar_lineas_seleccionadas';
       const lines = await this.loadStagingLines(
         queryRunner,
         context.idfolDev,
@@ -501,7 +507,9 @@ export class PvDevolucionesService {
       }
 
       await this.validateSelectedLines(queryRunner, context, selected);
+      failureStage = 'resolver_fecha_proceso';
       const processNow = await this.loadSqlProcessNow(queryRunner);
+      failureStage = 'reconstruir_ticket_devolucion';
       await this.regenerateTicketDevolucion(
         queryRunner,
         context.idfolDev,
@@ -529,7 +537,17 @@ export class PvDevolucionesService {
       };
     } catch (error) {
       await this.rollbackTransactionSafe(queryRunner);
-      throw this.mapError(error, 'No se pudo preparar detalle de devolución');
+      const mappedError = this.mapError(
+        error,
+        'No se pudo preparar detalle de devolución',
+      );
+      await this.auditPrepareFailure(mappedError, {
+        idfolDev,
+        suc: auditSuc,
+        user,
+        stage: failureStage,
+      });
+      throw mappedError;
     } finally {
       await queryRunner.release();
     }
@@ -929,9 +947,13 @@ export class PvDevolucionesService {
   private async loadSqlProcessNow(executor: SqlExecutor): Promise<Date> {
     const rows = await executor.query(
       `
+      DECLARE @UTC_NOW datetime2(7) = SYSUTCDATETIME();
+      DECLARE @MEXICO_NOW datetimeoffset(7) =
+        @UTC_NOW AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)';
+
       SELECT
-        GETDATE() AS NOW_SQL,
-        DATEPART(TZOFFSET, SYSDATETIMEOFFSET()) AS OFFSET_MINUTES
+        CAST(@MEXICO_NOW AS datetime2(3)) AS NOW_SQL,
+        DATEPART(TZOFFSET, @MEXICO_NOW) AS OFFSET_MINUTES
       `,
     );
     const row = (rows?.[0] ?? {}) as Record<string, unknown>;
@@ -952,11 +974,43 @@ export class PvDevolucionesService {
     );
     if (offsetMinutes != null && offsetMinutes !== -360) {
       throw new ConflictException(
-        `Timezone SQL Server inválido (${offsetMinutes} min). Se requiere America/Mexico_City (-360).`,
+        `Zona horaria operativa inválida (${offsetMinutes} min). Se esperaba America/Mexico_City (-360).`,
       );
     }
 
     return nowSql;
+  }
+
+  private async auditPrepareFailure(
+    error: Error,
+    input: {
+      idfolDev: string;
+      suc: string | null;
+      user: JwtPayload;
+      stage: string;
+    },
+  ) {
+    const statusCode =
+      error instanceof HttpException ? error.getStatus() : null;
+    const safeMessage =
+      error instanceof ConflictException
+        ? this.normalizeText(error.message).slice(0, 240)
+        : null;
+
+    await this.audit.log({
+      IDUSUARIO: Number(input.user.sub ?? 0) || null,
+      ACTION: 'PV_DEV_PREPARE_ERROR',
+      MODULO: 'punto-venta',
+      ENTIDAD: 'PV_CTR_FOL_ASVR',
+      ENTIDAD_ID: input.idfolDev,
+      SUC: input.suc,
+      METADATA_JSON: JSON.stringify({
+        etapa: input.stage,
+        statusCode,
+        errorType: error.constructor?.name ?? 'Error',
+        ...(safeMessage ? { message: safeMessage } : {}),
+      }),
+    });
   }
 
   private round2(value: number) {

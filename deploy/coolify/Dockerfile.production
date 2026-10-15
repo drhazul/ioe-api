@@ -1,0 +1,38 @@
+# Combined API + Flutter Web artifact for the existing Coolify application.
+# Runtime services override the default Nginx entrypoint in production.compose.yaml.
+# Flutter version stays pinned to the release toolchain used by this image.
+FROM --platform=linux/amd64 ghcr.io/cirruslabs/flutter:3.44.0@sha256:0a9de3b70b5b7b921a346eb2793e363dc22280849a4fd690d9dde99ce1c2b1b8 AS flutter_build
+WORKDIR /app/ioe_app
+COPY ioe_app/ ./
+# assets/.env is removed from the generated context. Flutter needs the asset,
+# so create only public same-origin web configuration during this build.
+RUN printf 'API_BASE_URL_WEB=/api\nAPI_BASE_URL=\n' > assets/.env \
+    && flutter pub get \
+    && flutter build web --release --pwa-strategy=none
+
+FROM node:24-alpine AS api_build
+WORKDIR /api/ioe-api
+COPY ioe-api/package*.json ./
+RUN npm ci
+COPY ioe-api/ ./
+RUN npm run build
+
+FROM node:24-alpine AS production
+ARG API_SHA
+ARG APP_SHA
+LABEL org.opencontainers.image.source-api="https://github.com/drhazul/ioe-api" \
+      org.opencontainers.image.source-app="https://github.com/drhazul/ioe_app" \
+      org.opencontainers.image.revision-api="${API_SHA}" \
+      org.opencontainers.image.revision-app="${APP_SHA}"
+RUN apk add --no-cache nginx
+WORKDIR /srv/api
+COPY --from=api_build /api/ioe-api/dist ./dist
+COPY --from=api_build /api/ioe-api/node_modules ./node_modules
+COPY --from=api_build /api/ioe-api/package*.json ./
+WORKDIR /srv/www
+COPY --from=flutter_build /app/ioe_app/build/web ./web
+COPY deploy/nginx-production.conf /etc/nginx/nginx.conf
+EXPOSE 3001 8081 8085
+ENV NODE_ENV=production PORT=3001
+ENTRYPOINT ["/usr/sbin/nginx"]
+CMD ["-g", "daemon off;"]

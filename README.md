@@ -236,3 +236,7 @@ API selecciona nombres SOAP de credenciales por ambiente para obtiene_status_sat
 ## Identidad fiscal sin restricción por sucursal — 2026-10-14
 
 El titular autoriza excepción específica de FACTURA_QUADRUM: sucursal no limita operación ni determina la identidad del emisor. Guard de documentos conserva autenticación, existencia y RFC emisor válido, pero deja de consultar USR_MOD_SUC o comparar SUC del usuario. Simulación/emisión exigen RfcEmisor en cabecera, sin inferirlo de DAT_SUC ni comparar con RFC actual de sucursal. CSD y cuenta propios, habilitación RFC/flujo, restricciones de pruebas y protección contra duplicidad/incertidumbre continúan. Permisos administrativos de CSD/correo y reglas de otros módulos sin cambios. Los criterios anteriores de bloqueo fiscal por sucursal quedan supersedidos sólo para este módulo. Acta de diagnóstico/intento: docs/modules/cfdi/QUADRUM_DF06_VF0007_20261014.md.
+
+## Despliegue conjunto en Coolify — 2026-10-15
+
+La reconstrucción de API + Flutter Web usa `deploy/coolify/production.compose.yaml`, `Dockerfile.production` y `build-production-image.sh`. API apunta explícitamente a IOELOCAL por la red privada Docker (`ioe-sql-standby:1433`, `DB_NAME=IOELOCAL`); FEDERADA permanece en instancia separada. Compose no administra SQL, publicaciones `1433/1434`, el respaldo/log shipping `.40`→`.234` ni SMB de CFDI `.234`. La fuente se prepara localmente y aún requiere commits coordinados, activación en ventana y UAT; ver `deploy/coolify/README.md`.
