@@ -20,7 +20,7 @@ Esta integración agrega fuente reproducible para reconstruir en conjunto el API
 - Mantener `/ArchivosUsuarios/respaldoCFDI` en API. En host debe seguir montado por SMB desde almacenamiento persistente `.234`; no guardar respaldos CFDI en disco de `.40`, no quitar túnel SMB ni cambiar origen durante este cambio.
 - Compose usa `bind.create_host_path: false`, pero eso solo evita crear rutas ausentes. **Antes de recrear API**, validar en Proxmox que `findmnt -T /mnt/ioe-cfdi234` siga mostrando el CIFS esperado de `.234`, que el bind hacia CT `.40` llegue a `/ArchivosUsuarios/respaldoCFDI`, y que un CFDI existente sea visible desde `.40`. No arrancar si la cadena SMB/bind está caída: el directorio local vacío de `.40` no reemplaza almacenamiento persistente.
 - Variables de entorno actuales se referencian por nombre en Compose. Copiar/configurar los valores existentes de forma privada en el recurso Coolify; no pegarlos en YAML, commits, logs ni build args. Destino DB se fija en Compose, no se toma del entorno.
-- Dockerfile usa Node 24 LTS para API build/runtime; Node 20 terminó soporte el 2026-03-24. El candidato conjunto ejecuta compilación API y Flutter Web antes de activación; no mezclar el cambio de runtime con cambios de red/DB.
+- Dockerfile usa Node 24 LTS para API build/runtime; Node 20 terminó soporte el 2026-03-24. Tras compilar, elimina dependencias de desarrollo del runtime. El candidato conjunto ejecuta compilación API y Flutter Web antes de activación; no mezclar el cambio de runtime con cambios de red/DB.
 
 ### Construcción y activación
 

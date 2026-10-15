@@ -13,7 +13,7 @@
 1. Calcular hora de proceso como `SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'`; enviar el valor local `datetime2` a las operaciones existentes. El mismo helper sirve para preparar y finalizar devolución.
 2. Tras rollback, registrar fallos de `detalle/preparar` con folio, sucursal, etapa, estado y tipo de excepción. Solo conflictos incluyen mensaje; no se guarda body ni secretos.
 3. Frontend muestra el mensaje de API mediante `apiErrorMessage` para hacer visible la validación que bloquea el avance.
-4. Reconstruir imagen conjunta API+Flutter Web con los SHAs de ambos commits y Node 24 LTS. La auditoría detectó un `proxy-addr` crítico; el lockfile queda en `2.0.8`. Permanecen 16 avisos altos de dependencias productivas; la integración no hace actualización masiva de paquetes.
+4. Reconstruir imagen conjunta API+Flutter Web con los SHAs de ambos commits y Node 24 LTS; runtime elimina dependencias de desarrollo. La auditoría detectó un `proxy-addr` crítico; el lockfile queda en `2.0.8`. Audit productivo posterior: 0 críticas, 16 altas, 14 moderadas y 2 bajas; la integración no hace actualización masiva de paquetes.
 5. Mantener SQL, sus relojes, puertos, mounts, red, proxy y variables privadas sin cambios.
 
 ## Validación y activación
