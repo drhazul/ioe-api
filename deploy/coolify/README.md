@@ -2,7 +2,7 @@
 
 ## Integración productiva API + Flutter Web — 2026-10-15
 
-Esta integración agrega fuente reproducible para reconstruir en conjunto el API y el front del recurso Coolify actual. **Archivos aún no desplegados**: el runtime observado sigue en imagen `ioe-allinone:primary-20261015`, con API `85fa560` y App `d4a2ba8`.
+Esta integración deja fuente reproducible para reconstruir API y front juntos. El release del 2026-10-15 quedó activo en Coolify con API `17feeb19a776704adcdf457fa8ce5831730651c3`, App `5163f2fbbfc64d8f5c556bde825bda21bfeccf0d` e imagen `ioe-allinone:production-17feeb19a776-5163f2fbbfc6` (`sha256:a69914372cf624a04824a45516051929026ef9a648666767450d78f4e7d735f4`).
 
 ### Contrato de base de datos y red
 
@@ -26,11 +26,20 @@ Esta integración agrega fuente reproducible para reconstruir en conjunto el API
 
 1. Revisar y cerrar todos los cambios pendientes en `ioe-api` e `ioe_app`; crear commits coordinados conforme a instrucciones de workspace.
 2. Preparar checkouts limpios de ambos commits. Ejecutar `build-production-image.sh` con `API_REPO_DIR`, `APP_REPO_DIR`, `EXPECTED_API_SHA` y `EXPECTED_APP_SHA`. Script rechaza cambios sin commit, SHAs distintos, rutas CRM retiradas y archivos de secreto/respaldo; crea tag `ioe-allinone:production-<API>-<App>` y reporta image ID. No inicia servicios ni mueve tag `primary`; no reutilizar tag existente.
-3. En configuración del recurso Coolify, establecer `IOE_IMAGE` al tag candidato y `COOLIFY_APP_NETWORK` al nombre de red vigente (`tysuzjl0xcdbhfje49pbcqyg` al observar runtime). Conservar `api.production.env` privado, existente y con modo `0600`; no volcar sus valores. Registrar image ID.
+3. En `.env` del recurso Coolify, establecer `IOE_IMAGE` al tag candidato y `COOLIFY_APP_NETWORK` al nombre de red vigente (`tysuzjl0xcdbhfje49pbcqyg` al observar runtime). Conservar `api.production.env` privado, existente y con modo `0600`; no volcar sus valores. Registrar image ID.
 4. Activar únicamente en ventana coordinada. Compose reemplaza una API y un front en conjunto; no asumir actualización sin interrupción. Health de API consulta DB con `SELECT 1`; `depends_on` espera API saludable antes de arrancar front.
 5. Postflight: confirmar `DB_NAME()=IOELOCAL`, instancia ONLINE, front/API y proxy; comprobar `.40:1433` continúa hacia FEDERADA, el socket `.40:1434` filtra por gateway VPN y llega al bind local `127.0.0.1:1434`, SMB CFDI sigue en `.234`, y envío de logs `.40`→`.234` sigue con LSN/timers sanos. Completar UAT autenticada. Rollback ordinario vuelve a tag/config previos sin recuperar `.234` ni cambiar escritor SQL.
 
 La sintaxis Compose se valida con variables ficticias y el script construye una imagen candidata sin iniciar servicios. Este cambio de fuente no cambia firewall, Docker runtime, servicios, instancias DB, backups, Nginx `.3` ni DNS.
+
+### Ejecución del release — 2026-10-15
+
+- El Compose activo del recurso conserva nombres/etiquetas Coolify, redes, puerto `18085`, uploads y bind CFDI. La configuración de ejecución coincide con `production.compose.yaml`; `api.production.env` sigue privado con modo `0600`.
+- API y front quedaron `healthy`. `/` y `/api/health/db` respondieron `200` localmente y por `erp.ioebusiness.com.mx`; consulta read-only confirmó `DB_NAME()=IOELOCAL` y `ONLINE`. Runtime API confirmó Node `v24.22.0`.
+- CFDI se validó en Proxmox como CIFS desde `.234`, bind a CT `105` y lectura desde API. Timers de log shipping inverso y verificación de rol siguen activos. Puertos `.40:1433` y `.40:1434` conservaron conectividad TCP.
+- Corrección PV: el API calcula hora de operación desde UTC con `AT TIME ZONE 'Central Standard Time (Mexico)'`, sin depender de zona del proceso SQL; la pantalla muestra el error API específico. No hubo migración SQL ni reintento de devolución. UAT autenticada del flujo queda pendiente.
+- El build reportó `0` críticas, `16` altas, `14` moderadas y `2` bajas tras actualizar `proxy-addr`; no se aplicó actualización amplia de dependencias.
+- Se conservó imagen anterior `ioe-allinone:primary-20261015` y copia previa de Compose para rollback. No se podaron imágenes ni volúmenes.
 
 El listener SSMS es configuración de host separada del Compose. Fue activado el 2026-10-15 sin reiniciar SQL ni API; la ruta TCP y el health de API/DB respondieron. La estación aparece en `.40` detrás del gateway VPN `172.16.100.2`; el firewall de `.40` limita a ese origen. Para limitar por cliente individual, aplicar ACL en el gateway antes de su NAT.
 
