@@ -6,6 +6,7 @@ readonly api_repo="${API_REPO_DIR:-$(cd -- "$script_dir/../.." && pwd)}"
 readonly app_repo="${APP_REPO_DIR:?Set APP_REPO_DIR to clean ioe_app checkout}"
 readonly expected_api_sha="${EXPECTED_API_SHA:?Set EXPECTED_API_SHA to reviewed API commit}"
 readonly expected_app_sha="${EXPECTED_APP_SHA:?Set EXPECTED_APP_SHA to reviewed App commit}"
+readonly build_memory_limit="${BUILD_MEMORY_LIMIT:-}"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -52,10 +53,15 @@ install -m 0644 "$script_dir/nginx-production.conf" "$context/deploy/nginx-produ
 install -m 0644 "$script_dir/.dockerignore.production" "$context/.dockerignore"
 
 echo "Building candidate: API ${expected_api_sha}, App ${expected_app_sha}."
-docker build --progress=plain \
+build_args=(--progress=plain)
+if [[ -n "$build_memory_limit" ]]; then
+  build_args+=(--resource "memory=${build_memory_limit}")
+fi
+docker buildx build "${build_args[@]}" \
   --build-arg "API_SHA=$expected_api_sha" \
   --build-arg "APP_SHA=$expected_app_sha" \
   --tag "$image_tag" \
+  --load \
   "$context"
 
 actual_api_sha="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision-api"}}' "$image_tag")"
