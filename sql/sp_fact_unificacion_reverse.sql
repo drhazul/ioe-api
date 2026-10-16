@@ -17,6 +17,10 @@ BEGIN
   DECLARE @motivoNorm NVARCHAR(500) = NULLIF(LTRIM(RTRIM(ISNULL(@MOTIVO, ''))), '');
   DECLARE @usuarioNorm NVARCHAR(120) = NULLIF(LTRIM(RTRIM(ISNULL(@USUARIO, ''))), '');
   DECLARE @lockResult INT = -1;
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
 
   IF @grupoNorm = ''
     THROW 51130, 'GRUPMAS es requerido', 1;
@@ -106,7 +110,7 @@ BEGIN
         'REVERSA UNIFICACION ',
         ISNULL(@usuarioNorm, 'SYSTEM'),
         ' ',
-        CONVERT(NVARCHAR(19), GETDATE(), 120),
+        CONVERT(NVARCHAR(19), @processNow, 120),
         ': ',
         @motivoNorm
       ),

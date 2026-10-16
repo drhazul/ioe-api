@@ -16,7 +16,9 @@ BEGIN
     IDFOL NVARCHAR(255) NULL,
     SUC VARCHAR(255) NULL,
     [USER] NVARCHAR(255) NULL,
-    FCN DATETIME NOT NULL DEFAULT GETDATE(),
+    FCN DATETIME NOT NULL DEFAULT (
+      CAST(SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)' AS DATETIME)
+    ),
     CLSM FLOAT NULL,
     SIGN FLOAT NULL,
     CTD FLOAT NULL,
@@ -24,6 +26,22 @@ BEGIN
     SRC NVARCHAR(40) NULL
   );
 END;
+GO
+
+DECLARE @dfMb51ConflictFcn SYSNAME;
+SELECT @dfMb51ConflictFcn = dc.name
+FROM sys.default_constraints dc
+INNER JOIN sys.columns c
+  ON c.object_id = dc.parent_object_id
+ AND c.column_id = dc.parent_column_id
+WHERE dc.parent_object_id = OBJECT_ID('dbo.MB51_CONFLICT_LOG')
+  AND c.name = 'FCN';
+IF @dfMb51ConflictFcn IS NOT NULL
+  EXEC(N'ALTER TABLE dbo.MB51_CONFLICT_LOG DROP CONSTRAINT ' + QUOTENAME(@dfMb51ConflictFcn));
+ALTER TABLE dbo.MB51_CONFLICT_LOG
+  ADD CONSTRAINT DF_MB51_CONFLICT_LOG_FCN DEFAULT (
+    CAST(SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)' AS DATETIME)
+  ) FOR FCN;
 GO
 
 ALTER PROCEDURE dbo.sp_mb51_transmitir_folio
@@ -50,7 +68,10 @@ BEGIN
   DECLARE @isSkipped BIT = 0;
   DECLARE @skipReason NVARCHAR(120) = '';
   DECLARE @estaFinal NVARCHAR(40) = '';
-  DECLARE @processNow DATETIME = GETDATE();
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
 
   IF @idfolNorm = ''
     THROW 57201, 'IDFOL es requerido', 1;

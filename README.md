@@ -1,5 +1,9 @@
 # IOE API
 
+## Fecha de proceso en punto de venta y facturación — 2026-10-15
+
+Los folios CP/CA/VF y sellos de cierre, devolución/MB51 y control CFDI convierten reloj UTC a hora local de México. Fechas editables o explícitas de negocio se conservan. Los procedimientos y defaults correspondientes requieren aplicar sus scripts SQL; esta corrección no repara filas históricas.
+
 ## DEV_PROVD / Devoluciones a proveedor (2026-08-28)
 
 - API `/devoluciones-proveedor` para creación, reserva, autorización con movimiento 102, evidencias, rechazo/cancelación, consolidación y salida física.

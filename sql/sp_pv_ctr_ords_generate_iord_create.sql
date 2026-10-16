@@ -9,7 +9,13 @@ BEGIN
 
   DECLARE @startedTran BIT = 0;
   DECLARE @sucNorm NVARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
-  DECLARE @fcnNorm DATETIME = ISNULL(@FCN, GETDATE());
+  DECLARE @fcnNorm DATETIME = ISNULL(
+    @FCN,
+    CAST(
+      SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+      AS DATETIME
+    )
+  );
   DECLARE @fcnDate DATE = CAST(@fcnNorm AS DATE);
   DECLARE @serie INT;
   DECLARE @serieTxt NVARCHAR(10);

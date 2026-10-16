@@ -13,6 +13,10 @@ USE IOELOCAL;
 
 DECLARE @fechaCorte DATETIME = '2026-04-02T00:00:00'; -- ajusta si deseas otro límite
 DECLARE @actor NVARCHAR(255) = 'codex';
+DECLARE @processNow DATETIME = CAST(
+  SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+  AS DATETIME
+);
 
 IF OBJECT_ID('tempdb..#missing') IS NOT NULL DROP TABLE #missing;
 IF OBJECT_ID('tempdb..#to_insert') IS NOT NULL DROP TABLE #to_insert;
@@ -63,7 +67,7 @@ SELECT
   CTDA = t.CTD * t.SIGNO,
   CTOT = (t.CTD * t.SIGNO) * t.CTOP,
   FCND = t.FCNM,
-  FCNC = GETDATE(),
+  FCNC = @processNow,
   TXT  = t.DOCP,
   ALMACEN = '001',
   SUC = t.SUC

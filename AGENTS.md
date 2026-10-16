@@ -1,5 +1,7 @@
 # Instrucciones de agente para ioe-api
 
+- Punto de venta / fechas de proceso (2026-10-15): folios CP/CA/VF, cierre, staging/transmisión MB51 y sellos de facturación/CFDI usan hora local de México derivada de UTC; fechas recibidas como dato de negocio siguen intactas. Aplicar los scripts SQL actualizados junto con API.
+
 > Abre otros README/AGENTS solo cuando la tarea lo requiera; usa el índice de módulos.
 
 - DEV_PROVD / Devoluciones a proveedor (2026-08-28): módulo `src/modules/devoluciones-proveedor`, ruta `/devoluciones-proveedor`, exclusivo de Jefe de Inventarios/admin; reserva en `DEV_CTRL_PROVD`, protección global `trg_dat_art_dev_provd_reserva` y salida transaccional/idempotente `DAT_MB51` movimiento 102 solo al autorizar. Diseño: `docs/modules/inventarios/devoluciones_proveedor_dev_provd.md`.

@@ -43,6 +43,10 @@ BEGIN
   DECLARE @idfol NVARCHAR(100) = CONCAT(@idfolOrigen, '-', @tipoNorm);
   DECLARE @lockResource NVARCHAR(255) = CONCAT('FACT_CFDI_SERIE_', @serie);
   DECLARE @lock INT;
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
 
   BEGIN TRAN;
 
@@ -85,7 +89,7 @@ BEGIN
     @idfol, @reemision, @rfcNorm, @serie, @folio,
     CONCAT(@serie, '-', @folio),
     @FECHA, @consecutivo, @consecutivo, 'RESERVADO',
-    @USUARIO, @USUARIO, GETDATE(), GETDATE()
+    @USUARIO, @USUARIO, @processNow, @processNow
   );
 
   COMMIT TRAN;

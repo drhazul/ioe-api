@@ -1317,7 +1317,14 @@ export class PvCotizacionesCierreService {
     },
   ) {
     const cols = ['IDF', 'IDFOL', 'FCN', 'FORM', 'IMPP', 'IMPC'];
-    const values = ['@0', '@1', 'GETDATE()', '@2', '@3', '@4'];
+    const values = [
+      '@0',
+      '@1',
+      "CAST(SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)' AS DATETIME)",
+      '@2',
+      '@3',
+      '@4',
+    ];
     const params: unknown[] = [
       input.idf,
       input.idfol,
@@ -1396,7 +1403,9 @@ export class PvCotizacionesCierreService {
     }
 
     if (columns.has('FCNM')) {
-      sets.push('FCNM = GETDATE()');
+      sets.push(
+        "FCNM = CAST(SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)' AS DATETIME)",
+      );
     }
 
     if (columns.has('OPVM')) {
@@ -1584,7 +1593,9 @@ export class PvCotizacionesCierreService {
     };
     const pushNow = (column: string) => {
       cols.push(column);
-      values.push('GETDATE()');
+      values.push(
+        "CAST(SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)' AS DATETIME)",
+      );
     };
     const classColumn = colsSet.has('CMOV')
       ? 'CMOV'
@@ -1675,7 +1686,9 @@ export class PvCotizacionesCierreService {
     };
     const pushNow = (column: string) => {
       cols.push(column);
-      values.push('GETDATE()');
+      values.push(
+        "CAST(SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)' AS DATETIME)",
+      );
     };
     const rtxt = `Cargo ${input.form.toLowerCase()} ticket ${input.idfol}`;
 

@@ -18,6 +18,10 @@ BEGIN
   DECLARE @usuarioNorm NVARCHAR(120) = LTRIM(RTRIM(ISNULL(@USUARIO, '')));
   DECLARE @comentarioNorm NVARCHAR(500) = NULLIF(LTRIM(RTRIM(ISNULL(@COMENTARIO, ''))), '');
   DECLARE @sucNorm NVARCHAR(20) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
 
   IF @idFolsJson = ''
     SET @idFolsJson = '[]';
@@ -107,7 +111,7 @@ BEGIN
 
   DECLARE @grupoId NVARCHAR(255) = '';
   DECLARE @idFolUnificado NVARCHAR(255) = '';
-  DECLARE @yyyymmdd CHAR(8) = CONVERT(CHAR(8), GETDATE(), 112);
+  DECLARE @yyyymmdd CHAR(8) = CONVERT(CHAR(8), @processNow, 112);
   DECLARE @prefix NVARCHAR(255);
   DECLARE @nextConsec INT;
   DECLARE @lockResult INT = -1;
@@ -172,7 +176,7 @@ BEGIN
     END;
 
     INSERT INTO dbo.FAC_CTRL_GRUP_MASV (GRUPMAS, FCNCREA, NFAC, ESTATUS)
-    VALUES (@grupoId, GETDATE(), @cantidad, 'PROCESANDO');
+    VALUES (@grupoId, @processNow, @cantidad, 'PROCESANDO');
 
     UPDATE F
     SET
@@ -213,7 +217,7 @@ BEGIN
     IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'FCN') IS NOT NULL
     BEGIN
       SET @insertCols += N', [FCN]';
-      SET @insertVals += N', GETDATE()';
+      SET @insertVals += N', @pNOW';
     END;
     IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'IMPT') IS NOT NULL
     BEGIN
@@ -313,7 +317,7 @@ BEGIN
     IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'FCNR') IS NOT NULL
     BEGIN
       SET @insertCols += N', [FCNR]';
-      SET @insertVals += N', GETDATE()';
+      SET @insertVals += N', @pNOW';
     END;
 
     DECLARE @comRegistro NVARCHAR(500) = NULL;
@@ -335,7 +339,7 @@ BEGIN
       ELSE 0
     END;
     DECLARE @fcnsInsert NVARCHAR(40) = CASE
-      WHEN @fcns = '' THEN CONVERT(NVARCHAR(40), GETDATE(), 112)
+      WHEN @fcns = '' THEN CONVERT(NVARCHAR(40), @processNow, 112)
       ELSE @fcns
     END;
     DECLARE @tipoFactInsert NVARCHAR(120) = CASE
@@ -361,7 +365,8 @@ BEGIN
         @pRAZON NVARCHAR(255),
         @pSUC NVARCHAR(40),
         @pCOM NVARCHAR(500),
-        @pMOD NVARCHAR(255)',
+        @pMOD NVARCHAR(255),
+        @pNOW DATETIME',
       @pIDFOL = @idFolUnificado,
       @pCLIEN = @clien,
       @pIMPT = @total,
@@ -378,7 +383,8 @@ BEGIN
       @pRAZON = @razonSocial,
       @pSUC = @sucSel,
       @pCOM = @comRegistro,
-      @pMOD = N'UNIFICACION';
+      @pMOD = N'UNIFICACION',
+      @pNOW = @processNow;
 
     UPDATE dbo.FAC_CTRL_GRUP_MASV
     SET ESTATUS = 'UNIFICADO'

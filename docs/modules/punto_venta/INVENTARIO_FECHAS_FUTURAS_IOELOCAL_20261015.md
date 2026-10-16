@@ -1,13 +1,150 @@
 # Inventario vivo de timestamps futuros — IOELOCAL
 
-- Corte de solo lectura: 2026-10-15T21:03:08.2466736 UTC (2026-10-15T15:03:08.2466736 hora México).
-- Destino SQL: dd7842d7ba7e / IOELOCAL.
-- 69 columnas en 42 tablas con algún valor posterior al reloj México; suma de celdas candidatas: 42347. Una fila puede contarse en varias columnas.
+- Corte del inventario amplio (consulta inicial): 2026-10-15T23:11:09.0149211 UTC (2026-10-15T17:11:09.0149211 hora México). La consulta filtrada más reciente se documenta debajo; el inventario amplio no se volvió a ejecutar.
+- Destino SQL: `DB_HOST:DB_PORT` del `.env` primario = `172.16.100.40:1434`, base `IOELOCAL`, servidor `dd7842d7ba7e`; estado `ONLINE`, recuperación `FULL`, multiusuario y lectura/escritura habilitada.
+- 69 columnas en 42 tablas con algún valor posterior al reloj México; suma de celdas candidatas: 40751. También hay 24459 posteriores a UTC. Una fila puede contarse en varias columnas.
 - Exploración usa `NOLOCK`; RCSI=false; aislamiento snapshot=OFF. Conteos son preliminares y pueden variar con actividad concurrente.
 - Regla del titular: UTC→México solo para timestamps de evento alimentados por reloj de sistema al crear/insertar el registro. Fechas de negocio futuras, entrega ORD, vigencias y expiraciones se preservan.
 - Conteo amplio clasifica todas las columnas temporales futuras; no significa que todas sean corruptas ni elegibles para DML.
 
-## Valores posteriores al reloj UTC
+## Ajuste de alcance tras aclaración del titular
+
+Solo considerar campos asignados por reloj del sistema y no editables por el usuario. La revisión de DTO/servicios detectó seis campos editables en la whitelist del primer preflight: `DAT_MB51.FCNC`, `PV_CTR_FOL_ASVR.FCNM` y `PV_CTR_ORDS.FCNRT`, `FCNAS`, `FCNTD`, `FCNMOD`. Se excluyeron del script de avance y de su whitelist de reversa, aunque algunos también reciban `GETDATE()` en flujos automáticos.
+
+Whitelist estática de código: 31 campos/25 tablas. El `VALIDAR` exacto más reciente antes de aplicar contó 5,324 celdas con llave en 28 campos/22 tablas; 0 bloqueadas. Corte UTC `2026-10-15T23:30:07.5491579Z`, hora México `2026-10-15T17:30:07.5491579`, hash `3AB920E319390C93A46AF41331F6B220B517DADB67F648F462F1AD2A3ED550B2`. Dos intentos con aprobaciones exactas anteriores (`B515D2DB...53D0E`, después `06E61570...786C4E`) detectaron deriva de conteo/hash dentro del guard y abortaron con rollback, sin DML ni ledger. Diferencias entre snapshots: `DAT_FOLIOS_CONSEC.FCNM` 15→7, `REC_BORRADOR_REC.FCNM` 1→0 y `PV_TICKET_LOG.updated_at` 711→710. Este preflight queda como histórico; la autorización posterior cubrió alcance dinámico acotado con la misma whitelist y regla.
+
+Destino confirmado por el titular: corregir solo `IOELOCAL` en `172.16.100.40:1434`. `192.168.10.234` es espejo en `RESTORING`; no es destino de esta corrección ni se modificó. La conexión a `.40` se verificó en solo lectura.
+
+### Resultado del APLICAR dinámico en `.40`
+
+- Lote confirmado: `01B98172-A8AB-4897-9270-8FF063686682`. Se actualizaron **5,094 celdas** en **28 campos / 22 tablas**; 0 bloqueadas. La transacción guardó los valores anteriores en `dbo.IOELOCAL_EVENT_TS_REPAIR_LEDGER` antes del cambio; quedan 5,094 entradas reversibles y ninguna marcada como revertida.
+- Corte capturado dentro de la transacción: UTC `2026-10-15T23:52:00.7518211`; México `2026-10-15T17:52:00.7518211-06:00`.
+- El postflight con el mismo corte encontró **0 celdas elegibles con llave y 0 bloqueadas**, hash `8879D4F43C6364557039D6B69109547ED45D537C3A78BC972547224F029C4501`.
+- El hash del plan aplicado no llegó al reporte del wrapper local porque falló después de terminar la consulta de aplicación, al consultar el ledger. La aplicación y el commit se confirmaron por el ledger y postflight; el hash se reconstruyó en solo lectura desde el ledger y whitelist: `74E2EDE1A93C1C630FA7A59E2D94C9786BE59776B6458551E00A2991CE70548E`. No se repitió DML.
+- `.234` no se consultó ni modificó para esta corrección. No se hizo backup separado fuera de la base; el ledger es la fuente de reversa del lote.
+
+### Reloj actual y riesgo de recurrencia (2026-10-16)
+
+- Windows: `2026-10-16T08:46:22-06:00`; UTC `2026-10-16T14:46:22Z`; zona `Central Standard Time (Mexico)`.
+- SQL `.40`: `GETDATE()`/`SYSDATETIMEOFFSET()` indican reloj UTC (`+00:00`). La expresión usada por devoluciones convirtió UTC a hora México y devolvió offset `-360`, esperado por el guard de `loadSqlProcessNow`.
+- Checkout API tiene cambios aún sin commit que sustituyen `GETDATE()` por conversión UTC→México en el folio fallback y `PV_DEV_DET_TMP.FCNR`. El API sigue en `HEAD=40eb010`, siete commits delante de `origin/master`; esos dos reemplazos están solo en working tree.
+- El daemon Docker local no respondió; no se verificó la imagen activa de Coolify. Hasta desplegar/confirmar el código que corrige esos escritores, nuevas filas pueden volver a guardar UTC como hora naive. La reparación de datos fue puntual; no garantiza prevención.
+- Causa del HTTP 409 original sigue sin confirmar y no se demuestra relacionada con la zona horaria.
+
+### Inventario amplio por campo (corte 17:11 hora México)
+
+Conteo amplio de campos temporales; incluye fechas válidas de negocio, editables y timestamps que no califican para corrección. No equivale al alcance DML.
+
+| Tabla.campo | > México | > UTC |
+|---|---:|---:|
+| `AUDIT_LOG.FCNR` | 6649 | 0 |
+| `CTROL_TRAMISIONES.FNCT` | 257 | 0 |
+| `DAT_ART_MASIVA_TMP.CREADO_EN` | 1455 | 0 |
+| `DAT_ART_MASIVA_TMP.PROCESADO_EN` | 1455 | 0 |
+| `DAT_CONT_AJUSTE_LOG.FCNR` | 1 | 0 |
+| `DAT_CONT_CAPTURA.FCNR` | 5 | 0 |
+| `DAT_CONT_CTRL.FCNC` | 1 | 0 |
+| `DAT_CTR_DOC.FCND` | 3 | 0 |
+| `DAT_CTRL_CTAS.FCND` | 9 | 0 |
+| `DAT_FOLIOS_CONSEC.FCNM` | 15 | 0 |
+| `DAT_MB51.FCNC` | 1066 | 0 |
+| `DAT_MB51.FCND` | 1005 | 0 |
+| `DAT_RET_CTR_SVR.FCNR` | 7 | 0 |
+| `DOC_CTRL_MERMA.FCND` | 1 | 0 |
+| `DOC_CTRL_MERMA.FCNM` | 1 | 0 |
+| `FAC_CTRL_GRUP_MASV.FCNCREA` | 7 | 0 |
+| `FAC_SVR_SHAP.CFDI_F_TIMBRADO` | 12 | 0 |
+| `FAC_SVR_SHAP.FCN` | 51 | 0 |
+| `FAC_SVR_SHAP.FCNF` | 12 | 0 |
+| `FACT_CFDI_EMAIL_OUTBOX.ACTUALIZADO_EN` | 11 | 0 |
+| `FACT_CFDI_EMAIL_OUTBOX.CREADO_EN` | 11 | 0 |
+| `FACT_CFDI_EMAIL_OUTBOX.ENVIADO_EN` | 11 | 0 |
+| `FACT_CFDI_FOLIOS_DIARIOS.FCN_TIMBRADO` | 12 | 0 |
+| `FACT_CFDI_FOLIOS_DIARIOS.FCNC` | 11 | 0 |
+| `FACT_CFDI_FOLIOS_DIARIOS.FCNM` | 12 | 0 |
+| `FACT_CLIENT_SHP.FCNR` | 1 | 0 |
+| `FACT_CSD.VIGENCIA_HASTA` | 4 | 4 |
+| `PROMO_CAB.FCN_TER` | 3 | 3 |
+| `PROMO_TICKET_DESC_APLI.FCNDES` | 71 | 0 |
+| `PV_CTR_FOL_ASVR.FCN` | 232 | 0 |
+| `PV_CTR_FOL_ASVR.FCNM` | 243 | 0 |
+| `PV_CTR_FOL_FORM.FCN` | 205 | 0 |
+| `PV_CTR_ORDS.FCN_AUT_CYM` | 9 | 0 |
+| `PV_CTR_ORDS.FCNAS` | 145 | 0 |
+| `PV_CTR_ORDS.FCNEN` | 85 | 0 |
+| `PV_CTR_ORDS.FCNM` | 101 | 92 |
+| `PV_CTR_ORDS.FCNMOD` | 279 | 0 |
+| `PV_CTR_ORDS.FCNRT` | 134 | 0 |
+| `PV_CTR_ORDS.FCNS` | 167 | 0 |
+| `PV_CTR_ORDS.FCNTD` | 144 | 0 |
+| `PV_CTR_ORDS.HR_ENT` | 85 | 0 |
+| `PV_CTR_ORDS_ENTREGA.FCN_ALTA` | 36 | 0 |
+| `PV_CTR_ORDS_ENTREGA_DET.FCN_ALTA` | 84 | 0 |
+| `PV_CTR_ORDS_FLUJO_HIST.FCNR` | 1254 | 0 |
+| `PV_DEV_DET_TMP.FCNR` | 44 | 0 |
+| `PV_OPV.FCNR` | 1 | 1 |
+| `PV_ORD_CAMBIO_MERMA_PRECIO.FCN_ALT` | 9 | 0 |
+| `PV_ORD_CAMBIO_MERMA_PRECIO.FCN_MOD` | 9 | 0 |
+| `PV_ORD_CAMBIO_MERMA_TMP.FCN_ALT` | 10 | 0 |
+| `PV_ORD_CAMBIO_MERMA_TMP.FCN_MOD` | 10 | 0 |
+| `PV_TICKET_LOG.updated_at` | 729 | 0 |
+| `REC_BORRADOR_REC.FCNM` | 2 | 0 |
+| `REC_CAB_PED.FCNC` | 2 | 0 |
+| `REC_CAB_PED.FCNP` | 1 | 0 |
+| `REC_CAB_PED.FCNR` | 2 | 0 |
+| `REC_CTO_HIST.FCN` | 19 | 0 |
+| `REC_CTRL_DOC_REC.FCN_AUTORIZA` | 2 | 0 |
+| `REC_CTRL_DOC_REC.FCN_FISICA` | 2 | 0 |
+| `REC_CTRL_DOC_REC.FCNC` | 2 | 0 |
+| `REC_GUIA_PED.FCNR` | 2 | 0 |
+| `REF_DETALLE.FCNR` | 67 | 0 |
+| `TRAN_CTR_DOCPRE.FCNC` | 2 | 0 |
+| `TRAN_CTR_DOCPRE.FCND` | 1 | 0 |
+| `TRAN_CTR_DOCPRE.FCNM` | 2 | 0 |
+| `TRAN_DET_ART.FCN_CONT` | 4 | 0 |
+| `TRAN_EVID.FCN` | 1 | 0 |
+| `TRAN_PAQ_ENV.FCN` | 1 | 0 |
+| `TRAN_PAQ_ENV.FENV` | 1 | 0 |
+| `USUARIO_TOKEN.EXPIRES_AT` | 24464 | 24359 |
+
+### Targets activos del VALIDAR exacto previo (histórico; corte 17:30 hora México)
+
+| Tabla.campo | Celdas | Estado |
+|---|---:|---|
+| `DAT_ART_MASIVA_TMP.CREADO_EN` | 1455 | LISTO PARA REVISION |
+| `DAT_ART_MASIVA_TMP.PROCESADO_EN` | 1455 | LISTO PARA REVISION |
+| `DAT_CONT_CAPTURA.FCNR` | 5 | LISTO PARA REVISION |
+| `DAT_FOLIOS_CONSEC.FCNM` | 7 | LISTO PARA REVISION |
+| `DOC_CTRL_MERMA.FCNM` | 1 | LISTO PARA REVISION |
+| `FAC_SVR_SHAP.CFDI_F_TIMBRADO` | 15 | LISTO PARA REVISION |
+| `FAC_SVR_SHAP.FCNF` | 15 | LISTO PARA REVISION |
+| `FACT_CFDI_EMAIL_OUTBOX.ACTUALIZADO_EN` | 14 | LISTO PARA REVISION |
+| `FACT_CFDI_EMAIL_OUTBOX.CREADO_EN` | 14 | LISTO PARA REVISION |
+| `FACT_CFDI_FOLIOS_DIARIOS.FCN_TIMBRADO` | 15 | LISTO PARA REVISION |
+| `FACT_CFDI_FOLIOS_DIARIOS.FCNC` | 14 | LISTO PARA REVISION |
+| `FACT_CFDI_FOLIOS_DIARIOS.FCNM` | 15 | LISTO PARA REVISION |
+| `PROMO_TICKET_DESC_APLI.FCNDES` | 68 | LISTO PARA REVISION |
+| `PV_CTR_ORDS.FCN_AUT_CYM` | 10 | LISTO PARA REVISION |
+| `PV_CTR_ORDS_ENTREGA.FCN_ALTA` | 39 | LISTO PARA REVISION |
+| `PV_CTR_ORDS_ENTREGA_DET.FCN_ALTA` | 93 | LISTO PARA REVISION |
+| `PV_CTR_ORDS_FLUJO_HIST.FCNR` | 1288 | LISTO PARA REVISION |
+| `PV_DEV_DET_TMP.FCNR` | 49 | LISTO PARA REVISION |
+| `PV_ORD_CAMBIO_MERMA_PRECIO.FCN_ALT` | 10 | LISTO PARA REVISION |
+| `PV_ORD_CAMBIO_MERMA_TMP.FCN_ALT` | 10 | LISTO PARA REVISION |
+| `PV_ORD_CAMBIO_MERMA_TMP.FCN_MOD` | 10 | LISTO PARA REVISION |
+| `PV_TICKET_LOG.updated_at` | 710 | LISTO PARA REVISION |
+| `REC_CTRL_DOC_REC.FCN_AUTORIZA` | 2 | LISTO PARA REVISION |
+| `REC_GUIA_PED.FCNR` | 2 | LISTO PARA REVISION |
+| `TRAN_CTR_DOCPRE.FCNM` | 2 | LISTO PARA REVISION |
+| `TRAN_DET_ART.FCN_CONT` | 4 | LISTO PARA REVISION |
+| `TRAN_EVID.FCN` | 1 | LISTO PARA REVISION |
+| `TRAN_PAQ_ENV.FCN` | 1 | LISTO PARA REVISION |
+
+No incluir `DAT_MB51.FCNC`, `PV_CTR_FOL_ASVR.FCNM` ni fechas editables de `PV_CTR_ORDS`. Fechas futuras de entrega, vigencias, promociones, tokens y otros valores sin fuente autoritativa permanecen fuera del DML. La tabla anterior es snapshot exacto previo y no representa el conteo aplicado, que quedó registrado arriba.
+
+Chequeo read-only previo: el login permitía actualizar las tablas activas y crear tabla. El ledger ahora existe por el lote aplicado; no reutilizar conteos/hash históricos como autorización para nuevas ejecuciones.
+
+## Valores posteriores al reloj UTC (corte histórico, supersedido)
 
 - `FACT_CSD.VIGENCIA_HASTA`: 4 valor(es) posteriores a UTC
 - `PROMO_CAB.FCN_TER`: 3 valor(es) posteriores a UTC
@@ -15,7 +152,7 @@
 - `PV_OPV.FCNR`: 1 valor(es) posteriores a UTC
 - `USUARIO_TOKEN.EXPIRES_AT`: 24153 valor(es) posteriores a UTC
 
-## Preflight del script (VALIDAR, solo lectura)
+## Preflight histórico del script (VALIDAR, solo lectura; supersedido)
 
 - Corte UTC: `2026-10-15T21:03:11.063Z`; hora México: `2026-10-15T15:03:11.063`.
 - Celdas elegibles con llave: 7715; bloqueadas sin llave: 1; hash por whitelist, llaves y valores: `8FEBBD1DCDA796038CA9E9A5C1F73FE276E3ACA4AE04DD5F1D8AB8D769F57211`.
@@ -52,21 +189,21 @@
 - `DAT_CONT_CTRL.FCNR` queda bloqueada: fila con default de reloj, pero sin llave única para reversa exacta.
 - Repetir `VALIDAR` antes de cualquier ejecución; hash/corte corresponden solo a este preflight y caducan si cambian filas o whitelist.
 
-## Inventario
+## Inventario histórico con clasificación de origen (conteos supersedidos)
 
 | Tabla.campo | Tipo | > México | > UTC | Mínimo | Máximo | Default | Llave estable | Escritor localizado | Decisión preliminar |
 |---|---|---:|---:|---|---|---|---|---|---|
 | `AUDIT_LOG.FCNR` | datetime2 | 7679 | 0 | 2026-10-15T15:03:12 | 2026-10-15T21:03:08 | (sysdatetime()) | PK PK__AUDIT_LO__95D716204DF06EFE([IDLOG]) |  | EXCLUIR/BLOQUEAR: Auditoría: preservar contrato UTC; fuente repo y default vivo difieren |
 | `CTROL_TRAMISIONES.FNCT` | datetime | 310 | 0 | 2026-10-15T15:05:26.250 | 2026-10-15T21:02:55.093 |  | PK PK__CTROL_TR__3214EC275B04046B([ID]) |  | PENDIENTE: trazar escritor/semántica |
 | `DAT_ART_MASIVA_TMP.CREADO_EN` | datetime2 | 1455 | 0 | 2026-10-15T17:50:18 | 2026-10-15T19:36:07 | (sysutcdatetime()) | PK PK_DAT_ART_MASIVA_TMP([ID]) |  | CANDIDATO: default de reloj de sistema |
-| `DAT_ART_MASIVA_TMP.PROCESADO_EN` | datetime2 | 1455 | 0 | 2026-10-15T17:50:18 | 2026-10-15T19:36:07 |  | PK PK_DAT_ART_MASIVA_TMP([ID]) |  | PENDIENTE: trazar escritor/semántica |
+| `DAT_ART_MASIVA_TMP.PROCESADO_EN` | datetime2 | 1455 | 0 | 2026-10-15T17:50:18 | 2026-10-15T19:36:07 |  | PK PK_DAT_ART_MASIVA_TMP([ID]) | sp_datart_massive_apply | CANDIDATO: el SP fija `@AHORA=SYSUTCDATETIME()`; no es entrada del DTO |
 | `DAT_CONT_CAPTURA.FCNR` | datetime | 296 | 0 | 2026-10-15T15:35:55.587 | 2026-10-15T18:37:00.353 | (getdate()) | PK PK__DAT_CONT__3214EC27486843B4([ID]) |  | CANDIDATO: default de reloj de sistema |
 | `DAT_CONT_CTRL.FCNR` | datetime2 | 1 | 0 | 2026-10-15T15:23:27.1028072 | 2026-10-15T15:23:27.1028072 | (sysdatetime()) | SIN_LLAVE_UNICA |  | CANDIDATO: default de reloj de sistema |
 | `DAT_CONT_UPLOAD_ITEMS.FCNR` | datetime2 | 2 | 0 | 2026-10-15T15:23:33.5518017 | 2026-10-15T15:23:33.5518017 | (sysdatetime()) | PK PK_DAT_CONT_UPLOAD_ITEMS([ID]) |  | CANDIDATO: default de reloj de sistema |
 | `DAT_CTR_DOC.FCND` | datetime | 5 | 0 | 2026-10-15T15:14:33.393 | 2026-10-15T19:03:06.830 |  | PK PK_DATCTRDOC([DOC]) |  | PENDIENTE: trazar escritor/semántica |
 | `DAT_CTRL_CTAS.FCND` | datetime | 10 | 0 | 2026-10-15T15:14:33.397 | 2026-10-15T20:20:54.573 |  | PK PK_DATCTRCTAS([NDOC]) |  | PENDIENTE: trazar escritor/semántica |
 | `DAT_FOLIOS_CONSEC.FCNM` | datetime | 16 | 0 | 2026-10-15T15:28:18.010 | 2026-10-15T21:02:54.833 | (getdate()) | UQ UX_DAT_FOLIOS_CONSEC_SUC_FECHA_TIPO([SUC],[FECHA],[TIPO_FOLIO]) | sp_pv_next_visible_folio | CANDIDATO: default de reloj de sistema |
-| `DAT_MB51.FCNC` | datetime | 980 | 0 | 2026-10-15T15:05:26.250 | 2026-10-15T21:02:55.093 |  | PK PK_DATMB51([IDPD]) | sp_merma_contabilizar | CANDIDATO: escritor usa reloj de sistema |
+| `DAT_MB51.FCNC` | datetime | 980 | 0 | 2026-10-15T15:05:26.250 | 2026-10-15T21:02:55.093 |  | PK PK_DATMB51([IDPD]) | sp_merma_contabilizar; API genérica | EXCLUIR: `dto.FCNC` se acepta en alta/actualización |
 | `DAT_MB51.FCND` | datetime | 948 | 0 | 2026-10-15T15:05:26.013 | 2026-10-15T21:02:54.730 |  | PK PK_DATMB51([IDPD]) |  | PENDIENTE: trazar escritor/semántica |
 | `DAT_RET_CTR_SVR.FCNR` | datetime | 3 | 0 | 2026-10-15T19:46:13.457 | 2026-10-15T20:18:14.320 |  | PK PK_DATRETCTRSVR([IDRET]) |  | PENDIENTE: trazar escritor/semántica |
 | `DOC_CTRL_MERMA.FCND` | datetime | 1 | 0 | 2026-10-15T19:20:44.443 | 2026-10-15T19:20:44.443 |  | PK PK_DOCMER([DOCMER]) |  | PENDIENTE: trazar escritor/semántica |
@@ -78,7 +215,7 @@
 | `FACT_CFDI_EMAIL_OUTBOX.ACTUALIZADO_EN` | datetime2 | 9 | 0 | 2026-10-15T18:58:02 | 2026-10-15T20:45:01 | (sysdatetime()) | PK PK_FACT_CFDI_EMAIL_OUTBOX([ID]) |  | CANDIDATO: default de reloj de sistema |
 | `FACT_CFDI_EMAIL_OUTBOX.CREADO_EN` | datetime2 | 9 | 0 | 2026-10-15T18:57:08 | 2026-10-15T20:44:44 | (sysdatetime()) | PK PK_FACT_CFDI_EMAIL_OUTBOX([ID]) |  | CANDIDATO: default de reloj de sistema |
 | `FACT_CFDI_EMAIL_OUTBOX.ENVIADO_EN` | datetime2 | 9 | 0 | 2026-10-15T18:58:02 | 2026-10-15T20:45:01 |  | PK PK_FACT_CFDI_EMAIL_OUTBOX([ID]) |  | PENDIENTE: trazar escritor/semántica |
-| `FACT_CFDI_FOLIOS_DIARIOS.FCN_TIMBRADO` | datetime | 9 | 0 | 2026-10-15T18:57:07.447 | 2026-10-15T20:44:44.203 |  | PK PK_FACT_CFDI_FOLIOS_DIARIOS([ID]) |  | PENDIENTE: trazar escritor/semántica |
+| `FACT_CFDI_FOLIOS_DIARIOS.FCN_TIMBRADO` | datetime | 9 | 0 | 2026-10-15T18:57:07.447 | 2026-10-15T20:44:44.203 |  | PK PK_FACT_CFDI_FOLIOS_DIARIOS([ID]) | sp_fact_cfdi_serie_update_status | CANDIDATO: el SP asigna `GETDATE()` al cambiar a TIMBRADO; no acepta fecha del DTO |
 | `FACT_CFDI_FOLIOS_DIARIOS.FCNC` | datetime | 9 | 0 | 2026-10-15T16:44:28.407 | 2026-10-15T20:44:41.813 | (getdate()) | PK PK_FACT_CFDI_FOLIOS_DIARIOS([ID]) |  | CANDIDATO: default de reloj de sistema |
 | `FACT_CFDI_FOLIOS_DIARIOS.FCNM` | datetime | 9 | 0 | 2026-10-15T18:57:07.447 | 2026-10-15T20:44:44.203 | (getdate()) | PK PK_FACT_CFDI_FOLIOS_DIARIOS([ID]) | sp_fact_cfdi_serie_reserve, sp_fact_cfdi_serie_update_status | CANDIDATO: default de reloj de sistema |
 | `FACT_CLIENT_SHP.FCNR` | datetime | 1 | 0 | 2026-10-15T20:27:19.263 | 2026-10-15T20:27:19.263 |  | PK PK_IDC([IDC]) |  | PENDIENTE: trazar escritor/semántica |
@@ -86,16 +223,16 @@
 | `PROMO_CAB.FCN_TER` | datetime | 3 | 3 | 2026-12-31T00:00:00 | 2027-01-01T00:00:00 |  | PK PK_IDPROMCAB([ID_PROM]) |  | EXCLUIR/BLOQUEAR: Fin de promoción válida a futuro |
 | `PROMO_TICKET_DESC_APLI.FCNDES` | datetime | 86 | 0 | 2026-10-15T15:24:56.457 | 2026-10-15T20:52:44.450 | (getdate()) | PK PK_PROMO_TICKET_DESC_APLI([ID_APLI]) |  | CANDIDATO: default de reloj de sistema |
 | `PV_CTR_FOL_ASVR.FCN` | datetime | 253 | 0 | 2026-10-15T15:10:48.887 | 2026-10-15T21:02:36.030 |  | PK PK_CTR_FOL([IDFOL]) |  | PENDIENTE: trazar escritor/semántica |
-| `PV_CTR_FOL_ASVR.FCNM` | datetime | 280 | 0 | 2026-10-15T15:05:26.013 | 2026-10-15T21:02:54.730 |  | PK PK_CTR_FOL([IDFOL]) | sp_ps_form_delete, sp_ps_terminar, sp_ps_ticket_add_service, sp_ps_procesar, sp_ps_form_add, sp_ps_folio_set_cliente | CANDIDATO: escritor usa reloj de sistema |
+| `PV_CTR_FOL_ASVR.FCNM` | datetime | 280 | 0 | 2026-10-15T15:05:26.013 | 2026-10-15T21:02:54.730 |  | PK PK_CTR_FOL([IDFOL]) | API create/update | EXCLUIR: `dto.FCNM` se acepta en alta/actualización |
 | `PV_CTR_FOL_FORM.FCN` | datetime | 245 | 0 | 2026-10-15T15:05:26.013 | 2026-10-15T21:02:54.730 |  | PK PK_PVCTRFOLFORM([IDF]) |  | PENDIENTE: trazar escritor/semántica |
-| `PV_CTR_ORDS.FCN_AUT_CYM` | datetime | 8 | 0 | 2026-10-15T15:14:33.580 | 2026-10-15T20:06:46.440 |  | PK PK_PVCTRORDS([IORD]) |  | PENDIENTE: trazar escritor/semántica |
-| `PV_CTR_ORDS.FCNAS` | datetime | 143 | 0 | 2026-10-15T15:04:00.133 | 2026-10-15T20:57:23.793 |  | PK PK_PVCTRORDS([IORD]) | sp_ordenes_trabajo_asignar_lote | CANDIDATO: escritor usa reloj de sistema |
+| `PV_CTR_ORDS.FCN_AUT_CYM` | datetime | 8 | 0 | 2026-10-15T15:14:33.580 | 2026-10-15T20:06:46.440 |  | PK PK_PVCTRORDS([IORD]) | ordenes-trabajo.service.ts | CANDIDATO: servicio fija `GETDATE()` al autorizar cambio/merma; no acepta fecha en DTO |
+| `PV_CTR_ORDS.FCNAS` | datetime | 143 | 0 | 2026-10-15T15:04:00.133 | 2026-10-15T20:57:23.793 |  | PK PK_PVCTRORDS([IORD]) | API update DTO; SP de asignación | EXCLUIR: `dto.FCNAS` se acepta en actualización |
 | `PV_CTR_ORDS.FCNEN` | datetime | 81 | 0 | 2026-10-15T15:04:25.143 | 2026-10-15T20:27:51.297 |  | PK PK_PVCTRORDS([IORD]) | sp_ordenes_trabajo_entregar_lote | CANDIDATO: escritor usa reloj de sistema |
 | `PV_CTR_ORDS.FCNM` | datetime | 82 | 75 | 2026-10-15T18:00:00 | 2026-10-22T00:00:00 |  | PK PK_PVCTRORDS([IORD]) |  | EXCLUIR/BLOQUEAR: Fecha operativa/entrega futura, no timestamp de alta |
-| `PV_CTR_ORDS.FCNMOD` | datetime | 278 | 0 | 2026-10-15T15:04:25.143 | 2026-10-15T21:01:36.950 |  | PK PK_PVCTRORDS([IORD]) | sp_ordenes_trabajo_aplicar_merma_cambio, sp_ordenes_trabajo_set_estado, sp_ordenes_trabajo_enviar, sp_ordenes_trabajo_recibir, sp_ordenes_trabajo_cambio_material, sp_ordenes_trabajo_merma, sp_ordenes_trabajo_enviar_lote, sp_ordenes_trabajo_recibir_lote, sp_ordenes_trabajo_entregar_lote, sp_ordenes_trabajo_asignar_lote, sp_ordenes_trabajo_asignar_laboratorio_lote, sp_ordenes_trabajo_trabajo_terminado_lote, sp_ordenes_trabajo_regresar_incidencia_lote, sp_ordenes_trabajo_regresar_tienda_lote, sp_ordenes_trabajo_anular_lote | CANDIDATO: escritor usa reloj de sistema |
-| `PV_CTR_ORDS.FCNRT` | datetime | 101 | 0 | 2026-10-15T15:04:18.073 | 2026-10-15T20:57:31.807 |  | PK PK_PVCTRORDS([IORD]) | sp_ordenes_trabajo_recibir, sp_ordenes_trabajo_regresar_tienda_lote | CANDIDATO: escritor usa reloj de sistema |
+| `PV_CTR_ORDS.FCNMOD` | datetime | 278 | 0 | 2026-10-15T15:04:25.143 | 2026-10-15T21:01:36.950 |  | PK PK_PVCTRORDS([IORD]) | API update DTO; SP de órdenes | EXCLUIR: `dto.FCNMOD` se acepta en actualización |
+| `PV_CTR_ORDS.FCNRT` | datetime | 101 | 0 | 2026-10-15T15:04:18.073 | 2026-10-15T20:57:31.807 |  | PK PK_PVCTRORDS([IORD]) | API update DTO; SP de recepción | EXCLUIR: `dto.FCNRT` se acepta en actualización |
 | `PV_CTR_ORDS.FCNS` | datetime | 217 | 0 | 2026-10-15T15:05:36.843 | 2026-10-15T21:01:47.140 |  | PK PK_PVCTRORDS([IORD]) |  | PENDIENTE: trazar escritor/semántica |
-| `PV_CTR_ORDS.FCNTD` | datetime | 130 | 0 | 2026-10-15T15:50:39.623 | 2026-10-15T20:48:03.177 |  | PK PK_PVCTRORDS([IORD]) | sp_ordenes_trabajo_trabajo_terminado_lote | CANDIDATO: escritor usa reloj de sistema |
+| `PV_CTR_ORDS.FCNTD` | datetime | 130 | 0 | 2026-10-15T15:50:39.623 | 2026-10-15T20:48:03.177 |  | PK PK_PVCTRORDS([IORD]) | API update DTO; SP trabajo terminado | EXCLUIR: `dto.FCNTD` se acepta en actualización |
 | `PV_CTR_ORDS.HR_ENT` | datetime | 81 | 0 | 2026-10-15T15:04:25.143 | 2026-10-15T20:27:51.297 |  | PK PK_PVCTRORDS([IORD]) | sp_ordenes_trabajo_entregar_lote | CANDIDATO: escritor usa reloj de sistema |
 | `PV_CTR_ORDS_ENTREGA.FCN_ALTA` | datetime | 37 | 0 | 2026-10-15T15:04:25.120 | 2026-10-15T20:27:51.293 | (getdate()) | PK PK_PV_CTR_ORDS_ENTREGA([ID_ENTREGA]) |  | CANDIDATO: default de reloj de sistema |
 | `PV_CTR_ORDS_ENTREGA_DET.FCN_ALTA` | datetime | 80 | 0 | 2026-10-15T15:04:25.130 | 2026-10-15T20:27:51.297 | (getdate()) | PK PK_PV_CTR_ORDS_ENTREGA_DET([ID_ENTREGA_DET]) |  | CANDIDATO: default de reloj de sistema |

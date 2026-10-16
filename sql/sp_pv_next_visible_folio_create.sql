@@ -17,7 +17,11 @@ BEGIN
   DECLARE @startedTran BIT = 0;
   DECLARE @sucNorm NVARCHAR(20) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
   DECLARE @tipoNorm VARCHAR(2) = UPPER(LTRIM(RTRIM(ISNULL(@TIPO_FOLIO, ''))));
-  DECLARE @fechaNorm DATE = ISNULL(@FECHA, CONVERT(DATE, GETDATE()));
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
+  DECLARE @fechaNorm DATE = ISNULL(@FECHA, CONVERT(DATE, @processNow));
   DECLARE @lockResource NVARCHAR(120);
   DECLARE @lockResult INT;
 
@@ -68,7 +72,7 @@ BEGIN
       UPDATE dbo.DAT_FOLIOS_CONSEC
       SET
         ULTIMO_CONSEC = ULTIMO_CONSEC + 1,
-        FCNM = GETDATE()
+        FCNM = @processNow
       OUTPUT inserted.ULTIMO_CONSEC INTO @nextConsec (CONSEC)
       WHERE SUC = @sucNorm
         AND FECHA = @fechaNorm
@@ -88,7 +92,7 @@ BEGIN
         @fechaNorm,
         @tipoNorm,
         1,
-        GETDATE()
+        @processNow
       );
 
       INSERT INTO @nextConsec (CONSEC)

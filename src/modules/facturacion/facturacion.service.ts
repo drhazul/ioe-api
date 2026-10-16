@@ -11,6 +11,7 @@ import { DataSource, QueryFailedError } from 'typeorm';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { FactClientShpService } from '../factclientshp/factclientshp.service';
 import type { UpdateFactClientShpDto } from '../factclientshp/dto/update-factclientshp.dto';
+import { fechaCfdi } from '../cfdi/fecha-expedicion';
 import { FacturifyClient } from './facturify.client';
 import { constants as fsConstants } from 'node:fs';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -158,11 +159,7 @@ export class FacturacionService {
   }
 
   private dayFolder() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return fechaCfdi().slice(0, 10);
   }
 
   private async getFacSvrShapColumns(): Promise<Set<string>> {
@@ -2534,13 +2531,7 @@ SET NUMERIC_ROUNDABORT OFF;`;
   }
 
   private toDateYmdHis(date = new Date()) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    const hh = String(date.getHours()).padStart(2, '0');
-    const mm = String(date.getMinutes()).padStart(2, '0');
-    const ss = String(date.getSeconds()).padStart(2, '0');
-    return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+    return fechaCfdi(date).replace('T', ' ');
   }
 
   private async resolveEmisor(rfcEmisor: string) {
@@ -2926,7 +2917,7 @@ SET NUMERIC_ROUNDABORT OFF;`;
     const facColumns = await this.getFacSvrShapColumns();
     const setFcnfSql = facColumns.has('FCNF')
       ? `,
-             FCNF=CASE WHEN @3='TIMBRADO' THEN GETDATE() ELSE FCNF END`
+             FCNF=CASE WHEN @3='TIMBRADO' THEN @processNow ELSE FCNF END`
       : '';
     const newStatus = timbrado.ok ? 'FACTURADO' : 'PENDIENTE';
     const controlStatus = timbrado.ok ? 'TIMBRADO' : 'ERROR_EMISION';
@@ -2935,14 +2926,18 @@ SET NUMERIC_ROUNDABORT OFF;`;
       : JSON.stringify(timbrado.data).slice(0, 500);
     await this.dataSource.transaction(async (manager) => {
       await manager.query(
-        `UPDATE FAC_SVR_SHAP
+        `DECLARE @processNow DATETIME = CAST(
+           SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+           AS DATETIME
+         );
+         UPDATE FAC_SVR_SHAP
            SET ESTATUS=@1,
                CFDI_UUID=@2,
                CFDI_STATUS=@3,
                CFDI_XML_PATH=@4,
                CFDI_PDF_PATH=@5,
                CFDI_FACTURIFY_JOB_ID=@6,
-               CFDI_F_TIMBRADO=CASE WHEN @3='TIMBRADO' THEN GETDATE() ELSE CFDI_F_TIMBRADO END${setFcnfSql},
+               CFDI_F_TIMBRADO=CASE WHEN @3='TIMBRADO' THEN @processNow ELSE CFDI_F_TIMBRADO END${setFcnfSql},
                CFDI_ERROR_MSG=@7
          WHERE IDFOL=@0`,
         [
@@ -3203,10 +3198,14 @@ SET NUMERIC_ROUNDABORT OFF;`;
       : JSON.stringify(cancelRes.data).slice(0, 500);
     await this.dataSource.transaction(async (manager) => {
       await manager.query(
-        `UPDATE FAC_SVR_SHAP
+        `DECLARE @processNow DATETIME = CAST(
+           SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+           AS DATETIME
+         );
+         UPDATE FAC_SVR_SHAP
            SET CFDI_CANCEL_STATUS=@1,
                ESTATUS=@2,
-               CFDI_F_CANCELACION=CASE WHEN @1='CANCELACION_PENDIENTE' THEN GETDATE() ELSE CFDI_F_CANCELACION END,
+               CFDI_F_CANCELACION=CASE WHEN @1='CANCELACION_PENDIENTE' THEN @processNow ELSE CFDI_F_CANCELACION END,
                CFDI_ERROR_MSG=@3
          WHERE IDFOL=@0`,
         [

@@ -14,7 +14,7 @@ BEGIN
   DECLARE @sql NVARCHAR(MAX);
 
   DECLARE @folioReqfExpr NVARCHAR(64) = N'0';
-  DECLARE @folioFechaExpr NVARCHAR(64) = N'GETDATE()';
+  DECLARE @folioFechaExpr NVARCHAR(64) = N'@pNOW';
   DECLARE @folioWhere NVARCHAR(128) = N'IDFOL = @pIDFOL';
   DECLARE @folioOrder NVARCHAR(200) = N'ORDER BY CASE WHEN IDFOL = @pIDFOL THEN 0 ELSE 1 END';
 
@@ -28,7 +28,10 @@ BEGIN
   DECLARE @reqf INT = 0;
   DECLARE @syncEligible BIT = 0;
   DECLARE @folioFecha DATETIME = NULL;
-  DECLARE @fechaProceso DATETIME = GETDATE();
+  DECLARE @fechaProceso DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
   DECLARE @fcns NVARCHAR(20);
 
   DECLARE @ivaIntegrado INT = 1;
@@ -132,14 +135,15 @@ BEGIN
 
     EXEC sys.sp_executesql
       @sql,
-      N'@pIDFOL NVARCHAR(255), @pIDFOL_OUT NVARCHAR(255) OUTPUT, @pSUC NVARCHAR(255) OUTPUT, @pAUT NVARCHAR(20) OUTPUT, @pCLIEN FLOAT OUTPUT, @pREQF INT OUTPUT, @pFCN DATETIME OUTPUT',
+      N'@pIDFOL NVARCHAR(255), @pIDFOL_OUT NVARCHAR(255) OUTPUT, @pSUC NVARCHAR(255) OUTPUT, @pAUT NVARCHAR(20) OUTPUT, @pCLIEN FLOAT OUTPUT, @pREQF INT OUTPUT, @pFCN DATETIME OUTPUT, @pNOW DATETIME',
       @pIDFOL = @idfolNorm,
       @pIDFOL_OUT = @idfolActual OUTPUT,
       @pSUC = @suc OUTPUT,
       @pAUT = @aut OUTPUT,
       @pCLIEN = @clien OUTPUT,
       @pREQF = @reqfRaw OUTPUT,
-      @pFCN = @folioFecha OUTPUT;
+      @pFCN = @folioFecha OUTPUT,
+      @pNOW = @fechaProceso;
 
     IF ISNULL(@idfolActual, '') = ''
       THROW 51045, 'No existe folio para sincronización de facturación', 1;
@@ -176,7 +180,7 @@ BEGIN
       RETURN;
     END;
     SET @clienFac = @clien;
-    SET @fechaProceso = ISNULL(@folioFecha, GETDATE());
+    SET @fechaProceso = ISNULL(@folioFecha, @fechaProceso);
     SET @fcns = CONCAT(DAY(@fechaProceso), MONTH(@fechaProceso), YEAR(@fechaProceso));
 
     IF COL_LENGTH('dbo.FAC_SVR_SHAP', 'CLIEN') IS NOT NULL

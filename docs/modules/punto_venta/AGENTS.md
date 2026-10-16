@@ -1,5 +1,10 @@
 # Punto de venta (AGENTS API)
 
+## Fecha de proceso de folios, MB51 y CFDI (2026-10-15)
+- Los timestamps generados por sistema para `PV_CTR_FOL_ASVR`, `PV_CTR_FOL_FORM(_SVR)`, `DAT_FOLIOS_CONSEC`, staging de devoluciones, `DAT_MB51`, facturación y control CFDI se calculan con reloj UTC convertido a hora local de México.
+- El consecutivo CP/CA/VF usa fecha local de proceso. Las fechas explícitas o editables recibidas de negocio no se normalizan.
+- Aplicar SQL de `sp_pvctrfolasvr_create`, `sp_pv_next_visible_folio`, cierre, transmisión MB51 y facturación junto con API; los datos históricos quedan fuera de esta corrección.
+
 Navega a otros README/AGENTS solo cuando sea necesario.
 
 Enlaces relacionados:

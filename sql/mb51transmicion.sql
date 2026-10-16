@@ -95,7 +95,10 @@ BEGIN
   DECLARE @isSkipped BIT = 0;
   DECLARE @skipReason NVARCHAR(120) = '';
   DECLARE @estaFinal NVARCHAR(40) = '';
-  DECLARE @processNow DATETIME = GETDATE();
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
 
   IF @idfolNorm = ''
     THROW 57201, 'IDFOL es requerido', 1;

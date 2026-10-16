@@ -16,8 +16,11 @@ BEGIN
   DECLARE @tipotranNorm NVARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPOTRAN, ''))));
   DECLARE @opvNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@IDOPV, ''))), '');
   DECLARE @epsilon DECIMAL(18, 6) = 0.0001;
-  DECLARE @fechaProceso DATETIME = GETDATE();
-  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, GETDATE());
+  DECLARE @fechaProceso DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
+  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, @fechaProceso);
 
   DECLARE @idfolActual NVARCHAR(255);
   DECLARE @idfolInicial NVARCHAR(255);

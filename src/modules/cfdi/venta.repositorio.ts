@@ -213,14 +213,18 @@ export class VentaRepositorio {
    */
   async marcarCancelacionSolicitada(idFol: string): Promise<void> {
     await this.dataSource.query(
-      `UPDATE dbo.FAC_SVR_SHAP
+      `DECLARE @processNow DATETIME = CAST(
+         SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+         AS DATETIME
+       );
+       UPDATE dbo.FAC_SVR_SHAP
           SET CFDI_CANCEL_STATUS = 'CANCELACION_PENDIENTE',
               ESTATUS = 'PENDIENTE',
               -- Vuelve a la bandeja de pendientes CON LA FECHA DE HOY: si
               -- conservara la de la venta, quedaria enterrado entre los
               -- folios viejos y seria imposible de encontrar.
-              FCNF = GETDATE(),
-              CFDI_F_CANCELACION = GETDATE()
+              FCNF = @processNow,
+              CFDI_F_CANCELACION = @processNow
         WHERE IDFOL = @0`,
       [idFol],
     );
@@ -239,12 +243,16 @@ export class VentaRepositorio {
    */
   async marcarCancelado(idFol: string): Promise<void> {
     await this.dataSource.query(
-      `UPDATE dbo.FAC_SVR_SHAP
+      `DECLARE @processNow DATETIME = CAST(
+         SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+         AS DATETIME
+       );
+       UPDATE dbo.FAC_SVR_SHAP
           SET CFDI_STATUS = 'CANCELADO',
               CFDI_CANCEL_STATUS = 'CANCELADO_CONFIRMADO',
               ESTATUS = 'PENDIENTE',
-              FCNF = GETDATE(),
-              CFDI_F_CANCELACION = COALESCE(CFDI_F_CANCELACION, GETDATE())
+              FCNF = @processNow,
+              CFDI_F_CANCELACION = COALESCE(CFDI_F_CANCELACION, @processNow)
         WHERE IDFOL = @0`,
       [idFol],
     );
@@ -263,14 +271,18 @@ export class VentaRepositorio {
     xmlPath?: string | null;
   }): Promise<void> {
     await this.dataSource.query(
-      `UPDATE dbo.FAC_SVR_SHAP
+      `DECLARE @processNow DATETIME = CAST(
+         SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+         AS DATETIME
+       );
+       UPDATE dbo.FAC_SVR_SHAP
           SET CFDI_UUID = @1,
               CFDI_STATUS = 'TIMBRADO',
               CFDI_PAC = 'QUADRUM',
-              CFDI_F_TIMBRADO = GETDATE(),
+              CFDI_F_TIMBRADO = @processNow,
               -- El listado de FACTURADO ordena por FCNF, no por FCN: sin
               -- esta fecha el folio se va hasta la ultima pagina.
-              FCNF = COALESCE(FCNF, GETDATE()),
+              FCNF = COALESCE(FCNF, @processNow),
               CFDI_XML_PATH = COALESCE(@2, CFDI_XML_PATH),
               CFDI_ERROR_MSG = NULL,
               -- Si el folio venia de una cancelacion, el CFDI nuevo NO esta

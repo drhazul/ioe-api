@@ -1410,7 +1410,10 @@ export class PvDevolucionesService {
       DECLARE @sucNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@0, '')));
       DECLARE @opvNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@1, '')));
       DECLARE @terNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@2, ''))), '');
-      DECLARE @now DATETIME = GETDATE();
+      DECLARE @now DATETIME = CAST(
+        SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+        AS DATETIME
+      );
       DECLARE @nextTra INT;
       DECLARE @idfol NVARCHAR(255);
 
@@ -1609,7 +1612,10 @@ export class PvDevolucionesService {
         ISNULL(src.CTDDF, 0) AS CTDDF,
         ISNULL(src.CTD, 0) - ISNULL(src.CTDDF, 0) AS DIFD,
         NULL AS CTDD,
-        GETDATE() AS FCNR
+        CAST(
+          SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+          AS DATETIME2(0)
+        ) AS FCNR
       FROM dbo.PV_TICKET_LOG src
       WHERE src.IDFOL = @1
         AND (ISNULL(src.CTD, 0) - ISNULL(src.CTDDF, 0)) > 0

@@ -1,43 +1,62 @@
 /*
   Correccion acotada de timestamps de evento escritos con reloj de sistema.
 
-  VALIDA es modo predeterminado: solo lee metadata/datos y muestra conteos.
-  APLICA requiere corte UTC fijado, hash/conteo de una validacion previa,
-  reconocimiento de targets sin llave y revision de la reversa. No ejecutar
-  en produccion sin autorizacion separada y preflight fresco.
+  VALIDAR es modo predeterminado: solo lee metadata/datos y muestra conteos.
+  APLICAR por lote exacto exige corte UTC, hash/conteo aprobados y reversa.
+  APLICAR dinamico exige autorizacion separada del alcance; fija el corte al
+  iniciar transaccion, recalcula/actualiza bajo locks, aborta si hay targets
+  elegibles sin llave, y conserva ledger reversible. Ambos modos quedan apagados.
 
   Regla: asumir UTC para el valor sin zona y convertir con
   Central Standard Time (Mexico). Ventana: > hora Mexico y <= corte UTC.
   Fechas futuras de negocio no se incluyen. AUDIT_LOG.FCNR se excluye porque
   conserva evidencia UTC y su default vivo difiere del SQL versionado.
   PV_CTR_ORDS.FCNM y las fechas de entrega/programacion se excluyen por contrato.
-  Whitelist estatica revisada: defaults de reloj actuales y escrituras de reloj
-  verificadas. No incorpora automaticamente columnas descubiertas despues.
+  Whitelist estatica revisada: asignaciones del reloj del sistema no editables
+  por usuario. No incluir campos aceptados desde DTOs aunque existan SP que
+  tambien les asignen GETDATE(). No incorpora columnas nuevas automaticamente.
 */
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-DECLARE @Aplicar bit = 0; -- 0 = VALIDAR; cambiar a 1 solo tras aprobacion fresca.
+DECLARE @Aplicar bit = 0; -- 0 = VALIDAR; cualquier modo de escritura exige autorizacion.
+DECLARE @AlcanceDinamicoAutorizado bit = 0; -- 1 solo con autorizacion explicita del alcance acotado.
 DECLARE @CorteUtcConfirmado datetime2(7) = NULL; -- copiar de VALIDAR para APLICAR.
 DECLARE @CeldasEsperadas bigint = NULL;
 DECLARE @HashPlanEsperado varchar(64) = NULL;
 DECLARE @BloqueadasReconocidas bigint = NULL; -- DAT_CONT_CTRL.FCNR no tiene llave unica.
 DECLARE @ReversaPreparada bit = 0; -- requiere revisar sql/2026-10-15_revertir_timestamps_evento_utc_mexico.sql.
 DECLARE @BatchId uniqueidentifier = NULL;
+DECLARE @CorteUtc datetime2(7) = NULL;
+DECLARE @HoraMexico datetime2(7) = NULL;
 
 IF DB_NAME() <> N'IOELOCAL'
   THROW 51100, 'Destino rechazado: se esperaba IOELOCAL.', 1;
 
 IF @Aplicar = 1
 BEGIN
-  IF @CorteUtcConfirmado IS NULL OR @CeldasEsperadas IS NULL OR @HashPlanEsperado IS NULL
-    THROW 51101, 'APLICAR requiere corte UTC, conteo esperado y hash de VALIDAR.', 1;
-  IF @BloqueadasReconocidas IS NULL
-    THROW 51102, 'APLICAR requiere reconocer el conteo de targets sin llave estable.', 1;
   IF @ReversaPreparada <> 1
     THROW 51103, 'APLICAR bloqueado: preparar y revisar reversa antes de DML.', 1;
+  IF @AlcanceDinamicoAutorizado = 1
+  BEGIN
+    IF @CorteUtcConfirmado IS NOT NULL OR @CeldasEsperadas IS NOT NULL
+       OR @HashPlanEsperado IS NOT NULL OR @BloqueadasReconocidas IS NOT NULL
+      THROW 51115, 'El modo de alcance dinamico no acepta corte/hash/conteo de snapshot anterior.', 1;
+  END
+  ELSE
+  BEGIN
+    IF @CorteUtcConfirmado IS NULL OR @CeldasEsperadas IS NULL OR @HashPlanEsperado IS NULL
+      THROW 51101, 'APLICAR requiere corte UTC, conteo esperado y hash de VALIDAR.', 1;
+    IF @BloqueadasReconocidas IS NULL
+      THROW 51102, 'APLICAR requiere reconocer el conteo de targets sin llave estable.', 1;
+  END;
   SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
   BEGIN TRANSACTION;
+  -- En el modo dinamico, fijar ventana en cuanto abre la transaccion. El
+  -- conjunto se calcula y aplica bajo los locks de la misma transaccion.
+  SET @CorteUtc = COALESCE(@CorteUtcConfirmado, SYSUTCDATETIME());
+  SET @HoraMexico = CONVERT(datetime2(7),
+    @CorteUtc AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
   DECLARE @LockResult int;
   EXEC @LockResult = sys.sp_getapplock
     @Resource = N'IOELOCAL:event-timestamp-utc-mexico-repair',
@@ -45,12 +64,17 @@ BEGIN
     @LockOwner = N'Transaction',
     @LockTimeout = 10000;
   IF @LockResult < 0
+  BEGIN
+    ROLLBACK TRANSACTION;
     THROW 51104, 'No se obtuvo el bloqueo de migracion.', 1;
+  END;
 END;
-
-DECLARE @CorteUtc datetime2(7) = COALESCE(@CorteUtcConfirmado, SYSUTCDATETIME());
-DECLARE @HoraMexico datetime2(7) = CONVERT(datetime2(7),
-  @CorteUtc AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+ELSE
+BEGIN
+  SET @CorteUtc = COALESCE(@CorteUtcConfirmado, SYSUTCDATETIME());
+  SET @HoraMexico = CONVERT(datetime2(7),
+    @CorteUtc AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+END;
 
 CREATE TABLE #Whitelist
 (
@@ -130,22 +154,17 @@ IF EXISTS
 )
   THROW 51114, 'Target de whitelist ausente o ya no es datetime/datetime2; revisar plan.', 1;
 
--- Asignaciones explicitas de reloj verificadas en modulos SQL/API desplegados.
--- Fechas de entrega/programacion, FCNM de ORD y fechas de negocio quedan fuera.
+-- Asignaciones explicitas de reloj verificadas en modulos SQL/API versionados.
+-- Excluye fechas aceptadas desde DTO: DAT_MB51.FCNC, PV_CTR_FOL_ASVR.FCNM,
+-- y PV_CTR_ORDS.FCNRT/FCNAS/FCNTD/FCNMOD. Fechas de negocio tambien se excluyen.
 INSERT INTO #Whitelist (schema_name, table_name, column_name, source_evidence)
 SELECT N'dbo', v.table_name, v.column_name, v.evidence
 FROM (VALUES
   (N'DAT_ART_MASIVA_TMP', N'PROCESADO_EN', N'sp_datart_massive_apply: evento de proceso'),
-  (N'DAT_MB51', N'FCNC', N'sp_merma_contabilizar: hora de alta del movimiento'),
   (N'DOC_CTRL_MERMA', N'FCNM', N'SP de flujo de merma: hora de modificacion'),
   (N'FAC_SVR_SHAP', N'FCNF', N'facturacion.service.ts: GETDATE al timbrar'),
   (N'FAC_SVR_SHAP', N'CFDI_F_TIMBRADO', N'facturacion.service.ts: GETDATE al timbrar'),
   (N'FACT_CFDI_FOLIOS_DIARIOS', N'FCN_TIMBRADO', N'SP de folios CFDI: evento de timbrado'),
-  (N'PV_CTR_FOL_ASVR', N'FCNM', N'SP de punto de venta: evento de modificacion'),
-  (N'PV_CTR_ORDS', N'FCNRT', N'SP de ordenes: evento de recepcion'),
-  (N'PV_CTR_ORDS', N'FCNAS', N'SP de ordenes: evento de asignacion'),
-  (N'PV_CTR_ORDS', N'FCNTD', N'SP de ordenes: evento de trabajo terminado'),
-  (N'PV_CTR_ORDS', N'FCNMOD', N'SP/API de ordenes: evento de modificacion'),
   (N'PV_CTR_ORDS', N'FCN_AUT_CYM', N'ordenes-trabajo.service.ts: GETDATE al autorizar'),
   (N'PV_TICKET_LOG', N'updated_at', N'SP de tickets: evento de actualizacion'),
   (N'PV_DEV_DET_TMP', N'FCNR', N'pv-devoluciones.service.ts: GETDATE() AS FCNR'),
@@ -332,8 +351,8 @@ SET @HashPlan = CONVERT(varchar(64), HASHBYTES('SHA2_256', COALESCE(@DigestText,
 
 SELECT
   DB_NAME() AS database_name,
-  @CorteUtc AS corte_utc,
-  @HoraMexico AS hora_mexico,
+  CONVERT(varchar(33), @CorteUtc, 126) AS corte_utc,
+  CONVERT(varchar(33), @HoraMexico, 126) AS hora_mexico,
   @CeldasListas AS celdas_lista_con_llave,
   @CeldasBloqueadas AS celdas_bloqueadas_sin_llave,
   @HashPlan AS hash_plan,
@@ -346,15 +365,21 @@ ORDER BY schema_name, table_name, column_name;
 
 IF @Aplicar = 0 RETURN;
 
-IF @CeldasEsperadas <> @CeldasListas OR @HashPlanEsperado <> @HashPlan
+IF @AlcanceDinamicoAutorizado = 0
+   AND (@CeldasEsperadas <> @CeldasListas OR @HashPlanEsperado <> @HashPlan)
 BEGIN
   IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
   THROW 51105, 'El corte actual no coincide con conteo/hash aprobado; no se modifica nada.', 1;
 END;
-IF @BloqueadasReconocidas <> @CeldasBloqueadas
+IF @AlcanceDinamicoAutorizado = 0 AND @BloqueadasReconocidas <> @CeldasBloqueadas
 BEGIN
   IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
   THROW 51106, 'El conteo de columnas sin llave no coincide con el reconocido.', 1;
+END;
+IF @AlcanceDinamicoAutorizado = 1 AND @CeldasBloqueadas <> 0
+BEGIN
+  IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+  THROW 51116, 'Alcance dinamico bloqueado: hay celdas elegibles sin llave estable.', 1;
 END;
 IF @CeldasListas = 0
 BEGIN
@@ -429,6 +454,11 @@ BEGIN TRY
 
   COMMIT TRANSACTION;
   SELECT @BatchId AS batch_id, @RowsChanged AS celdas_actualizadas,
+    CONVERT(varchar(33), @CorteUtc, 126) AS corte_utc_aplicado,
+    CONVERT(varchar(33), @HoraMexico, 126) AS hora_mexico_aplicada,
+    @CeldasBloqueadas AS celdas_bloqueadas,
+    @HashPlan AS hash_plan_aplicado,
+    CASE WHEN @AlcanceDinamicoAutorizado = 1 THEN N'ALCANCE_DINAMICO' ELSE N'LOTE_HASH_EXACTO' END AS modo_autorizacion,
     N'Ledger conservado; sql/2026-10-15_revertir_timestamps_evento_utc_mexico.sql permite reversa con validacion de valor actual.' AS resultado;
 END TRY
 BEGIN CATCH
