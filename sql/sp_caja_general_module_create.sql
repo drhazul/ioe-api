@@ -249,9 +249,12 @@ BEGIN
   DECLARE @sucNorm VARCHAR(25) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
   DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@OPV, ''))));
   DECLARE @tipoNorm VARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPO_CORTE, 'GLOBAL'))));
-  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
+  DECLARE @hoyMexico DATE = CONVERT(DATE, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), @hoyMexico);
   DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
   DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
+  DECLARE @retirosInicioUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), @fcnDate) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
+  DECLARE @retirosFinUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), DATEADD(DAY, 1, @fcnDate)) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
 
   IF @tipoNorm NOT IN ('CA', 'VF', 'GLOBAL')
     SET @tipoNorm = 'GLOBAL';
@@ -363,8 +366,8 @@ BEGIN
       FROM dbo.DAT_RET_CTR_SVR r
       INNER JOIN dbo.DAT_RET_DET_SVR d ON d.IDRET = r.IDRET
       WHERE UPPER(LTRIM(RTRIM(ISNULL(r.OPV, '')))) = @opvNorm
-        AND r.FCNR >= @dtIni
-        AND r.FCNR < @dtFin
+        AND r.FCNR >= @retirosInicioUtc
+        AND r.FCNR < @retirosFinUtc
         AND UPPER(LTRIM(RTRIM(ISNULL(r.ESTA, '')))) NOT IN ('CANCELADO', 'CANCEL', 'ANULADO')
       GROUP BY dbo.fn_cg_normalize_forma(d.FORMA)
     ),
@@ -651,9 +654,12 @@ BEGIN
   DECLARE @sucNorm VARCHAR(25) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
   DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@OPV, ''))));
   DECLARE @tipoNorm VARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPO_CORTE, 'GLOBAL'))));
-  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
+  DECLARE @hoyMexico DATE = CONVERT(DATE, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), @hoyMexico);
   DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
   DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
+  DECLARE @retirosInicioUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), @fcnDate) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
+  DECLARE @retirosFinUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), DATEADD(DAY, 1, @fcnDate)) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
 
   IF @tipoNorm NOT IN ('CA', 'VF', 'GLOBAL')
     SET @tipoNorm = 'GLOBAL';
@@ -715,8 +721,8 @@ BEGIN
     FROM dbo.DAT_RET_CTR_SVR r
     INNER JOIN dbo.DAT_RET_DET_SVR d ON d.IDRET = r.IDRET
     WHERE UPPER(LTRIM(RTRIM(ISNULL(r.OPV, '')))) = @opvNorm
-      AND r.FCNR >= @dtIni
-      AND r.FCNR < @dtFin
+      AND r.FCNR >= @retirosInicioUtc
+      AND r.FCNR < @retirosFinUtc
       AND UPPER(LTRIM(RTRIM(ISNULL(r.ESTA, '')))) NOT IN ('CANCELADO', 'CANCEL', 'ANULADO')
     GROUP BY dbo.fn_cg_normalize_forma(d.FORMA)
   ),
@@ -956,9 +962,12 @@ BEGIN
 
   DECLARE @sucNorm VARCHAR(25) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
   DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@OPV, ''))));
-  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
+  DECLARE @hoyMexico DATE = CONVERT(DATE, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), @hoyMexico);
   DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
   DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
+  DECLARE @retirosInicioUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), @fcnDate) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
+  DECLARE @retirosFinUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), DATEADD(DAY, 1, @fcnDate)) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
 
   IF @sucNorm = ''
     THROW 58060, 'SUC es obligatorio', 1;
@@ -977,8 +986,8 @@ BEGIN
   INNER JOIN dbo.DAT_RET_DET_EFEC_SVR e
     ON e.IDFOR = d.ID
   WHERE UPPER(LTRIM(RTRIM(ISNULL(r.OPV, '')))) = @opvNorm
-    AND r.FCNR >= @dtIni
-    AND r.FCNR < @dtFin
+    AND r.FCNR >= @retirosInicioUtc
+    AND r.FCNR < @retirosFinUtc
     AND UPPER(LTRIM(RTRIM(ISNULL(r.ESTA, '')))) NOT IN ('CANCELADO', 'CANCEL', 'ANULADO')
     AND dbo.fn_cg_normalize_forma(d.FORMA) = 'EFECTIVO'
   GROUP BY ISNULL(e.DENO, 0)
@@ -1179,10 +1188,13 @@ BEGIN
   DECLARE @terNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@TER, ''))), '');
   DECLARE @userNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@USER, ''))), '');
   DECLARE @tipoNorm VARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPO_CORTE, 'GLOBAL'))));
-  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
+  DECLARE @hoyMexico DATE = CONVERT(DATE, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), @hoyMexico);
   DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
   DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
-  DECLARE @fechaProceso DATETIME = GETDATE();
+  DECLARE @retirosInicioUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), @fcnDate) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
+  DECLARE @retirosFinUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), DATEADD(DAY, 1, @fcnDate)) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, CONVERT(DATETIME2(7), SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'));
 
   IF @tipoNorm NOT IN ('CA', 'VF', 'GLOBAL')
     SET @tipoNorm = 'GLOBAL';
@@ -1330,8 +1342,8 @@ BEGIN
       FROM dbo.DAT_RET_CTR_SVR r
       INNER JOIN dbo.DAT_RET_DET_SVR d ON d.IDRET = r.IDRET
       WHERE UPPER(LTRIM(RTRIM(ISNULL(r.OPV, '')))) = @opvNorm
-        AND r.FCNR >= @dtIni
-        AND r.FCNR < @dtFin
+        AND r.FCNR >= @retirosInicioUtc
+        AND r.FCNR < @retirosFinUtc
         AND UPPER(LTRIM(RTRIM(ISNULL(r.ESTA, '')))) NOT IN ('CANCELADO', 'CANCEL', 'ANULADO')
       GROUP BY dbo.fn_cg_normalize_forma(d.FORMA)
     ),
@@ -1584,10 +1596,11 @@ BEGIN
   DECLARE @terNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@TER, ''))), '');
   DECLARE @userNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@USER, ''))), '');
   DECLARE @allowHistoric BIT = CASE WHEN ISNULL(@ALLOW_HISTORIC_REACTIVATION, 0) = 1 THEN 1 ELSE 0 END;
-  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
+  DECLARE @hoyMexico DATE = CONVERT(DATE, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), @hoyMexico);
   DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
-  DECLARE @fechaProceso DATETIME = GETDATE();
-  DECLARE @today DATE = CONVERT(DATE, GETDATE());
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, CONVERT(DATETIME2(7), SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'));
+  DECLARE @today DATE = @hoyMexico;
 
   IF @sucNorm = ''
     THROW 58120, 'SUC es obligatorio', 1;
@@ -1748,9 +1761,12 @@ BEGIN
 
   DECLARE @sucNorm VARCHAR(25) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
   DECLARE @tipoNorm VARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPO_CORTE, 'GLOBAL'))));
-  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), CONVERT(DATE, GETDATE()));
+  DECLARE @hoyMexico DATE = CONVERT(DATE, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+  DECLARE @fcnDate DATE = ISNULL(CONVERT(DATE, @FCN), @hoyMexico);
   DECLARE @dtIni DATETIME = CAST(@fcnDate AS DATETIME);
   DECLARE @dtFin DATETIME = DATEADD(DAY, 1, @dtIni);
+  DECLARE @retirosInicioUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), @fcnDate) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
+  DECLARE @retirosFinUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), DATEADD(DAY, 1, @fcnDate)) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
 
   IF @tipoNorm NOT IN ('CA', 'VF', 'GLOBAL')
     SET @tipoNorm = 'GLOBAL';
@@ -1835,8 +1851,8 @@ BEGIN
         ON fo.IDFOL = a.IDFOL
       WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = @sucNorm
     )
-      AND r.FCNR >= @dtIni
-      AND r.FCNR < @dtFin
+      AND r.FCNR >= @retirosInicioUtc
+      AND r.FCNR < @retirosFinUtc
       AND UPPER(LTRIM(RTRIM(ISNULL(r.ESTA, '')))) NOT IN ('CANCELADO', 'CANCEL', 'ANULADO')
     GROUP BY dbo.fn_cg_normalize_forma(d.FORMA)
   ),
@@ -1924,8 +1940,8 @@ BEGIN
       ON d.IDRET = r.IDRET
     INNER JOIN dbo.DAT_RET_DET_EFEC_SVR e
       ON e.IDFOR = d.ID
-    WHERE r.FCNR >= @dtIni
-      AND r.FCNR < @dtFin
+    WHERE r.FCNR >= @retirosInicioUtc
+      AND r.FCNR < @retirosFinUtc
       AND UPPER(LTRIM(RTRIM(ISNULL(r.ESTA, '')))) NOT IN ('CANCELADO', 'CANCEL', 'ANULADO')
       AND dbo.fn_cg_normalize_forma(d.FORMA) = 'EFECTIVO'
     GROUP BY ISNULL(e.DENO, 0)

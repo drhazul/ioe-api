@@ -2,7 +2,9 @@
 
 ## Fecha de proceso en punto de venta y facturación — 2026-10-15
 
-Los folios CP/CA/VF y sellos de cierre, devolución/MB51 y control CFDI convierten reloj UTC a hora local de México. Fechas editables o explícitas de negocio se conservan. Los procedimientos y defaults correspondientes requieren aplicar sus scripts SQL; esta corrección no repara filas históricas.
+Los folios CP/CA/VF y sellos de cierre, devolución/MB51 y control CFDI convierten reloj UTC a hora local de México. Fechas editables o explícitas de negocio se conservan. En `.40:1434/IOELOCAL`, la prevención SQL se aplicó el 2026-10-16 en 11 procedimientos y 4 defaults; otros entornos requieren preflight. El código API está en `074ee21`; la imagen conjunta API/App y UAT siguen sin verificarse. Esta corrección no repara filas históricas.
+
+Caja General/Retiros: `DAT_RET_CTR_SVR.FCNR` conserva UTC y los SP consultan rangos del día operativo de México convertidos a UTC. Las fechas de movimientos `DAT_CTR_DOC.FCND`/`DAT_CTRL_CTAS.FCND` creados por cierre o reversa se generan en hora México. Script guarded: `sql/2026-10-16_retiros_caja_fecha_mexico.sql`; queda pendiente de aplicar en `.40` y no se ejecuta al sincronizar Git ni construir imagen.
 
 ## DEV_PROVD / Devoluciones a proveedor (2026-08-28)
 

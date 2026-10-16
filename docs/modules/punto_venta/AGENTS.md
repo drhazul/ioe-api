@@ -177,6 +177,12 @@ Enlaces relacionados:
 ## Caja General: entrega OPV (2026-06-18)
 - `sp_cg_sync_entrega_opv_abierta`, `sp_cg_cerrar_entrega_opv` y `sp_cg_reactivar_entrega_opv` usan `sp_getapplock` por sucursal/fecha/OPV y borrado por `IDE` + contexto antes de reinsertar en `DAT_FORM_ENTR_OPV_SVR`, para evitar duplicados de la PK `PK_DATFORMENTROPVSVR`.
 
+## Retiros y entrega OPV: fecha de negocio (2026-10-16)
+- `DAT_RET_CTR_SVR.FCNR` se conserva como UTC. Para agrupar por día operativo, derivar límites semiabiertos UTC desde `Central Standard Time (Mexico)`; no comparar `FCNR` con medianoche UTC ni aplicar `CONVERT(date, FCNR)`.
+- Mantener rangos de ventas (`PV_CTR_FOL_ASVR.FCNM`) en fecha local; no reutilizar límites de ventas para retiros ni modificar filas históricas.
+- `DAT_CTR_DOC.FCND` y `DAT_CTRL_CTAS.FCND` creados al cerrar/revertir una entrega OPV reciben hora México derivada de UTC.
+- Migración acotada: `sql/2026-10-16_retiros_caja_fecha_mexico.sql`; fuente lista, aplicación en `.40` pendiente de autorización específica. Después, resincronizar solo la entrega abierta requerida; diferencia negativa queda abierta para conciliación.
+
 ## Punto de venta: alta de cotizacion desde panel (trazabilidad app)
 - Flujo frontend: confirmacion de alta -> modal de cliente filtrado por SUC.
 - `GET /factclientshp?suc=<SUC>` lista clientes por la sucursal activa del panel; para admin multi-sucursal no debe limitar por `user.suc` (usa reglas `isAdmin` `ADMIN_ROLE_IDS/ADMIN_NIVELES`).

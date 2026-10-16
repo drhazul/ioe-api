@@ -2,7 +2,7 @@
 
 Inventario amplio inicial: `2026-10-15T23:11:09.0149211Z` (`17:11:09` hora México). `VALIDAR` renovado en solo lectura: `2026-10-15T23:30:07.5491579Z` (`17:30:07.5491579` hora México). Destino: `.40` (`172.16.100.40:1434`), `IOELOCAL` en `dd7842d7ba7e`, `ONLINE` y `FULL`. `.234` es espejo en `RESTORING`; queda fuera de esta corrección.
 
-**Estado:** corrección dinámica autorizada y aplicada en `.40`; resultado y límites abajo. La causa del HTTP 409 de preparación de devolución continúa sin confirmar y no se presume vinculada a estas fechas.
+**Estado:** lote dinámico de datos y prevención SQL focalizada aplicados en `.40`. La causa técnica del HTTP 409 quedó identificada en el código histórico; falta UAT autenticada posterior al fix.
 
 ## Regla acordada
 
@@ -25,7 +25,9 @@ Aunque algunos procedimientos también les asignen `GETDATE()`, no entran al DML
 - Captura apunta a `POST /pv-devoluciones/:idfolDev/detalle/preparar`, implementado en `src/modules/pv-devoluciones/pv-devoluciones.controller.ts`; el servicio captura etapa, estado y mensaje en `PV_DEV_PREPARE_ERROR`.
 - Consulta read-only a auditoría viva encontró **0** eventos `PV_DEV_PREPARE_ERROR`. Sí hay eventos recientes de `PV_DEV_CREATE` y `PV_DEV_FINALIZE`, por lo que el registro de fallos no acredita la solicitud de la captura.
 - Runtime inspeccionado: imagen conjunta `ioe-allinone:production-17feeb19a776-5163f2fbbfc6`; API y front `healthy`; `/` y `/api/health/db` responden `200`. El contenedor API actual se creó `2026-10-15 19:44:48 UTC`; búsqueda de mensajes del error en sus logs devuelve **0**. La captura de las 12:38 hora México es aprox. `18:38 UTC`; el contenedor anterior ya no existe, así que no se recuperó ese log histórico.
-- El código puede emitir 409 al faltar una línea seleccionada con `CTDD > 0`, por conflictos de validación/estado, o por offset operativo distinto de `-360`. Falta el cuerpo JSON de respuesta o el log asociado a la solicitud para discriminar.
+- El SHA que operaba antes del corte (`85fa560`) leía `GETDATE()`/`SYSDATETIMEOFFSET()` y lanzaba 409 si el offset no era `-360`. El reloj SQL vivo en `.40` reportó UTC (`+00:00`); auditoría confirmó líneas seleccionadas válidas. Esto identifica la causa técnica del bloqueo de zona horaria.
+- La captura de 12:38 hora México del 2026-10-15 precede a la imagen activa posterior (`17feeb19a776-5163f2fbbfc6`, API `17feeb19a776704adcdf457fa8ce5831730651c3`), cuyo helper `2dd2e0f` deriva hora México desde UTC y comprueba `-360`. El API/front actuales están `healthy`; `/` y `/api/health/db` responden `200`.
+- No existe evento/log/correlation ID del 409 original; no puede enlazarse una línea de auditoría con la captura. La causa por código y entorno sí está identificada; UAT autenticada sigue pendiente.
 - `PV_DEV_DET_TMP.FCNR` sí tiene timestamps recientes UTC escritos con `GETDATE()` y 10 celdas dentro de la ventana UTC/México al preflight. El flujo de preparación ordena staging por `FCNR`, pero no usa ese campo para validar `CTDD`; no hay evidencia que conecte esa anomalía con el 409. Causa del 409 sigue **sin confirmar**.
 
 ## Inventario y preflight vigente en `.40`
@@ -56,23 +58,32 @@ Aunque algunos procedimientos también les asignen `GETDATE()`, no entran al DML
 
 1. DML de timestamps ya aplicado solo a `.40`, bajo whitelist fija y la regla UTC→México autorizada. `.234` espejo no se tocó.
 2. Si se decide revertir este lote, usar script de reversa con batch `01B98172-A8AB-4897-9270-8FF063686682`; no ejecutar otra migración con snapshots/hash anteriores.
-3. Para resolver el 409 original, reproducir preparar devolución con sesión autenticada y conservar respuesta JSON, correlation ID y logs de API/Coolify del mismo minuto. Validar elegibilidad de líneas, estado y offset; solo entonces corregir la condición identificada.
-4. Ejecutar UAT autenticada de preparar/editar/finalizar devolución después de investigar el 409. Ninguna evidencia disponible confirma aún que ese flujo quedó reparado.
-5. Activar la prevención de timestamps: revisar/commitear cambios pendientes de API y App sin descartar trabajo, reconstruir imagen conjunta y validar ambas imágenes, health y web en Coolify. El estado vigente de despliegue marca build/corte/UAT pendientes; no afirmar despliegue activo hasta postflight.
+3. UAT autenticada: preparar/editar/finalizar una devolución válida y conservar respuesta, correlation ID y logs asociados. Confirmar offset `-360`; no finalizar pago como parte de la validación.
+4. Integrar todos los cambios fuente pendientes de API/App, reconstruir imagen conjunta y validar ambos SHAs, health y web. No afirmar activación de los escritores nuevos sin confirmar la imagen en Coolify.
+5. La prevención SQL focalizada quedó aplicada en `.40` el 2026-10-16. La migración separada de Caja General/Retiros `sql/2026-10-16_retiros_caja_fecha_mexico.sql` sigue sin ejecutar; Git Sync y build no ejecutan SQL.
 
 ## Verificación del reloj — 2026-10-16
 
 - Equipo Windows: `2026-10-16T08:46:22-06:00`; UTC `2026-10-16T14:46:22Z`; zona `Central Standard Time (Mexico)`.
 - SQL `.40:1434/IOELOCAL`: `GETDATE()`/`SYSDATETIMEOFFSET()` reflejan reloj UTC, offset `+00:00`. La expresión `SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'` devuelve hora México cerca de `08:45` con offset `-360`, igual al esperado por la validación del API.
-- En el checkout API, modificaciones sin commit reemplazan `GETDATE()` por conversión UTC→México para el folio fallback y `PV_DEV_DET_TMP.FCNR`. `HEAD=40eb010`, `master` siete commits delante de `origin/master`; esos cambios no están en un commit publicado.
-- Docker Desktop local no conectó al daemon. No se leyó runtime/imagen Coolify, por lo que no se confirma qué versión genera nuevas escrituras en producción. La migración del ledger corrige filas existentes solamente; sin desplegar y verificar el escritor, el problema puede reaparecer.
-- Este hallazgo no prueba que el timestamp causara el 409 de `detalle/preparar`; la causa del 409 y el UAT siguen pendientes.
+- Estado vigente actualizado después de este snapshot: el fix API quedó integrado en `074ee21` y el remoto actual es `19ac67b`; ver «Prevención SQL aplicada en .40 — 2026-10-16» abajo para estado de SQL y runtime.
+- Docker Desktop local no conectó al daemon; el runtime se inspeccionó por SSH en `.40`. La imagen activa sigue siendo `production-17feeb19a776-5163f2fbbfc6`; el código más reciente corrige dos escritores directos de fecha y aún no está activado.
+- Primer build remoto de la imagen más reciente se detuvo antes de cargar candidato: la compilación temporal WASM alcanzó el límite cgroup `2 GiB` y dejó los compiladores esperando. Se agregó `--no-wasm-dry-run` al build JavaScript-only; reintento/corte y UAT siguen pendientes.
 
 ## Estado y límites
 
 - El wrapper local falló al consultar el ledger después de recibir la respuesta de aplicación; no capturó el resultset final. No se repitió DML. Consulta independiente confirmó el ledger/batch; postflight read-only confirmó cero elegibles. Hash del plan se reconstruyó desde ledger y whitelist y quedó explícitamente identificado como reconstruido.
 - El ledger conserva los valores anteriores; no se generó backup separado fuera de la base. El script de reversa no se ha ejecutado sobre este batch.
 - `.234` no se consultó ni recibió escrituras. DML dirigido solo a `172.16.100.40:1434/IOELOCAL`.
-- La causa del 409 original sigue **sin confirmar**. Auditoría consultada no tenía `PV_DEV_PREPARE_ERROR` de ese evento y no se recuperó log histórico del contenedor previo.
-- UAT de preparar/editar/finalizar devolución sigue pendiente. El estado vigente de `docs/COOLIFY_SEGUIMIENTO.md` y `docs/COOLIFY_PLAN.md` deja build/corte/UAT de la reconstrucción conjunta pendientes. El daemon local no permitió verificar runtime; no se hizo un despliegue nuevo.
+- La causa técnica del 409 original es el guard de zona horaria de `85fa560` ante SQL UTC (`+00:00`); el fix `2dd2e0f` está en la imagen activa posterior. Falta correlation ID/log histórico, así que no hay enlace directo a la solicitud original.
+- UAT de preparar/editar/finalizar sigue pendiente. Aún no se ha desplegado el candidato más reciente; la imagen activa y health fueron verificados remotamente.
 - El modo predeterminado del script sigue `VALIDAR`; otros lotes requieren nueva autorización, corte/hash o autorización dinámica nueva, revisión de whitelist y ledger/postflight.
+
+## Prevención SQL aplicada en `.40` — 2026-10-16
+
+- Destino confirmado: `172.16.100.40:1434/IOELOCAL`, SQL Server `dd7842d7ba7e`, DB `ONLINE/READ_WRITE`; reloj del host SQL en UTC. La conversión `Central Standard Time (Mexico)` devolvió offset `-360` minutos.
+- En una transacción se alteraron 11 SP: `sp_pvctrfolasvr_create`, `sp_pv_next_visible_folio`, `sp_pv_cotizacion_cerrar`, `sp_mb51_transmitir_folio`, `sp_fact_sync_folio_vf`, `sp_fact_cfdi_serie_reserve`, `sp_fact_cfdi_serie_update_status`, `sp_fact_cfdi_nc_reserve`, `sp_fact_cfdi_rel_reserve`, `sp_fact_unificacion_create` y `sp_fact_unificacion_reverse`.
+- Se actualizaron defaults de `DAT_FOLIOS_CONSEC.FCNM`, `PV_DEV_DET_TMP.FCNR` y `FACT_CFDI_FOLIOS_DIARIOS.FCNC/FCNM` a UTC convertido a México. Solo afectan nuevas escrituras por default; no se actualizaron filas.
+- Postflight dentro/fuera de transacción confirmó las 11 definiciones y los 4 defaults esperados; los SP corregidos no conservan `GETDATE()` para esos timestamps de sistema. `dataMigrated=false`; folio histórico no tocado y `.234` fuera.
+- Se respaldaron definiciones/defaults y rollback verificable fuera de Git antes de aplicar. SHA-256 del plan SQL ejecutado: `21D2F1352582D127C27B6A4A4DC56D77850912CFA270A68F667BA44D4FF77830`; rollback: `5BBA3696B3D61C83AF688783371F3A0472CC28DD0D01309E778526BD2D27AEAF`.
+- No se ejecutaron los scripts SQL completos que incluyen DDL/DML ajeno al alcance. En `sp_mb51_transmitir_folio` se conservó la lógica viva de conflictos y solo se cambió el reloj de proceso. El runtime API/App, despliegue conjunto y UAT no se verificaron.

@@ -206,6 +206,9 @@ BEGIN
   DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@OPV, ''))));
   DECLARE @terNorm NVARCHAR(255) = NULLIF(UPPER(LTRIM(RTRIM(ISNULL(@TER, '')))), '');
   DECLARE @terCmp NVARCHAR(255) = ISNULL(@terNorm, '');
+  DECLARE @hoyMexico DATE = CONVERT(DATE, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+  DECLARE @retirosInicioUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), @hoyMexico) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
+  DECLARE @retirosFinUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), DATEADD(DAY, 1, @hoyMexico)) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
 
   IF @opvNorm = ''
   BEGIN
@@ -223,7 +226,8 @@ BEGIN
     IF EXISTS (
       SELECT 1
       FROM dbo.DAT_RET_CTR_SVR WITH (UPDLOCK, HOLDLOCK)
-      WHERE CONVERT(DATE, FCNR) = CONVERT(DATE, GETDATE())
+      WHERE FCNR >= @retirosInicioUtc
+        AND FCNR < @retirosFinUtc
         AND UPPER(LTRIM(RTRIM(ISNULL(OPV, '')))) = @opvNorm
         AND UPPER(LTRIM(RTRIM(ISNULL(TER, '')))) = @terCmp
         AND UPPER(LTRIM(RTRIM(ISNULL(ESTA, '')))) = 'ABIERTO'
@@ -246,7 +250,7 @@ BEGIN
       @IDRET,
       @terNorm,
       @opvNorm,
-      GETDATE(),
+      SYSUTCDATETIME(),
       0,
       'ABIERTO'
     );
@@ -282,6 +286,9 @@ BEGIN
 
   DECLARE @startedTran BIT = 0;
   DECLARE @opvNorm NVARCHAR(255) = UPPER(LTRIM(RTRIM(ISNULL(@OPV, ''))));
+  DECLARE @hoyMexico DATE = CONVERT(DATE, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+  DECLARE @retirosInicioUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), @hoyMexico) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
+  DECLARE @retirosFinUtc DATETIME2(7) = CONVERT(DATETIME2(7), (CONVERT(DATETIME2(7), DATEADD(DAY, 1, @hoyMexico)) AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC');
 
   IF @opvNorm = ''
   BEGIN
@@ -313,7 +320,8 @@ BEGIN
       FROM dbo.DAT_RET_DET_SVR
       WHERE IDRET = r.IDRET
     ) d
-    WHERE CONVERT(DATE, r.FCNR) = CONVERT(DATE, GETDATE())
+    WHERE r.FCNR >= @retirosInicioUtc
+      AND r.FCNR < @retirosFinUtc
       AND UPPER(LTRIM(RTRIM(ISNULL(r.OPV, '')))) = @opvNorm
     ORDER BY r.FCNR DESC;
 

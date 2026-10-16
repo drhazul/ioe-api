@@ -157,6 +157,13 @@ Enlaces relacionados:
 - no se permite finalizar sin detalles ni con total `<= 0`.
 - auditoría explícita de mutaciones (`POST/PUT/DELETE`) en `AUDIT_LOG` con `MODULO='retiros'`.
 
+## Fecha de negocio de retiros y entrega OPV (2026-10-16)
+
+- `DAT_RET_CTR_SVR.FCNR` permanece como UTC. Listado, unicidad diaria, resumen, efectivo, cierre y reportes Caja convierten los límites del día `Central Standard Time (Mexico)` a UTC y filtran con `FCNR >= inicioUtc AND FCNR < finUtc`.
+- Al generar movimientos de ajuste/reversa en `DAT_CTR_DOC.FCND` y `DAT_CTRL_CTAS.FCND`, `sp_cg_cerrar_entrega_opv` y `sp_cg_reactivar_entrega_opv` usan hora local de México derivada de UTC.
+- Los rangos de ventas (`PV_CTR_FOL_ASVR.FCNM`) permanecen en hora local. Esta corrección no reescribe timestamps ni importes históricos.
+- Migración SQL guarded: `sql/2026-10-16_retiros_caja_fecha_mexico.sql`; fuente integrada, aplicación en `.40` pendiente de autorización específica. Al resincronizar una entrega abierta, conservarla `ABIERTA` para conciliar cualquier diferencia antes del cierre.
+
 ## Estado de Cajón OPV (nuevo flujo 2026-03)
 
 - Módulo NestJS:

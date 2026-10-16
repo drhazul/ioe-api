@@ -21,6 +21,7 @@ Esta integración deja fuente reproducible para reconstruir API y front juntos. 
 - Compose usa `bind.create_host_path: false`, pero eso solo evita crear rutas ausentes. **Antes de recrear API**, validar en Proxmox que `findmnt -T /mnt/ioe-cfdi234` siga mostrando el CIFS esperado de `.234`, que el bind hacia CT `.40` llegue a `/ArchivosUsuarios/respaldoCFDI`, y que un CFDI existente sea visible desde `.40`. No arrancar si la cadena SMB/bind está caída: el directorio local vacío de `.40` no reemplaza almacenamiento persistente.
 - `api.production.env` contiene variables privadas del API en el directorio del recurso Coolify; mantenerlo fuera de Git con modo `0600`. `production.compose.yaml` lo carga como `env_file`. `IOE_IMAGE` y `COOLIFY_APP_NETWORK` son valores no secretos del `.env` del recurso; nunca copiar valores secretos a YAML, commits, logs ni build args. Destino DB se fija en Compose, no se toma del entorno.
 - Dockerfile usa Node 24 LTS para API build/runtime; Node 20 terminó soporte el 2026-03-24. Tras compilar, elimina dependencias de desarrollo del runtime. El candidato conjunto ejecuta compilación API y Flutter Web antes de activación; no mezclar el cambio de runtime con cambios de red/DB.
+- Flutter entrega el bundle JavaScript de producción; `--no-wasm-dry-run` omite la compilación WASM temporal predeterminada, que no se publica en este artefacto. `build-production-image.sh` admite `BUILD_MEMORY_LIMIT` para limitar memoria del paso remoto; en `.40` mantener un tope conservador porque SQL comparte host.
 
 ### Construcción y activación
 

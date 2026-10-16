@@ -1,6 +1,7 @@
 # Instrucciones de agente para ioe-api
 
 - Punto de venta / fechas de proceso (2026-10-15): folios CP/CA/VF, cierre, staging/transmisión MB51 y sellos de facturación/CFDI usan hora local de México derivada de UTC; fechas recibidas como dato de negocio siguen intactas. Aplicar los scripts SQL actualizados junto con API.
+- Caja General/Retiros (2026-10-16): `DAT_RET_CTR_SVR.FCNR` conserva UTC y se filtra con límites semiabiertos UTC derivados de `Central Standard Time (Mexico)`; `DAT_CTR_DOC.FCND` y `DAT_CTRL_CTAS.FCND` generados al cerrar/revertir entrega usan hora México. La migración `sql/2026-10-16_retiros_caja_fecha_mexico.sql` es independiente; no ejecutarla sin autorización específica del destino y ventana.
 
 > Abre otros README/AGENTS solo cuando la tarea lo requiera; usa el índice de módulos.
 

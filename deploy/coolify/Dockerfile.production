@@ -6,9 +6,11 @@ WORKDIR /app/ioe_app
 COPY ioe_app/ ./
 # assets/.env is removed from the generated context. Flutter needs the asset,
 # so create only public same-origin web configuration during this build.
+# This release serves the JavaScript web bundle; skip Flutter's default WASM
+# dry-run compiler, which adds a second high-memory compiler without output.
 RUN printf 'API_BASE_URL_WEB=/api\nAPI_BASE_URL=\n' > assets/.env \
     && flutter pub get \
-    && flutter build web --release --pwa-strategy=none
+    && flutter build web --release --pwa-strategy=none --no-wasm-dry-run
 
 FROM node:24-alpine AS api_build
 WORKDIR /api/ioe-api
