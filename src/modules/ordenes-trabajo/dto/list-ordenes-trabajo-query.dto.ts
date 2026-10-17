@@ -1,7 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
+  IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -119,4 +121,36 @@ export class ListOrdenesTrabajoQueryDto {
   @Min(1)
   @Max(25)
   pageSize?: number;
+
+  @ApiPropertyOptional({ writeOnly: true })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  exportAll?: boolean;
+
+  @ApiPropertyOptional({ writeOnly: true })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  reportMode?: boolean;
+
+  @ApiPropertyOptional({ writeOnly: true })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  ordenesVencerMode?: boolean;
+
+  @ApiPropertyOptional({ enum: ['por_vencer', 'retrasadas'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['por_vencer', 'retrasadas'])
+  vencimiento?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  otros?: boolean;
+
+  @ApiPropertyOptional({ writeOnly: true })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  deferResults?: boolean;
 }
