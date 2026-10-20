@@ -198,6 +198,12 @@ export class ActualizarArticuloCambioMermaDto extends CambioMermaContextDto {
 }
 
 export class SolicitarAutorizacionCambioMermaDto extends PrepararCambioMermaDto {
+  @ApiPropertyOptional({ example: '12345' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 100)
+  asign?: string;
+
   @ApiPropertyOptional({ example: 'ART-NUEVO-001' })
   @IsOptional()
   @IsString()
@@ -271,6 +277,12 @@ export class SendOrdBatchDto {
   @IsString({ each: true })
   @Length(1, 255, { each: true })
   iords!: string[];
+
+  @ApiPropertyOptional({ example: 'ORD duplicada por captura incorrecta' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  motivo?: string;
 }
 
 export class EntregarOrdBatchDto extends SendOrdBatchDto {

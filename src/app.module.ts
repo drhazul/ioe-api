@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { FaltantesSobrantesModule } from './modules/faltantes-sobrantes/faltantes-sobrantes.module';
 import { ConfigModule } from '@nestjs/config';
+import { resolve } from 'node:path';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -86,7 +87,9 @@ import { DevolucionesProveedorModule } from './modules/devoluciones-proveedor/de
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: envValidationSchema,
-      envFilePath: '.env',
+      // Resolve from the API source/build directory instead of process.cwd().
+      // Visual Studio can launch the API with a different working directory.
+      envFilePath: resolve(__dirname, '..', '.env'),
     }),
     ScheduleModule.forRoot(),
     DatabaseModule,

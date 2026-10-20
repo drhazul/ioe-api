@@ -9,6 +9,135 @@ describe('OrdenesTrabajoService cambio material/merma', () => {
     return service;
   }
 
+  describe('consulta estado', () => {
+    it('incluye SIN FLUJO en los modos operativo y estado autorizados', () => {
+      const service = createService();
+      const admin = { username: 'ADMIN', sub: 1 } as any;
+
+      expect(
+        (service as any).shouldIncludeNullFlow(admin, 'ADMIN', 'operativo'),
+      ).toBe(true);
+      expect(
+        (service as any).shouldIncludeNullFlow(admin, 'ADMIN', 'estado'),
+      ).toBe(true);
+      expect(
+        (service as any).shouldIncludeNullFlow(admin, 'ADMIN', 'anulados'),
+      ).toBe(false);
+    });
+
+    it('consulta Todos sin exigir otro filtro en el panel estado', () => {
+      const service = createService();
+
+      expect((service as any).shouldDeferPanel({}, 'estado', true)).toBe(false);
+      expect((service as any).shouldDeferPanel({}, 'entregadas', true)).toBe(
+        true,
+      );
+    });
+
+    it('arma el historial por ORD y evita una celda vacía', async () => {
+      const query = jest
+        .fn()
+        .mockResolvedValueOnce([{ ok: 1 }])
+        .mockResolvedValueOnce([
+          { IORD: 'DF01001', ESTSEGU: null, ESTSEGU_DESC: '' },
+          { IORD: 'DF01001', ESTSEGU: 3, ESTSEGU_DESC: 'AUTORIZADA' },
+          { IORD: 'DF01001', ESTSEGU: 5, ESTSEGU_DESC: 'EN TALLER' },
+        ]);
+      const service = createService(query);
+
+      await expect(
+        (service as any).attachFlowHistory([
+          {
+            IORD: 'DF01001',
+            ESTSEGU: 5,
+            ESTSEGU_DESC: 'EN TALLER',
+          },
+        ]),
+      ).resolves.toEqual([
+        {
+          IORD: 'DF01001',
+          ESTSEGU: 5,
+          ESTSEGU_DESC: 'EN TALLER',
+          FLUJO_HISTORIAL: 'SIN FLUJO -> 3 AUTORIZADA -> 5 EN TALLER',
+          FLUJO_HISTORIAL_ITEMS: [
+            { ESTSEGU: null, ESTSEGU_DESC: '' },
+            { ESTSEGU: 3, ESTSEGU_DESC: 'AUTORIZADA' },
+            { ESTSEGU: 5, ESTSEGU_DESC: 'EN TALLER' },
+          ],
+        },
+      ]);
+    });
+
+    it('usa el flujo actual si la tabla histórica todavía no existe', async () => {
+      const query = jest.fn().mockResolvedValueOnce([]);
+      const service = createService(query);
+
+      await expect(
+        (service as any).attachFlowHistory([
+          {
+            IORD: 'DF01002',
+            ESTSEGU: 7,
+            ESTSEGU_DESC: 'RECIBIDA',
+          },
+        ]),
+      ).resolves.toEqual([
+        {
+          IORD: 'DF01002',
+          ESTSEGU: 7,
+          ESTSEGU_DESC: 'RECIBIDA',
+          FLUJO_HISTORIAL: '7 RECIBIDA',
+          FLUJO_HISTORIAL_ITEMS: [{ ESTSEGU: 7, ESTSEGU_DESC: 'RECIBIDA' }],
+        },
+      ]);
+    });
+
+    it('expande una ORD en una fila por cada flujo recorrido', () => {
+      const service = createService();
+      expect(
+        (service as any).expandFlowHistoryItems([
+          {
+            IORD: 'DF01003',
+            ESTSEGU: 5,
+            ESTSEGU_DESC: 'EN TALLER',
+            FLUJO_HISTORIAL_ITEMS: [
+              { ESTSEGU: 3, ESTSEGU_DESC: 'AUTORIZADA' },
+              { ESTSEGU: 5, ESTSEGU_DESC: 'EN TALLER' },
+            ],
+          },
+        ]),
+      ).toEqual([
+        {
+          IORD: 'DF01003',
+          ESTSEGU: 3,
+          ESTSEGU_DESC: 'AUTORIZADA',
+          ESTSEGU_ACTUAL: 5,
+          ESTSEGU_ACTUAL_DESC: 'EN TALLER',
+        },
+        {
+          IORD: 'DF01003',
+          ESTSEGU: 5,
+          ESTSEGU_DESC: 'EN TALLER',
+          ESTSEGU_ACTUAL: 5,
+          ESTSEGU_ACTUAL_DESC: 'EN TALLER',
+        },
+      ]);
+    });
+
+    it('aplica la visibilidad al flujo historico solicitado, no al actual', () => {
+      const service = createService();
+      const rows = [
+        { IORD: 'DF01004', ESTSEGU: 5, ESTSEGU_DESC: 'EN TALLER' },
+      ];
+
+      expect(
+        (service as any).applyAllowedStatusFilterToItems(rows, [3], false, '3'),
+      ).toEqual(rows);
+      expect(
+        (service as any).applyAllowedStatusFilterToItems(rows, [5], false, '3'),
+      ).toEqual([]);
+    });
+  });
+
   describe('cálculo fiscal', () => {
     it('agrega IVA cuando venta fiscal requiere factura y DAT_SUC no integra IVA', () => {
       const service = createService();

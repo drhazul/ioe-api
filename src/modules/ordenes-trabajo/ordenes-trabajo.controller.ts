@@ -3,11 +3,14 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -53,12 +56,58 @@ export class OrdenesTrabajoController {
     return this.service.list(query, user);
   }
 
+  @Get('export/excel')
+  async exportExcel(
+    @Query() query: ListOrdenesTrabajoQueryDto,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.service.exportExcel(query, user);
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="ordenes_trabajo.xlsx"',
+    });
+    res.send(buffer);
+  }
+
   @Get('motivos-movimiento')
   listMotivosMovimiento(
     @Query('tipo') tipo: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.listMotivosMovimiento(tipo, user);
+  }
+
+  @Get('taller-colaboradores')
+  listarColaboradoresTaller(@CurrentUser() user: JwtPayload) {
+    return this.service.listarColaboradoresTaller(user);
+  }
+
+  @Post('taller-colaboradores')
+  crearColaboradorTaller(
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.crearColaboradorTaller(body, user);
+  }
+
+  @Patch('taller-colaboradores/:idopv')
+  editarColaboradorTaller(
+    @Param('idopv') idopv: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.editarColaboradorTaller(idopv, body, user);
+  }
+
+  @Patch('taller-colaboradores/:idopv/estatus')
+  cambiarEstatusColaboradorTaller(
+    @Param('idopv') idopv: string,
+    @Body() body: { estatus?: string },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.cambiarEstatusColaboradorTaller(idopv, body, user);
   }
 
   @Get(':iord')
@@ -284,6 +333,19 @@ export class OrdenesTrabajoController {
     @Req() req: any,
   ) {
     return this.service.regresarTiendaLote(dto, user, this.requestIp(req));
+  }
+
+  @Post('regresar-tienda/rechazar')
+  rechazarRegresarTiendaLote(
+    @Body() dto: SendOrdBatchDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.rechazarRegresarTiendaLote(
+      dto,
+      user,
+      this.requestIp(req),
+    );
   }
 
   @Post('asignar-laboratorio/lote')

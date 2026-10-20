@@ -18,6 +18,19 @@ foreach ($port in $ports) {
     $cmdLower = $cmd.ToLowerInvariant()
 
     $isProjectNode = $name -eq 'node.exe' -and $cmdLower.Contains($workspaceHint)
+    if (
+      -not $isProjectNode -and
+      $port -eq 3000 -and
+      $name -eq 'node.exe' -and
+      $cmdLower -match '(?:^|[\s"''])dist[\\/]main(?:\.js)?(?:$|[\s"''])'
+    ) {
+      try {
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3000/health' -TimeoutSec 2
+        $isProjectNode = $health.service -eq 'IOE-API'
+      } catch {
+        $isProjectNode = $false
+      }
+    }
 
     if ($isProjectNode) {
       Write-Host "[safe-start] Liberando puerto ${port}: PID=$($proc.ProcessId) $($proc.Name)"

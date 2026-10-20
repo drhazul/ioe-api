@@ -18,7 +18,9 @@ Enlaces relacionados:
   - `sql/2026-03-22_ordenes_trabajo_module_create.sql`
   - `sql/2026-04-23_ordenes_trabajo_estado_ord_mod_front.sql`
 - Endpoints:
-  - `GET /ordenes-trabajo` (panel con filtros server-side y paginación)
+  - `GET /ordenes-trabajo` (panel con filtros server-side y paginación; en `panelMode=estado`, el filtro `estsegu` busca en el historial, admite `NULL` como `SIN FLUJO` y devuelve una fila por flujo recorrido; la UI conserva la fila del flujo consultado. Las reglas de visibilidad se aplican antes del total/página con `sql/2026-10-13_ordenes_trabajo_estado_visibilidad_paginacion.sql`)
+  - En `ordenesVencerMode=true`, el filtro `vencimiento=por_vencer|retrasadas` usa `FCNM`, excluye flujos 4 y 11, y filtra antes de total/paginación; la exportación Excel reutiliza el mismo criterio.
+  - `GET /ordenes-trabajo/export/excel` reutiliza los filtros del panel y genera un XLSX con todos los resultados, sin limitarse a la página visible.
   - `GET /ordenes-trabajo/motivos-movimiento?tipo=1|2` (catálogo de motivos para cambio material/merma desde `DAT_ORD_MOTM`)
   - `GET /ordenes-trabajo/:iord`
   - `GET /ordenes-trabajo/:iord/detalle`
@@ -124,3 +126,9 @@ Enlaces relacionados:
 - cambio/merma CTD nueva ORD (2026-07-09): `sp_ordenes_trabajo_cambio_material` y `sp_ordenes_trabajo_merma` clonan la ORD nueva con `CTD = CTD_C_M`; el service re-normaliza `CTD/CTD_C_M` tras autorizar. Script: `sql/2026-07-09_ordenes_trabajo_cambio_merma_nueva_ord_ctdcm_fix.sql`.
 - cambio/merma autorización final (2026-07-09): `sp_ordenes_trabajo_registrar_ctrl_ctas_diff` genera `NDOC` con lock global y salta `DAT_CTR_DOC.DOC` ya existente para evitar PK duplicada durante diferencias contables. Script: `sql/2026-07-09_ordenes_trabajo_ctrl_ctas_ndoc_global_fix.sql`.
 - cambio/merma base económica/fiscal (2026-07-24): nueva tabla `PV_ORD_CAMBIO_MERMA_PRECIO` sella `PVTA_UNITARIO` y `PVTAT_BASE` por ORD. Misma ART queda permitida; diferencia usa base original prorrateada contra `DAT_ART.PVTA * CTD_C_M`, con IVA integrado/desglosado según sucursal y folio. Script: `sql/2026-07-24_ordenes_trabajo_cambio_merma_precio_snapshot_fix.sql`.
+- Reportes de Taller (`DAT_JAO_REP`, `JEF_TALLER`): al filtrar flujo `10` se incluyen ORDs que pasaron o permanecen en ese flujo, aunque actualmente estén en otro flujo; `Desde` filtra F. SOL (`PV_CTR_ORDS.FCNS`) y `Hasta` F. ENTR (`FCNM`, con fallback a `FCNS`). Se muestra el costo del servicio y se exporta en Excel.
+- Reportes de Taller (`DAT_JAO_REP`, `ANALISTA_ORD`): para flujo `10`, se aplica el mismo filtro de fechas por F. SOL y F. ENTR y se conserva la búsqueda de ORDs que pasaron o permanecen en el flujo según historial; el costo del servicio no se muestra a este rol.
+- Reportes de Taller (`DAT_JAO_REP`, `ANALISTA_ORD`): el flujo `4` permite consultar ORDs anuladas durante el periodo por historial de flujo; la respuesta añade el motivo guardado en auditoría para mostrarlo en la grilla.
+- Reportes de Taller (`DAT_JAO_REP`, `ANALISTA_ORD`): la exportación Excel incluye todos los resultados de los filtros activos y agrega `Motivo` cuando el flujo es `4`.
+- Consulta Estado de ORDs (`JEF_TALLER`): la grilla y la exportación Excel agregan `QUIEN_REALIZO` por movimiento histórico, vinculando los eventos de `PV_CTR_ORDS_FLUJO_HIST` con la auditoría y el usuario que los ejecutó.
+- Consulta Estado de ORDs (`JEF_TALLER`): el servicio agrega `TIEMPO_POR_FLUJO` desde `PV_CTR_ORDS_FLUJO_HIST.FCNR`; el flujo vigente se mide hasta la hora del servidor.
