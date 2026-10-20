@@ -2,7 +2,7 @@
 
 ## Fecha de proceso de folios, MB51 y CFDI (2026-10-15)
 
-La API genera fecha de folio CP/CA/VF y timestamps de cierre, staging/transmisión MB51 y control CFDI convirtiendo UTC a hora local de México. Conserva fechas explícitas/editables de negocio. Los scripts SQL deben aplicarse junto con la API; las filas históricas quedan fuera de esta corrección.
+La API genera fecha de folio CP/CA/VF y timestamps de cierre, staging/transmisión MB51 y control CFDI convirtiendo UTC a hora local de México. Las escrituras de relación ORD-ticket también convierten `PV_CTR_ORDS.FCNMOD` y `PV_TICKET_LOG.updated_at`. Conserva fechas explícitas/editables de negocio. Los scripts SQL deben aplicarse junto con la API; las filas históricas requieren whitelist y guardas propias.
 
 Navega a otros README/AGENTS solo cuando la tarea lo requiera.
 

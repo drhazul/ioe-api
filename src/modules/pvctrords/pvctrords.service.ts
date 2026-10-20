@@ -891,7 +891,7 @@ export class PvCtrOrdsService {
         COMAD = @4,
         DESCART = CASE WHEN NULLIF(@5, '') IS NULL THEN DESCART ELSE @5 END,
         ESTATUS = 1,
-        FCNMOD = GETDATE()
+        FCNMOD = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'))
       WHERE IORD = @0
       `,
       [
@@ -1000,7 +1000,7 @@ export class PvCtrOrdsService {
       `
       UPDATE dbo.PV_CTR_ORDS
       SET TICKET_REL = @1,
-          FCNMOD = GETDATE()
+          FCNMOD = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'))
       WHERE IORD = @0
       `,
       [input.iord, input.ticketRel],
@@ -1012,7 +1012,7 @@ export class PvCtrOrdsService {
       SET
         ORD = @2,
         TICKET_REL = @3,
-        updated_at = GETDATE()
+        updated_at = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'))
       WHERE ID = @0
         AND IDFOL = @1
       `,
@@ -1059,7 +1059,7 @@ export class PvCtrOrdsService {
         @8,
         @9,
         @10,
-        GETDATE(),
+        CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')),
         @11
       )
       `,
