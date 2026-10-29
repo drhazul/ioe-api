@@ -5,6 +5,9 @@ import {
   normalizarUsoCfdi,
   VentaInvalidaError,
 } from './venta.mapper';
+import { cadenaOriginal } from './cadena-original';
+import { hijo, serializarXml } from './cfdi-node';
+import { construirComprobante } from './comprobante';
 
 const CONTEXTO = { serie: 'JIFJ', folio: '1234', fecha: '2026-09-23T10:15:00' };
 
@@ -101,7 +104,9 @@ describe('mapearVenta', () => {
 
   it('exige RFC emisor del documento aunque la sucursal tenga RFC', () => {
     const header = { ...filas().header, RfcEmisor: '' };
-    expect(() => mapearVenta(filas({ header }), CONTEXTO)).toThrow(/RFC emisor/);
+    expect(() => mapearVenta(filas({ header }), CONTEXTO)).toThrow(
+      /RFC emisor/,
+    );
   });
 
   it('usa FormaPago cuando FormaPagoSAT viene vacia', () => {
@@ -125,6 +130,99 @@ describe('mapearVenta', () => {
       meses: '09',
       anio: '2026',
     });
+  });
+
+  describe.each(['cabecera', 'cliente'])('nombre fiscal desde %s', (origen) => {
+    it.each(['ESPINOSA', 'ROSA', 'CASA', 'ISAAC', 'S. A.', 'PÉREZ-ÑUÑEZ'])(
+      'conserva %s en receptor, XML y cadena original',
+      (terminacion) => {
+        const nombre = `ANA ${terminacion}`;
+        const base = filas();
+        const datos = mapearVenta(
+          filas({
+            header: {
+              ...base.header,
+              RfcReceptor: 'PEPJ8001019Q8',
+              RazonSocialReceptor: origen === 'cabecera' ? nombre : '',
+            },
+            cliente: {
+              ...base.cliente,
+              RFCRECEPTOR: 'PEPJ8001019Q8',
+              RAZONSOCIALRECEPTOR:
+                origen === 'cliente' ? nombre : 'OTRO NOMBRE',
+              REGIMENRECEPTOR: '612',
+            },
+          }),
+          CONTEXTO,
+        );
+        const { rfcEmisor, ...venta } = datos;
+        const comprobante = construirComprobante({
+          ...venta,
+          emisor: {
+            rfc: rfcEmisor,
+            nombre: 'EMISOR DE PRUEBA',
+            regimenFiscal: '612',
+            lugarExpedicion: '39000',
+          },
+        });
+
+        expect(datos.receptor).toEqual({
+          rfc: 'PEPJ8001019Q8',
+          nombre,
+          domicilioFiscal: '42501',
+          regimenFiscal: '612',
+          usoCfdi: 'G03',
+        });
+        expect(hijo(comprobante, 'cfdi:Receptor')?.attrs.get('Nombre')).toBe(
+          nombre,
+        );
+        expect(serializarXml(comprobante)).toContain(`Nombre="${nombre}"`);
+        expect(
+          cadenaOriginal({
+            ...comprobante,
+            attrs: new Map([
+              ...comprobante.attrs,
+              ['NoCertificado', '30001000000500003364'],
+            ]),
+          }),
+        ).toContain(`|${nombre}|`);
+        expect(comprobante.attrs.get('SubTotal')).toBe('200.00');
+        expect(comprobante.attrs.get('Total')).toBe('232.00');
+        expect(comprobante.attrs.get('MetodoPago')).toBe('PUE');
+        expect(comprobante.attrs.get('FormaPago')).toBe('03');
+        expect(hijo(comprobante, 'cfdi:Emisor')?.attrs.get('Rfc')).toBe(
+          'JIFJ4704238T5',
+        );
+      },
+    );
+  });
+
+  it('conserva palabra final de razon social al retirar forma societaria en XML', () => {
+    const header = {
+      ...filas().header,
+      RazonSocialReceptor: 'OPTICAS CASA, S.A. DE C.V.',
+    };
+    const { rfcEmisor, ...venta } = mapearVenta(filas({ header }), CONTEXTO);
+    const comprobante = construirComprobante({
+      ...venta,
+      emisor: {
+        rfc: rfcEmisor,
+        nombre: 'EMISOR DE PRUEBA',
+        regimenFiscal: '612',
+        lugarExpedicion: '39000',
+      },
+    });
+    expect(venta.receptor.nombre).toBe('OPTICAS CASA');
+    expect(serializarXml(comprobante)).toContain('Nombre="OPTICAS CASA"');
+    expect(
+      cadenaOriginal({
+        ...comprobante,
+        attrs: new Map([
+          ...comprobante.attrs,
+          ['NoCertificado', '30001000000500003364'],
+        ]),
+      }),
+    ).toContain('|OPTICAS CASA|');
   });
 });
 
@@ -179,13 +277,48 @@ describe('mapearVenta — lo que detiene antes de timbrar', () => {
 });
 
 describe('normalizarNombreSat', () => {
+  it.each(['ESPINOSA', 'ROSA', 'CASA', 'ISAAC'])(
+    'no recorta letras dentro de la palabra %s',
+    (nombre) => {
+      expect(normalizarNombreSat(nombre)).toBe(nombre);
+    },
+  );
+
   it.each([
     ['Grupo A & B, S.A. de C.V.', 'GRUPO A & B'],
     ['OPTICAS DEL SUR SA DE CV', 'OPTICAS DEL SUR'],
     ['SERVICIOS INTEGRALES S. DE R.L. DE C.V.', 'SERVICIOS INTEGRALES'],
+    ['EMPRESA CASA', 'EMPRESA CASA'],
+    ['EMPRESA ROSA', 'EMPRESA ROSA'],
+    ['GRUPO ESPINOSA', 'GRUPO ESPINOSA'],
+    ['GRUPO ISAAC', 'GRUPO ISAAC'],
+    ['CASA,S.A.', 'CASA'],
+    ['CASA SA', 'CASA'],
+    ['CASA SAPI DE CV', 'CASA'],
+    ['CASA S.A.P.I. DE C.V.', 'CASA'],
+    ['CASA S.C.', 'CASA'],
+    ['CASA A.C.', 'CASA'],
+    ['CASA S DE RL DE CV', 'CASA'],
     ['  juan   perez  ', 'JUAN PEREZ'],
   ])('%s -> %s', (entrada, esperado) => {
-    expect(normalizarNombreSat(entrada)).toBe(esperado);
+    expect(normalizarNombreSat(entrada, 'EKU9003173C9')).toBe(esperado);
+  });
+
+  it.each(['PEPJ8001019Q8', 'XEXX010101000', '', 'INVALIDO', 'EKU9003173C'])(
+    'sin RFC de persona moral (%s) conserva incluso sufijo separado',
+    (rfc) => {
+      expect(normalizarNombreSat('Ana S. A.', rfc)).toBe('ANA S. A.');
+    },
+  );
+
+  it('sin RFC conserva razon social completa y caracteres fiscales', () => {
+    expect(normalizarNombreSat('  ána   pérez-ñuñez & asociados, S.A.  ')).toBe(
+      'ÁNA PÉREZ-ÑUÑEZ & ASOCIADOS, S.A.',
+    );
+  });
+
+  it('reconoce RFC de persona moral con minusculas y espacios exteriores', () => {
+    expect(normalizarNombreSat('CASA S.A.', ' eku9003173c9 ')).toBe('CASA');
   });
 });
 
