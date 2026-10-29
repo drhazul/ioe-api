@@ -2,6 +2,10 @@
 
 `CfdiModule` implementa timbrado Quadrum separado de Facturify. El submódulo `correo/` agrega la primera versión de envío post-timbrado con Gmail API.
 
+## Diagnóstico de bloqueo de cancelación (2026-10-29)
+
+La captura «Operación Quadrum CANCELACION no habilitada en producción para ese RFC.» corresponde a guard interno de IOE, anterior a PAC. Corrección integrada localmente: `assertCancelacionQuadrum` verifica endpoint oficial y RFC, sin listas de habilitación ni bandera de emisión; el servicio conserva identidad del documento y CSD/cuenta propios. `assertOperacionQuadrum` delega cancelación y conserva restricciones para FACTURA/NC/REP. Despliegue aún pendiente. [Plan](../../../docs/modules/cfdi/QUADRUM_CANCELACION_PLAN_20261029.md) y [seguimiento](../../../docs/modules/cfdi/QUADRUM_CANCELACION_SEGUIMIENTO_20261029.md). Notas de soporte retiradas por instrucción del titular.
+
 ## Integración productiva de Quadrum
 
 Plan de corrección y criterios de activación: [QUADRUM_PRODUCCION_PLAN.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_PLAN.md). Estado por RFC, configuración y UAT: [QUADRUM_PRODUCCION_SEGUIMIENTO.md](../../../docs/modules/cfdi/QUADRUM_PRODUCCION_SEGUIMIENTO.md). La captura de endpoints en `.env` local no acredita su carga en el proceso productivo ni habilita los caminos fiscales bloqueados por código.
@@ -29,7 +33,7 @@ Release acotado API/App: `deploy/quadrum/Dockerfile.cuenta` recibe API exportada
 
 Plan, criterios y seguimiento: [`docs/modules/cfdi/FACTURA_QUADRUM_CORREO_PLAN.md`](../../../docs/modules/cfdi/FACTURA_QUADRUM_CORREO_PLAN.md) y [`FACTURA_QUADRUM_CORREO_SEGUIMIENTO.md`](../../../docs/modules/cfdi/FACTURA_QUADRUM_CORREO_SEGUIMIENTO.md).
 
-Producción exige `QUADRUM_PRODUCCION_HABILITADA=true`, RFC explícitos en `QUADRUM_RFC_HABILITADOS` y flujos explícitos en `QUADRUM_FLUJOS_HABILITADOS`. Sin esas condiciones se permite diagnóstico, no operación fiscal. Datos de documento sujetos a acceso por sucursal; ninguna cuenta global reemplaza al RFC. Reservas inciertas y cancelaciones pendientes bloquean reemisión.
+Emisión productiva (FACTURA/NC/REP) exige `QUADRUM_PRODUCCION_HABILITADA=true`, RFC explícitos en `QUADRUM_RFC_HABILITADOS` y flujos explícitos en `QUADRUM_FLUJOS_HABILITADOS`. Cancelación usa validación independiente de esas variables desde corrección local del 2026-10-29, pendiente de despliegue. No existe límite por sucursal para documentos Quadrum por instrucción previa del titular; ninguna cuenta global reemplaza al RFC en producción. Reservas inciertas y cancelaciones pendientes bloquean reemisión.
 
 
 ## Consulta SAT y contratos por ambiente (2026-10-13)

@@ -224,7 +224,7 @@ describe('CancelacionService', () => {
     );
   });
 
-  it('se niega a cancelar contra produccion', async () => {
+  it('rechaza UUID sin documento verificable en producción', async () => {
     const { service, estatusSat } = armar({ produccion: true });
 
     await expect(service.cancelar(peticion)).rejects.toBeInstanceOf(

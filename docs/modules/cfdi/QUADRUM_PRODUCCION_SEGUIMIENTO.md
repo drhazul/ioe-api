@@ -1,5 +1,7 @@
 # Seguimiento de corrección Quadrum para producción
 
+Actualización de alcance 2026-10-29: bloqueo CANCELACION confirmado como interno de IOE en CT105, previo al PAC. Retirada de listas/bandera de emisión implementada localmente con validación específica de cancelación y pruebas sin red; despliegue y UAT pendientes. [Plan independiente](QUADRUM_CANCELACION_PLAN_20261029.md) y [tablero](QUADRUM_CANCELACION_SEGUIMIENTO_20261029.md). Notas de soporte retiradas por titular. Cortes siguientes conservan su fecha histórica y no acreditan destino productivo actual ni rechazo externo de cancelación.
+
 Actualizado: 2026-10-13 (America/Mexico_City).
 Estado general: integración fiscal FACTURA validada con un documento timbrado/persistido por cada uno de los tres RFC comerciales. Casos: DF01-20261012-VF-0040, DF04-20261012-VF-0030 y DF05-20261013-VF-0008. Por decisión del titular, VF0004/CFDI40147 es incidencia operativa de cliente y queda fuera del resultado de integración. NC/REP/cancelación se revisarán durante operación; restricción actual es de API, no ausencia de UI. Correo, PDF y consulta SAT pasan al [plan independiente](QUADRUM_POST_TIMBRADO_CORRECCION_PLAN.md) y su [seguimiento](QUADRUM_POST_TIMBRADO_CORRECCION_SEGUIMIENTO.md). No se declara UAT de flujos no ejecutados.
 Plan: [QUADRUM_PRODUCCION_PLAN.md](QUADRUM_PRODUCCION_PLAN.md).
