@@ -16,9 +16,11 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { ListOrdenesTrabajoQueryDto } from './dto/list-ordenes-trabajo-query.dto';
+import { MermasAutorizadasQueryDto } from './dto/mermas-autorizadas-query.dto';
 import {
   AplicarMermaCambioDto,
   ActualizarArticuloCambioMermaDto,
+  CancelarCambioMermaDto,
   AssignLaboratorioBatchDto,
   AssignOrdBatchDto,
   CambioMaterialDto,
@@ -54,6 +56,38 @@ export class OrdenesTrabajoController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.list(query, user);
+  }
+
+  @Get('mermas-autorizadas')
+  listMermasAutorizadas(
+    @Query() query: MermasAutorizadasQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.listMermasAutorizadas(query, user);
+  }
+
+  @Get('mermas-autorizadas/filtros')
+  listMermasAutorizadasFilterOptions(
+    @Query() query: MermasAutorizadasQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.listMermasAutorizadas(query, user, true);
+  }
+
+  @Get('mermas-autorizadas/excel')
+  async exportMermasAutorizadasExcel(
+    @Query() query: MermasAutorizadasQueryDto,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.service.exportMermasAutorizadasExcel(query, user);
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition':
+        'attachment; filename="mermas_autorizadas_taller.xlsx"',
+    });
+    res.send(buffer);
   }
 
   @Get('export/excel')
@@ -212,6 +246,21 @@ export class OrdenesTrabajoController {
     @Req() req: any,
   ) {
     return this.service.crearCambioMerma(iord, dto, user, this.requestIp(req));
+  }
+
+  @Post(':iord/cambio-merma/cancelar')
+  cancelarCambioMerma(
+    @Param('iord') iord: string,
+    @Body() dto: CancelarCambioMermaDto,
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+  ) {
+    return this.service.cancelarCambioMerma(
+      iord,
+      dto,
+      user,
+      this.requestIp(req),
+    );
   }
 
   @Post(':iord/autorizar')

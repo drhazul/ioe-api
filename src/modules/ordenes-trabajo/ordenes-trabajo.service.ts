@@ -11,9 +11,11 @@ import { DataSource, QueryFailedError } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { ListOrdenesTrabajoQueryDto } from './dto/list-ordenes-trabajo-query.dto';
+import { MermasAutorizadasQueryDto } from './dto/mermas-autorizadas-query.dto';
 import {
   AplicarMermaCambioDto,
   ActualizarArticuloCambioMermaDto,
+  CancelarCambioMermaDto,
   AssignLaboratorioBatchDto,
   AssignOrdBatchDto,
   CambioMaterialDto,
@@ -66,11 +68,18 @@ type OrdFlowVisibilityRule = {
   onlyExternalLab: boolean;
 };
 
+type MermasAutorizadasFilterOptions = {
+  tipos: Array<{ value: string; label: string }>;
+  laboratorios: unknown[];
+  asignados: Array<{ value: string; label: string }>;
+};
+
 @Injectable()
 export class OrdenesTrabajoService {
   private readonly logger = new Logger(OrdenesTrabajoService.name);
   private static readonly MODULE_CODES = [
     'DAT_JAO_ORD',
+    'DAT_JAO_MERMA_AUTORIZADAS',
     'DAT_JAO_ORD_ESTADO',
     'DAT_JAO_ORD_ANULADAS',
     'DAT_JAO_ORD_ENTREGADAS',
@@ -87,6 +96,14 @@ export class OrdenesTrabajoService {
   private static readonly MODULE_CODES_INV_SCOPE = ['DAT_JAA_ALM'] as const;
   private flowVisibilityTableExists: boolean | null = null;
   private readonly flowVisibilityPanelConfigCache = new Map<string, boolean>();
+  private readonly mermasFilterOptionsCache = new Map<
+    string,
+    { expiresAt: number; value: MermasAutorizadasFilterOptions }
+  >();
+  private readonly mermasFilterOptionsInFlight = new Map<
+    string,
+    Promise<MermasAutorizadasFilterOptions>
+  >();
 
   constructor(
     private readonly dataSource: DataSource,
@@ -164,7 +181,19 @@ export class OrdenesTrabajoService {
       panelMode === 'estado';
     // Órdenes a Vencer es una consulta transversal: no hereda los flujos
     // asignados a un rol específico en los paneles operativo o Estado.
-    const panelRoleCode = roleCode;
+    const isControlCalidadOrdenesPanelUser =
+      (panelMode === 'estado' || panelMode === 'operativo') &&
+      (await this.isControlCalidadRole(user));
+    // Control de Calidad usa la visibilidad de flujos de ANALISTA_ORD en
+    // Gestión de Orden, Consulta Estado y Reportes de Taller, en solo lectura.
+    const panelRoleCode = isControlCalidadOrdenesPanelUser
+      ? 'ANALISTA_ORD'
+      : roleCode;
+    const panelResponseRoleCode = this.isAdmin(user)
+      ? 'ADMIN'
+      : isControlCalidadOrdenesPanelUser
+        ? 'CONTROL_CALIDAD'
+        : roleCode;
     const dataPanelMode = query.reportMode ? 'estado' : panelMode;
     // El alcance por sucursal y los permisos de flujo son independientes una
     // vez resuelto el rol; consultarlos juntos reduce viajes secuenciales a SQL.
@@ -187,15 +216,13 @@ export class OrdenesTrabajoService {
     const canUseOtros = query.reportMode === true && roleCode === 'JEF_TALLER';
     const canViewFlow10Report =
       query.reportMode === true &&
-      ['JEF_TALLER', 'ANALISTA_ORD', 'ANALISTA'].includes(roleCode);
-    const allowedActions = this.resolveAllowedActions(
-      user,
-      roleCode,
-      panelMode,
-    );
+      ['JEF_TALLER', 'ANALISTA_ORD', 'ANALISTA'].includes(panelRoleCode);
+    const allowedActions = isControlCalidadOrdenesPanelUser
+      ? ['VER_DETALLE']
+      : this.resolveAllowedActions(user, panelRoleCode, panelMode);
     if (
       query.reportMode === true &&
-      roleCode === 'ANALISTA_ORD' &&
+      panelRoleCode === 'ANALISTA_ORD' &&
       !allowedStatusCodes.some(
         (status) => this.formatStatusCode(status) === '4',
       )
@@ -208,7 +235,7 @@ export class OrdenesTrabajoService {
     const flowCatalogStatusCodes = allowedStatusCodes;
     if (
       query.reportMode === true &&
-      roleCode === 'ANALISTA_ORD' &&
+      panelRoleCode === 'ANALISTA_ORD' &&
       !flowCatalogStatusCodes.some(
         (status) => this.formatStatusCode(status) === '4',
       )
@@ -242,7 +269,7 @@ export class OrdenesTrabajoService {
         page,
         pageSize,
         total: 0,
-        roleCode: this.isAdmin(user) ? 'ADMIN' : roleCode,
+        roleCode: panelResponseRoleCode,
         panelMode,
         showFlowHistoryDetails,
         allowedSucs: scope.allowedSucs,
@@ -271,19 +298,27 @@ export class OrdenesTrabajoService {
     }
 
     const selectedReportFlow = this.toFloat(query.estsegu);
+    const selectedReportNullFlow =
+      this.normalizeUpper(query.estsegu) === 'NULL';
     const canViewSelectedHistoricalFlow =
       (canViewFlow10Report && selectedReportFlow === 10) ||
       (query.reportMode === true &&
-        roleCode === 'ANALISTA_ORD' &&
-        selectedReportFlow === 4) ||
+        panelRoleCode === 'ANALISTA_ORD' &&
+        (selectedReportFlow === 4 || selectedReportFlow === 7)) ||
       (query.reportMode === true &&
         roleCode === 'JEF_TALLER' &&
-        selectedReportFlow === 7);
-    if (canViewSelectedHistoricalFlow && selectedReportFlow != null) {
+        (selectedReportFlow === 7 ||
+          selectedReportFlow === 9.3 ||
+          selectedReportNullFlow));
+    if (
+      canViewSelectedHistoricalFlow &&
+      (selectedReportFlow != null || selectedReportNullFlow)
+    ) {
       return this.listReportHistoricalFlow(query, user, selectedReportFlow, {
         page,
         pageSize,
-        roleCode,
+        roleCode: panelRoleCode,
+        responseRoleCode: panelResponseRoleCode,
         panelMode,
         scope,
         allowedActions,
@@ -549,6 +584,9 @@ export class OrdenesTrabajoService {
         items = await this.attachFlowDurations(items);
       }
     }
+    if (query.reportMode === true) {
+      items = await this.attachChargedArticlePrices(items);
+    }
     const first = this.firstRow(rows);
     const total =
       canUseOtros && query.otros
@@ -560,7 +598,7 @@ export class OrdenesTrabajoService {
       page,
       pageSize,
       total,
-      roleCode: this.isAdmin(user) ? 'ADMIN' : roleCode,
+      roleCode: panelResponseRoleCode,
       panelMode,
       showFlowHistoryDetails,
       allowedSucs: scope.allowedSucs,
@@ -571,6 +609,570 @@ export class OrdenesTrabajoService {
       otrosOptions,
       items,
     };
+  }
+
+  async listMermasAutorizadas(
+    query: MermasAutorizadasQueryDto,
+    user: JwtPayload,
+    filterOptionsOnly = false,
+    includeTotalCount = true,
+    attachPrices = true,
+  ) {
+    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
+    const allowedRoles = new Set([
+      'JEF_TALLER',
+      'INVJEF',
+      'ANALISTA_INV',
+      'ANALISTA_ORD',
+      'ANALISTA',
+      'AUX_JEF_TALLER',
+      'AUX_JEFE_TALLER',
+      'AUXILIAR_JEF_TALLER',
+      'AUXILIAR_JEFE_TALLER',
+      'ENC_MAQUILA',
+      'ENC_BISEL',
+    ]);
+    const isControlCalidad = await this.isControlCalidadRole(user);
+    if (
+      !this.isAdmin(user) &&
+      !allowedRoles.has(roleCode) &&
+      !isControlCalidad
+    ) {
+      throw new ForbiddenException(
+        'No tienes permiso para consultar mermas autorizadas de Taller.',
+      );
+    }
+
+    const suc = this.normalizeText(query.suc) || null;
+    const scope = await this.resolveSucScope(user, suc, roleCode);
+    const page = Math.max(1, this.normalizePage(query.page));
+    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 25));
+    const [
+      hasAuditTable,
+      hasMotivoTable,
+      hasTipomColumn,
+      hasComadColumn,
+      hasCtdCambioColumn,
+      hasMotrColumn,
+      hasUsrAutColumn,
+      hasFcnAutColumn,
+    ] = await Promise.all([
+      this.hasTable('AUDIT_LOG'),
+      this.hasTable('DAT_ORD_MOTM'),
+      this.hasColumn('PV_CTR_ORDS', 'TIPOM'),
+      this.hasColumn('PV_CTR_ORDS', 'COMAD'),
+      this.hasColumn('PV_CTR_ORDS', 'CTD_C_M'),
+      this.hasColumn('PV_CTR_ORDS', 'MOTR'),
+      this.hasColumn('PV_CTR_ORDS', 'USR_AUT_CYM'),
+      this.hasColumn('PV_CTR_ORDS', 'FCN_AUT_CYM'),
+    ]);
+    const ctdCambioSql = hasCtdCambioColumn
+      ? 'TRY_CONVERT(FLOAT, o.CTD_C_M)'
+      : 'CAST(NULL AS FLOAT)';
+    const motivoSql = hasMotrColumn
+      ? 'TRY_CONVERT(INT, o.MOTR)'
+      : 'CAST(NULL AS INT)';
+    const tipoMSql = hasTipomColumn
+      ? 'TRY_CONVERT(INT, o.TIPOM)'
+      : 'CAST(NULL AS INT)';
+    const comadSql = hasComadColumn
+      ? 'o.COMAD'
+      : 'CAST(NULL AS NVARCHAR(2000))';
+    const usrAutSql = hasUsrAutColumn
+      ? 'o.USR_AUT_CYM'
+      : 'CAST(NULL AS NVARCHAR(255))';
+    const fcnAutSql = hasFcnAutColumn
+      ? 'o.FCN_AUT_CYM'
+      : 'CAST(NULL AS DATETIME)';
+    const authorizationDateSql = `COALESCE(${fcnAutSql}, o.FCNMOD)`;
+    // La consulta anterior expandía todos los arreglos iords del historial y
+    // hacía DISTINCT antes de unirlos a cada ORD. EXISTS evita materializar esa
+    // lista global y solo revisa los eventos de anulación necesarios.
+    const directCancellationExistsSql = hasAuditTable
+      ? `EXISTS (
+          SELECT 1
+          FROM dbo.AUDIT_LOG anulacion
+          CROSS APPLY OPENJSON(
+            CASE
+              WHEN ISJSON(anulacion.METADATA_JSON) = 1
+                THEN anulacion.METADATA_JSON
+              ELSE N'{}'
+            END,
+            '$.iords'
+          ) anulacionIord
+          WHERE anulacion.ACTION = 'ORD_ANULAR_LOTE'
+            AND UPPER(LTRIM(RTRIM(ISNULL(anulacion.MODULO, '')))) = 'ORDENES-TRABAJO'
+            AND UPPER(LTRIM(RTRIM(ISNULL(anulacion.ENTIDAD, '')))) = 'PV_CTR_ORDS'
+            AND UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), anulacionIord.[value])))) =
+                UPPER(LTRIM(RTRIM(ISNULL(o.IORD, ''))))
+        )`
+      : '1 = 0';
+    const approvedByInventoryChiefSql = `EXISTS (
+      SELECT 1
+      FROM dbo.USUARIO usuarioAutoriza
+      INNER JOIN dbo.ROL rolAutoriza ON rolAutoriza.IDROL = usuarioAutoriza.IDROL
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(usuarioAutoriza.USERNAME, '')))) =
+            UPPER(LTRIM(RTRIM(ISNULL(${usrAutSql}, ''))))
+        AND UPPER(LTRIM(RTRIM(ISNULL(rolAutoriza.CODIGO, '')))) = 'INVJEF'
+    )`;
+    const motivoMermaJoinSql = hasMotivoTable
+      ? `LEFT JOIN dbo.DAT_ORD_MOTM motivoMerma
+        ON TRY_CONVERT(INT, motivoMerma.IDM) = ${motivoSql}
+       AND TRY_CONVERT(INT, motivoMerma.TIPO) = 2`
+      : `LEFT JOIN (SELECT CAST(NULL AS INT) AS IDM, CAST(NULL AS NVARCHAR(255)) AS MOTM, CAST(NULL AS INT) AS TIPO) motivoMerma ON 1 = 0`;
+    const motivoCambioJoinSql = hasMotivoTable
+      ? `LEFT JOIN dbo.DAT_ORD_MOTM motivoCambio
+        ON TRY_CONVERT(INT, motivoCambio.IDM) = TRY_CONVERT(INT, o.MOTR)
+       AND TRY_CONVERT(INT, motivoCambio.TIPO) = 1`
+      : `LEFT JOIN (SELECT CAST(NULL AS INT) AS IDM, CAST(NULL AS NVARCHAR(255)) AS MOTM, CAST(NULL AS INT) AS TIPO) motivoCambio ON 1 = 0`;
+    const directCancellationPredicateSql = `(
+      TRY_CONVERT(INT, o.ESTATUS) = 2
+      AND TRY_CONVERT(FLOAT, o.ESTSEGU) = 4
+      AND NULLIF(LTRIM(RTRIM(ISNULL(o.IORD, ''))), '') IS NOT NULL
+      AND NULLIF(LTRIM(RTRIM(ISNULL(o.REEORD, ''))), '') IS NULL
+      AND NULLIF(LTRIM(RTRIM(ISNULL(${usrAutSql}, ''))), '') IS NULL
+      AND ISNULL(${tipoMSql}, 0) NOT IN (1, 2)
+      AND ${directCancellationExistsSql}
+    )`;
+    const params: unknown[] = [];
+    const where = [
+      `(
+        (
+          ${tipoMSql} IN (1, 2)
+          AND TRY_CONVERT(FLOAT, o.ESTSEGU) = 4
+          AND NULLIF(LTRIM(RTRIM(ISNULL(${usrAutSql}, ''))), '') IS NOT NULL
+          AND ${fcnAutSql} IS NOT NULL
+          AND ${approvedByInventoryChiefSql}
+        )
+        OR (
+          ${directCancellationPredicateSql}
+        )
+      )`,
+    ];
+
+    if (!scope.isAdmin) {
+      const sucParams = scope.allowedSucs.map(
+        (_, index) => `@${params.length + index}`,
+      );
+      where.push(
+        `UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (${sucParams.join(', ')})`,
+      );
+      params.push(...scope.allowedSucs.map((value) => value.toUpperCase()));
+    }
+    if (suc) {
+      where.push(`UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = @${params.length}`);
+      params.push(suc.toUpperCase());
+    }
+    const authorizationWhere = [...where];
+    const authorizationParams = [...params];
+    if (query.fecIni) {
+      where.push(
+        `CONVERT(DATE, ${authorizationDateSql}) >= @${params.length}`,
+      );
+      params.push(query.fecIni);
+    }
+    if (query.fecFin) {
+      where.push(
+        `CONVERT(DATE, ${authorizationDateSql}) <= @${params.length}`,
+      );
+      params.push(query.fecFin);
+    }
+    const iord = this.normalizeText(query.iord);
+    if (iord) {
+      where.push(
+        `(UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) LIKE @${params.length} OR UPPER(LTRIM(RTRIM(ISNULL(o.REEORD, '')))) LIKE @${params.length})`,
+      );
+      params.push(`%${iord.toUpperCase()}%`);
+    }
+    const idfol = this.normalizeText(query.idfol);
+    if (idfol) {
+      where.push(
+        `UPPER(LTRIM(RTRIM(ISNULL(o.IDFOL, '')))) LIKE @${params.length}`,
+      );
+      params.push(`%${idfol.toUpperCase()}%`);
+    }
+    const client = this.normalizeText(query.client);
+    if (client) {
+      where.push(
+        `(UPPER(LTRIM(RTRIM(ISNULL(o.CLIEN, '')))) LIKE @${params.length} OR UPPER(LTRIM(RTRIM(ISNULL(o.NCLIENTE, '')))) LIKE @${params.length})`,
+      );
+      params.push(`%${client.toUpperCase()}%`);
+    }
+    const tipo = this.normalizeText(query.tipo);
+    if (tipo) {
+      where.push(
+        `UPPER(LTRIM(RTRIM(ISNULL(o.TIPO, '')))) = @${params.length}`,
+      );
+      params.push(tipo.toUpperCase());
+    }
+    const labor = this.normalizeText(query.labor);
+    if (labor) {
+      where.push(`TRY_CONVERT(INT, o.LABOR) = TRY_CONVERT(INT, @${params.length})`);
+      params.push(labor);
+    }
+    const asign = this.normalizeText(query.asign);
+    if (asign) {
+      where.push(
+        `UPPER(LTRIM(RTRIM(ISNULL(o.ASIGN, '')))) = @${params.length}`,
+      );
+      params.push(asign.toUpperCase());
+    }
+    const iordAutorizacion = this.normalizeText(query.iordAutorizacion);
+    if (iordAutorizacion) {
+      where.push(
+        `UPPER(LTRIM(RTRIM(ISNULL(o.REEORD, '')))) LIKE @${params.length}`,
+      );
+      params.push(`%${iordAutorizacion.toUpperCase()}%`);
+    }
+    const iordOriginal = this.normalizeText(query.iordOriginal);
+    if (iordOriginal) {
+      where.push(
+        `UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) LIKE @${params.length}`,
+      );
+      params.push(`%${iordOriginal.toUpperCase()}%`);
+    }
+
+    if (filterOptionsOnly) {
+      return {
+        ok: true,
+        filterOptions: await this.resolveCachedMermasAutorizadasFilterOptions(
+          roleCode,
+          scope,
+          authorizationWhere,
+          authorizationParams,
+        ),
+      };
+    }
+
+    const whereSql = where.join(' AND ');
+    let rows = await this.dataSource.query(
+      `
+      WITH PageOrd AS (
+        SELECT
+          o.SUC,
+          o.IDFOL,
+          o.IORD,
+          o.REEORD,
+          o.OPV,
+          o.ART,
+          o.DESCART,
+          o.CTD,
+          ${ctdCambioSql} AS CTD_C_M,
+          o.CLIEN,
+          o.NCLIENTE,
+          o.LABOR,
+          o.ASIGN,
+          o.TIPO,
+          o.ESTSEGU,
+          ${motivoSql} AS MOTR,
+          ${tipoMSql} AS TIPOM,
+          ${comadSql} AS COMAD,
+          ${usrAutSql} AS USR_AUT_CYM,
+          ${authorizationDateSql} AS AUTHORIZATION_DATE,
+          CASE WHEN ${directCancellationPredicateSql} THEN 1 ELSE 0 END AS DIRECT_CANCELLED,
+          ${includeTotalCount ? 'COUNT_BIG(1) OVER ()' : 'CAST(NULL AS BIGINT)'} AS TOTAL_COUNT
+        FROM dbo.PV_CTR_ORDS o
+        WHERE ${whereSql}
+        ORDER BY ${authorizationDateSql} DESC, o.IORD DESC
+        OFFSET @${params.length} ROWS FETCH NEXT @${params.length + 1} ROWS ONLY
+      )
+      SELECT
+        LTRIM(RTRIM(ISNULL(o.SUC, ''))) AS SUC,
+        LTRIM(RTRIM(ISNULL(o.IDFOL, ''))) AS IDFOL,
+        LTRIM(RTRIM(ISNULL(o.IORD, ''))) AS IORD,
+        LTRIM(RTRIM(ISNULL(o.REEORD, ''))) AS IORD_NUEVA,
+        COALESCE(
+          NULLIF(LTRIM(RTRIM(CONCAT(
+            ISNULL(opv.NOMB, ''),
+            CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(opv.APELP, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(opv.APELP)) END,
+            CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(opv.APELM, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(opv.APELM)) END
+          ))), ''),
+          NULLIF(LTRIM(RTRIM(ISNULL(uopv.NOMBRE, ''))), ''),
+          LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
+        ) AS OPV,
+        LTRIM(RTRIM(ISNULL(o.ART, ''))) AS ART,
+        LTRIM(RTRIM(ISNULL(o.DESCART, ''))) AS DESCART,
+        TRY_CONVERT(FLOAT, o.CTD) AS CTD,
+        COALESCE(${ctdCambioSql}, TRY_CONVERT(FLOAT, o.CTD)) AS CTD_C_M,
+        LTRIM(RTRIM(ISNULL(o.CLIEN, ''))) AS CLIEN,
+        LTRIM(RTRIM(ISNULL(o.NCLIENTE, ''))) AS NCLIENTE,
+        TRY_CONVERT(FLOAT, precio.PVTA) AS COSTO_SERVICIO,
+        TRY_CONVERT(FLOAT, precio.CTOP) AS COSTO_ARTICULO,
+        LTRIM(RTRIM(ISNULL(l.LAB, ''))) AS LABORATORIO_DESC,
+        COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(
+          ISNULL(asignado.NOMB, ''),
+          CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(asignado.APELP, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(asignado.APELP)) END,
+          CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(asignado.APELM, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(asignado.APELM)) END
+        ))), ''), LTRIM(RTRIM(ISNULL(o.ASIGN, '')))) AS RESPONSABLE_MERMA,
+        LTRIM(RTRIM(ISNULL(o.TIPO, ''))) AS TIPO,
+        TRY_CONVERT(FLOAT, o.ESTSEGU) AS ESTSEGU,
+        LTRIM(RTRIM(ISNULL(o.ASIGN, ''))) AS ASIGN,
+        o.LABOR AS LABOR,
+        o.MOTR AS MOTR,
+        LTRIM(RTRIM(ISNULL(motivoMerma.MOTM, ''))) AS MOTIVO_MERMA,
+        CASE WHEN TRY_CONVERT(INT, o.TIPOM) = 1
+          THEN COALESCE(
+            NULLIF(LTRIM(RTRIM(ISNULL(motivoCambio.MOTM, ''))), ''),
+            LTRIM(RTRIM(ISNULL(CAST(o.COMAD AS NVARCHAR(MAX)), '')))
+          )
+          ELSE ''
+        END AS MOTIVO_CAMBIO_MATERIAL,
+        CASE
+          WHEN TRY_CONVERT(INT, o.TIPOM) = 1 THEN 'CAMBIO DE MATERIAL AUTORIZADO'
+          WHEN TRY_CONVERT(INT, o.TIPOM) = 2 THEN 'MERMA AUTORIZADA'
+          WHEN o.DIRECT_CANCELLED = 1 THEN 'ANULADA EN DAT_JAO_ORD'
+          ELSE ''
+        END AS MOVIMIENTO,
+        CASE WHEN TRY_CONVERT(FLOAT, o.ESTSEGU) = 4
+          THEN '4 ANULADA'
+          ELSE ''
+        END AS FLUJO,
+        LTRIM(RTRIM(ISNULL(${usrAutSql}, ''))) AS USR_AUT_CYM,
+        o.AUTHORIZATION_DATE AS FCN_AUT_CYM,
+        LTRIM(RTRIM(ISNULL(n.ART, ''))) AS ART_NUEVA,
+        LTRIM(RTRIM(ISNULL(n.DESCART, ''))) AS DESCART_NUEVA,
+        TRY_CONVERT(FLOAT, n.CTD) AS CTD_NUEVA
+      FROM PageOrd o
+      LEFT JOIN dbo.PV_CTR_ORDS n
+        ON LTRIM(RTRIM(ISNULL(n.IORD, ''))) = LTRIM(RTRIM(ISNULL(o.REEORD, '')))
+      LEFT JOIN dbo.DAT_LAB l
+        ON TRY_CONVERT(INT, l.ID) = TRY_CONVERT(INT, o.LABOR)
+      LEFT JOIN dbo.PV_OPV asignado
+        ON UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), asignado.IDOPV)))) =
+           UPPER(LTRIM(RTRIM(ISNULL(o.ASIGN, ''))))
+      LEFT JOIN dbo.USUARIO uopv
+        ON TRY_CONVERT(INT, uopv.IDUSUARIO) = TRY_CONVERT(INT, o.OPV)
+      LEFT JOIN dbo.PV_OPV opv
+        ON LTRIM(RTRIM(ISNULL(CAST(opv.IDOPV AS NVARCHAR(100)), ''))) =
+           LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
+      ${motivoCambioJoinSql}
+      OUTER APPLY (
+        SELECT TOP 1 art.PVTA, art.CTOP
+        FROM dbo.DAT_ART art
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(art.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.ART, ''))))
+          AND UPPER(LTRIM(RTRIM(ISNULL(art.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.SUC, ''))))
+        ORDER BY TRY_CONVERT(INT, ISNULL(art.BLOQ, 0)) ASC
+      ) precio
+      ${motivoMermaJoinSql}
+      ORDER BY o.AUTHORIZATION_DATE DESC, o.IORD DESC
+      `,
+      [...params, (page - 1) * pageSize, pageSize],
+    );
+
+    let total = 0;
+    if (Array.isArray(rows) && rows.length) {
+      total = Number(rows[0]?.TOTAL_COUNT ?? rows[0]?.total_count ?? 0);
+      rows = rows.map((row: Record<string, unknown>) => {
+        delete row.TOTAL_COUNT;
+        delete row.total_count;
+        return row;
+      });
+    } else if (includeTotalCount && page > 1) {
+      // Si solicitan una página fuera del rango, conserva el total exacto aunque
+      // COUNT_BIG OVER() no pueda devolverlo en una página vacía.
+      const countRows = await this.dataSource.query(
+        `SELECT COUNT_BIG(1) AS total
+         FROM dbo.PV_CTR_ORDS o
+         WHERE ${whereSql}`,
+        params,
+      );
+      total = Number(countRows?.[0]?.total ?? countRows?.[0]?.TOTAL ?? 0);
+    }
+
+    const rawItems = (rows ?? []) as Record<string, unknown>[];
+    const items = attachPrices
+      ? await this.attachChargedArticlePrices(rawItems)
+      : rawItems;
+    return { items, total, page, pageSize };
+  }
+
+  private async resolveCachedMermasAutorizadasFilterOptions(
+    roleCode: string,
+    scope: SucScope,
+    where: string[],
+    params: unknown[],
+  ): Promise<MermasAutorizadasFilterOptions> {
+    const key = JSON.stringify({
+      roleCode,
+      isAdmin: scope.isAdmin,
+      allowedSucs: [...scope.allowedSucs].sort(),
+      requestedSuc: scope.requestedSuc,
+    });
+    const now = Date.now();
+    const cached = this.mermasFilterOptionsCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.value;
+    if (cached) this.mermasFilterOptionsCache.delete(key);
+
+    const pending = this.mermasFilterOptionsInFlight.get(key);
+    if (pending) return pending;
+
+    const request = this.queryMermasAutorizadasFilterOptions(
+      scope,
+      where,
+      params,
+    )
+      .then((value) => {
+        this.mermasFilterOptionsCache.set(key, {
+          expiresAt: Date.now() + 60_000,
+          value,
+        });
+        return value;
+      })
+      .finally(() => this.mermasFilterOptionsInFlight.delete(key));
+    this.mermasFilterOptionsInFlight.set(key, request);
+    return request;
+  }
+
+  private async queryMermasAutorizadasFilterOptions(
+    scope: SucScope,
+    where: string[],
+    params: unknown[],
+  ): Promise<MermasAutorizadasFilterOptions> {
+    const [rows, laboratorios] = await Promise.all([
+      this.dataSource.query(
+        `SET NOCOUNT ON;
+         IF OBJECT_ID('tempdb..#MermasAutorizadasFilterOptions') IS NOT NULL
+           DROP TABLE #MermasAutorizadasFilterOptions;
+         SELECT DISTINCT
+           LTRIM(RTRIM(ISNULL(o.TIPO, ''))) AS TIPO,
+           LTRIM(RTRIM(ISNULL(o.ASIGN, ''))) AS ASIGN
+         INTO #MermasAutorizadasFilterOptions
+         FROM dbo.PV_CTR_ORDS o
+         WHERE ${where.join(' AND ')}
+         ;
+         SELECT OPTION_TYPE, VALUE, LABEL
+         FROM (
+           SELECT
+             CAST('TIPO' AS NVARCHAR(10)) AS OPTION_TYPE,
+             tipos.TIPO AS VALUE,
+             tipos.TIPO AS LABEL
+           FROM (
+             SELECT DISTINCT TIPO
+             FROM #MermasAutorizadasFilterOptions
+             WHERE NULLIF(TIPO, '') IS NOT NULL
+           ) tipos
+           UNION ALL
+           SELECT
+             CAST('ASIGN' AS NVARCHAR(10)) AS OPTION_TYPE,
+             asignados.ASIGN AS VALUE,
+             COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(
+               ISNULL(p.NOMB, ''),
+               CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(p.APELP, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(p.APELP)) END,
+               CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(p.APELM, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(p.APELM)) END
+             ))), ''), asignados.ASIGN) AS LABEL
+           FROM (
+             SELECT DISTINCT ASIGN
+             FROM #MermasAutorizadasFilterOptions
+             WHERE NULLIF(ASIGN, '') IS NOT NULL
+           ) asignados
+           LEFT JOIN dbo.PV_OPV p
+             ON UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), p.IDOPV)))) =
+                UPPER(asignados.ASIGN)
+         ) opciones
+         ORDER BY OPTION_TYPE, VALUE;
+         DROP TABLE #MermasAutorizadasFilterOptions;`,
+        params,
+      ),
+      this.resolveLaboratorios(scope),
+    ]);
+    const optionRows = Array.isArray(rows)
+      ? (rows as Record<string, unknown>[])
+      : [];
+    const uniqueOptions = (optionType: string) => {
+      const seen = new Set<string>();
+      return optionRows.flatMap((row) => {
+        if (
+          this.normalizeUpper(row.OPTION_TYPE) !== optionType
+        ) {
+          return [];
+        }
+        const value = this.normalizeText(row.VALUE);
+        if (!value || seen.has(value.toUpperCase())) return [];
+        seen.add(value.toUpperCase());
+        return [{ value, label: this.normalizeText(row.LABEL) ?? value }];
+      });
+    };
+    return {
+      tipos: uniqueOptions('TIPO'),
+      laboratorios,
+      asignados: uniqueOptions('ASIGN'),
+    };
+  }
+
+  async exportMermasAutorizadasExcel(
+    query: MermasAutorizadasQueryDto,
+    user: JwtPayload,
+  ): Promise<Buffer> {
+    const pageSize = 100;
+    const first = await this.listMermasAutorizadas(
+      { ...query, page: 1, pageSize },
+      user,
+      false,
+      true,
+      false,
+    );
+    const rows = [...(first.items ?? [])];
+    const pageCount = Math.ceil(Number(first.total ?? 0) / pageSize);
+    for (let page = 2; page <= pageCount; page += 1) {
+      const result = await this.listMermasAutorizadas(
+        { ...query, page, pageSize },
+        user,
+        false,
+        false,
+        false,
+      );
+      rows.push(...(result.items ?? []));
+    }
+
+    const pricedRows = await this.attachChargedArticlePrices(rows);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Mermas autorizadas');
+    sheet.columns = [
+      { header: 'SUC', key: 'SUC', width: 14 },
+      { header: 'Tipo', key: 'TIPO', width: 18 },
+      { header: 'Movimiento', key: 'MOVIMIENTO', width: 34 },
+      { header: 'OPV', key: 'OPV', width: 30 },
+      { header: 'Laboratorio', key: 'LABORATORIO_DESC', width: 28 },
+      { header: 'IORD', key: 'IORD', width: 22 },
+      { header: 'Cliente', key: 'CLIENTE', width: 32 },
+      { header: 'Artículo', key: 'ART', width: 20 },
+      { header: 'Descripción', key: 'DESCART', width: 36 },
+      { header: 'CTD', key: 'CTD_C_M', width: 12 },
+      { header: 'Flujo', key: 'FLUJO', width: 18 },
+      { header: 'Asignado', key: 'RESPONSABLE_MERMA', width: 32 },
+      { header: 'Motivo de Merma', key: 'MOTIVO_MERMA', width: 44 },
+      { header: 'Motivo Cambio de Material', key: 'MOTIVO_CAMBIO_MATERIAL', width: 44 },
+      { header: 'IORD autorización', key: 'IORD_NUEVA', width: 22 },
+      { header: 'Folio', key: 'IDFOL', width: 28 },
+      { header: 'Artículo nuevo', key: 'ART_NUEVA', width: 20 },
+      { header: 'Descripción nueva', key: 'DESCART_NUEVA', width: 36 },
+      { header: 'F. autorización', key: 'FCN_AUT_CYM', width: 22 },
+      { header: 'Precio cobrado', key: 'PRECIO_COBRADO', width: 18 },
+      { header: 'Costo del artículo', key: 'COSTO_ARTICULO', width: 20 },
+      { header: 'Costo del servicio', key: 'COSTO_SERVICIO', width: 20 },
+      { header: 'Autorizó', key: 'USR_AUT_CYM', width: 22 },
+    ];
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF071428' },
+    };
+    for (const row of pricedRows) {
+      sheet.addRow({
+        ...row,
+        CLIENTE: `${this.normalizeText(row.CLIEN) ?? ''} ${this.normalizeText(row.NCLIENTE) ?? ''}`.trim(),
+        FCN_AUT_CYM:
+          row.FCN_AUT_CYM instanceof Date
+            ? row.FCN_AUT_CYM
+            : this.normalizeText(row.FCN_AUT_CYM),
+      });
+    }
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: 'A1', to: 'W1' };
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
   }
 
   private async listOrdenesVencerRows(
@@ -747,11 +1349,12 @@ export class OrdenesTrabajoService {
   private async listReportHistoricalFlow(
     query: ListOrdenesTrabajoQueryDto,
     user: JwtPayload,
-    flowCode: number,
+    flowCode: number | null,
     context: {
       page: number;
       pageSize: number;
       roleCode: string;
+      responseRoleCode: string;
       panelMode: string;
       scope: SucScope;
       allowedActions: string[];
@@ -763,17 +1366,25 @@ export class OrdenesTrabajoService {
       otrosOptions: unknown[];
     },
   ) {
-    const selectedFlowCode = this.formatStatusCode(flowCode);
-    const hasSelectedFlow = context.allowedStatusCodes.some(
-      (status) => this.formatStatusCode(status) === selectedFlowCode,
-    );
+    const selectedFlowCode =
+      flowCode == null ? 'NULL' : this.formatStatusCode(flowCode);
+    const hasSelectedFlow =
+      flowCode == null
+        ? context.includeNullFlow
+        : context.allowedStatusCodes.some(
+            (status) => this.formatStatusCode(status) === selectedFlowCode,
+          );
+    const flowHistoryPredicate =
+      flowCode == null ? 'h.ESTSEGU IS NULL' : `h.ESTSEGU = ${flowCode}`;
+    const flowCatalogPredicate =
+      flowCode == null ? '1 = 0' : `TRY_CONVERT(FLOAT, e.ESTA) = ${flowCode}`;
     if (!hasSelectedFlow) {
       return {
         ok: true,
         page: context.page,
         pageSize: context.pageSize,
         total: 0,
-        roleCode: this.isAdmin(user) ? 'ADMIN' : context.roleCode,
+        roleCode: context.responseRoleCode,
         panelMode: context.panelMode,
         allowedSucs: context.scope.allowedSucs,
         allowedActions: context.allowedActions,
@@ -801,17 +1412,79 @@ export class OrdenesTrabajoService {
       ((context.roleCode === 'JEF_TALLER' &&
         (flowCode === 7 || flowCode === 10)) ||
         (context.roleCode === 'ANALISTA_ORD' && flowCode === 10));
-    const flowDateClause =
+    const includeFlow10MaterialCost =
       query.reportMode === true &&
-      context.roleCode === 'ANALISTA_ORD' &&
-      (flowCode === 4 || flowCode === 7)
+      flowCode === 10 &&
+      context.roleCode === 'JEF_TALLER';
+    const materialCostSelect = includeFlow10MaterialCost
+      ? 'TRY_CONVERT(FLOAT, material.CTOP) AS COSTO_MATERIAL,'
+      : '';
+    const servicePriceSelect = includeFlow10MaterialCost
+      ? 'TRY_CONVERT(FLOAT, material.PVTA) AS COSTO_SERVICIO,'
+      : 'TRY_CONVERT(FLOAT, o.CTORD) AS COSTO_SERVICIO,';
+    const materialCostJoin = includeFlow10MaterialCost
+      ? `OUTER APPLY (
+          SELECT TOP 1 art.CTOP, art.PVTA
+          FROM dbo.DAT_ART art
+          WHERE UPPER(LTRIM(RTRIM(ISNULL(art.SUC, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.SUC, ''))))
+            AND UPPER(LTRIM(RTRIM(ISNULL(art.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.ART, ''))))
+          ORDER BY TRY_CONVERT(INT, ISNULL(art.BLOQ, 0)) ASC
+        ) material`
+      : '';
+    const flowDateClause =
+      query.reportMode === true && flowCode == null
         ? `AND (@0 IS NULL OR h.FCNR >= TRY_CONVERT(DATE, @0))
           AND (@1 IS NULL OR h.FCNR < DATEADD(DAY, 1, TRY_CONVERT(DATE, @1)))`
-        : reportFiltersByOrderDates
-          ? `AND (@0 IS NULL OR TRY_CONVERT(DATE, o.FCNS) >= TRY_CONVERT(DATE, @0))
+        : query.reportMode === true &&
+            context.roleCode === 'ANALISTA_ORD' &&
+            (flowCode === 4 || flowCode === 7)
+          ? `AND (@0 IS NULL OR h.FCNR >= TRY_CONVERT(DATE, @0))
+          AND (@1 IS NULL OR h.FCNR < DATEADD(DAY, 1, TRY_CONVERT(DATE, @1)))`
+          : reportFiltersByOrderDates
+            ? `AND (@0 IS NULL OR TRY_CONVERT(DATE, o.FCNS) >= TRY_CONVERT(DATE, @0))
           AND (@1 IS NULL OR TRY_CONVERT(DATE, ISNULL(o.FCNM, o.FCNS)) <= TRY_CONVERT(DATE, @1))`
-          : `AND (@0 IS NULL OR h.NEXT_FCNR IS NULL OR h.NEXT_FCNR > TRY_CONVERT(DATE, @0))
+            : `AND (@0 IS NULL OR h.NEXT_FCNR IS NULL OR h.NEXT_FCNR > TRY_CONVERT(DATE, @0))
           AND (@1 IS NULL OR h.FCNR < DATEADD(DAY, 1, TRY_CONVERT(DATE, @1)))`;
+    const isJefeGarantiaReport =
+      query.reportMode === true &&
+      context.roleCode === 'JEF_TALLER' &&
+      flowCode === 9.3;
+    const needsFlowIntervalBoundary =
+      this.normalizeText(query.fecIni) != null ||
+      this.normalizeText(query.fecFin) != null;
+    const flowHistoryCte = isJefeGarantiaReport
+      ? `FlowHistoryIntervals AS (
+        SELECT
+          h.IORD,
+          h.ID,
+          TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
+          h.FCNR,
+          ${needsFlowIntervalBoundary ? 'nextFlow.FCNR' : 'CAST(NULL AS DATETIME)'} AS NEXT_FCNR
+        FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
+        ${needsFlowIntervalBoundary ? `OUTER APPLY (
+          SELECT TOP (1) h2.FCNR
+          FROM dbo.PV_CTR_ORDS_FLUJO_HIST h2
+          WHERE UPPER(LTRIM(RTRIM(h2.IORD))) = UPPER(LTRIM(RTRIM(h.IORD)))
+            AND (
+              h2.FCNR > h.FCNR
+              OR (h2.FCNR = h.FCNR AND h2.ID > h.ID)
+            )
+          ORDER BY h2.FCNR, h2.ID
+        ) nextFlow` : ''}
+        WHERE h.ESTSEGU = 9.3
+      )`
+      : `FlowHistoryIntervals AS (
+        SELECT
+          h.IORD,
+          h.ID,
+          TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
+          h.FCNR,
+          LEAD(h.FCNR) OVER (
+            PARTITION BY UPPER(LTRIM(RTRIM(h.IORD)))
+            ORDER BY h.FCNR, h.ID
+          ) AS NEXT_FCNR
+        FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
+      )`;
     const params: unknown[] = [
       this.normalizeText(query.fecIni),
       this.normalizeText(query.fecFin),
@@ -840,18 +1513,7 @@ export class OrdenesTrabajoService {
     params.push(context.pageSize);
     const rows = await this.dataSource.query(
       `
-      WITH FlowHistoryIntervals AS (
-        SELECT
-          h.IORD,
-          h.ID,
-          TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
-          h.FCNR,
-          LEAD(h.FCNR) OVER (
-            PARTITION BY UPPER(LTRIM(RTRIM(h.IORD)))
-            ORDER BY h.FCNR, h.ID
-          ) AS NEXT_FCNR
-        FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
-      ),
+      WITH ${flowHistoryCte},
       FlowOrders AS (
         SELECT
           o.IORD,
@@ -884,7 +1546,8 @@ export class OrdenesTrabajoService {
           o.LABOR,
           o.MOTR,
           o.SUC,
-          TRY_CONVERT(FLOAT, o.CTORD) AS COSTO_SERVICIO,
+          ${servicePriceSelect}
+          ${materialCostSelect}
           h.FCNR AS FECHA_FLUJO,
           ROW_NUMBER() OVER (
             PARTITION BY UPPER(LTRIM(RTRIM(o.IORD)))
@@ -893,16 +1556,17 @@ export class OrdenesTrabajoService {
         FROM dbo.PV_CTR_ORDS o
         INNER JOIN FlowHistoryIntervals h
           ON UPPER(LTRIM(RTRIM(h.IORD))) = UPPER(LTRIM(RTRIM(o.IORD)))
-         AND h.ESTSEGU = ${flowCode}
+         AND ${flowHistoryPredicate}
         LEFT JOIN dbo.DAT_EST_ORD e
-          ON TRY_CONVERT(FLOAT, e.ESTA) = ${flowCode}
+          ON ${flowCatalogPredicate}
         LEFT JOIN dbo.USUARIO uopv
           ON TRY_CONVERT(INT, uopv.IDUSUARIO) = TRY_CONVERT(INT, o.OPV)
         LEFT JOIN dbo.PV_OPV opv
           ON LTRIM(RTRIM(ISNULL(CAST(opv.IDOPV AS NVARCHAR(100)), ''))) = LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
         LEFT JOIN dbo.DAT_LAB lab
           ON TRY_CONVERT(INT, lab.ID) = TRY_CONVERT(INT, o.LABOR)
-        WHERE TRY_CONVERT(INT, o.ESTATUS) = 2
+        ${materialCostJoin}
+        WHERE ${isJefeGarantiaReport ? '1 = 1' : 'TRY_CONVERT(INT, o.ESTATUS) = 2'}
           ${flowDateClause}
           AND (@2 IS NULL OR LTRIM(RTRIM(ISNULL(o.IORD, ''))) LIKE '%' + @2 + '%')
           AND (@3 IS NULL OR LTRIM(RTRIM(ISNULL(o.IDFOL, ''))) LIKE '%' + @3 + '%')
@@ -972,13 +1636,17 @@ export class OrdenesTrabajoService {
       context.roleCode,
       selectedFlowCode,
     );
+    const reportItems =
+      query.reportMode === true
+        ? await this.attachChargedArticlePrices(visibleItems)
+        : visibleItems;
     const asignLabels = await this.resolveOpvLabels(
-      visibleItems.map((item) => item.ASIGN),
+      reportItems.map((item) => item.ASIGN),
     );
     const opvLabels = await this.resolveUsuarioLabels(
-      visibleItems.map((item) => item.OPV_ID ?? item.OPV),
+      reportItems.map((item) => item.OPV_ID ?? item.OPV),
     );
-    const labeledItems = visibleItems.map((item) => {
+    const labeledItems = reportItems.map((item) => {
       const asignId = this.normalizeText(item.ASIGN);
       const asignLabel = asignId == null ? null : asignLabels.get(asignId);
       const opvId = this.normalizeText(item.OPV_ID ?? item.OPV);
@@ -999,7 +1667,7 @@ export class OrdenesTrabajoService {
       page: context.page,
       pageSize: context.pageSize,
       total: this.toInt(first?.TOTAL_COUNT ?? first?.total_count) ?? 0,
-      roleCode: this.isAdmin(user) ? 'ADMIN' : context.roleCode,
+      roleCode: context.responseRoleCode,
       panelMode: context.panelMode,
       allowedSucs: context.scope.allowedSucs,
       allowedActions: context.allowedActions,
@@ -1009,6 +1677,177 @@ export class OrdenesTrabajoService {
       otrosOptions: context.otrosOptions,
       items: labeledItems,
     };
+  }
+
+  private async attachChargedArticlePrices(
+    items: Record<string, unknown>[],
+  ): Promise<Record<string, unknown>[]> {
+    if (!items.length) return items;
+
+    const references = items.map((item) => ({
+      item,
+      iord: this.normalizeUpper(item.IORD),
+      idfol: this.normalizeUpper(item.IDFOL),
+      art: this.normalizeUpper(item.ART),
+    }));
+    const prices = new Map<string, number>();
+    const itemKey = (reference: (typeof references)[number]) =>
+      reference.iord ?? '';
+    const priceFrom = (
+      row: Record<string, unknown>,
+      unitField: string,
+      totalField: string,
+      quantityField: string,
+    ) => {
+      const unitPrice = this.toFloat(row[unitField]);
+      if (unitPrice != null && unitPrice >= 0) return unitPrice;
+      const total = this.toFloat(row[totalField]);
+      const quantity = this.toFloat(row[quantityField]);
+      return total != null && total >= 0 && quantity != null && quantity > 0
+        ? this.roundMoney(total / quantity)
+        : null;
+    };
+    const distinct = (values: Array<string | null>) => [
+      ...new Set(values.filter((value): value is string => value != null)),
+    ];
+
+    const referencesWithIord = references.filter(
+      (reference) => reference.iord != null,
+    );
+    if (await this.hasTable('PV_ORD_CAMBIO_MERMA_PRECIO')) {
+      const iords = distinct(
+        referencesWithIord.map((reference) => reference.iord),
+      );
+      for (let start = 0; start < iords.length; start += 500) {
+        const batch = iords.slice(start, start + 500);
+        const placeholders = batch.map((_, index) => `@${index}`).join(',');
+        const rows = await this.dataSource.query(
+          `
+          SELECT IORD, ART, TRY_CONVERT(FLOAT, PVTA_UNITARIO) AS PVTA_UNITARIO,
+                 FCN_MOD, FCN_ALT
+          FROM dbo.PV_ORD_CAMBIO_MERMA_PRECIO
+          WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) IN (${placeholders})
+          ORDER BY ISNULL(FCN_MOD, FCN_ALT) DESC
+          `,
+          batch,
+        );
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const iord = this.normalizeUpper(row.IORD);
+          const article = this.normalizeUpper(row.ART);
+          const price = this.toFloat(row.PVTA_UNITARIO);
+          const matchingOrder = referencesWithIord.some(
+            (reference) =>
+              reference.iord === iord &&
+              (reference.art == null || reference.art === article),
+          );
+          if (
+            iord &&
+            matchingOrder &&
+            price != null &&
+            price >= 0 &&
+            !prices.has(iord)
+          ) {
+            prices.set(iord, price);
+          }
+        }
+      }
+    }
+
+    const attachFromTicketSource = async (
+      tableName: 'PV_TICKET_LOG' | 'FACT_TICKET_SHP',
+    ) => {
+      if (!(await this.hasTable(tableName))) return;
+      const unresolved = referencesWithIord.filter(
+        (reference) => !prices.has(itemKey(reference)),
+      );
+      for (let start = 0; start < unresolved.length; start += 200) {
+        const batch = unresolved.slice(start, start + 200);
+        const iords = distinct(batch.map((reference) => reference.iord));
+        const pairs = batch.filter(
+          (reference) => reference.idfol != null && reference.art != null,
+        );
+        const folios = distinct(pairs.map((reference) => reference.idfol));
+        const articles = distinct(pairs.map((reference) => reference.art));
+        const params: string[] = [];
+        const inClause = (values: string[]) => {
+          const startIndex = params.length;
+          const placeholders = values.map(
+            (_, index) => `@${startIndex + index}`,
+          );
+          params.push(...values);
+          return placeholders.join(',');
+        };
+        const conditions: string[] = [];
+        if (iords.length) {
+          conditions.push(
+            `UPPER(LTRIM(RTRIM(ISNULL(ORD, '')))) IN (${inClause(iords)})`,
+          );
+        }
+        if (folios.length && articles.length) {
+          conditions.push(
+            `(UPPER(LTRIM(RTRIM(ISNULL(IDFOL, '')))) IN (${inClause(folios)})
+              AND UPPER(LTRIM(RTRIM(ISNULL(ART, '')))) IN (${inClause(articles)}))`,
+          );
+        }
+        if (!conditions.length) continue;
+        const ticketSql =
+          tableName === 'PV_TICKET_LOG'
+            ? `SELECT ORD, IDFOL, ART, PVTA, PVTAT, CTD, UPDATED_AT, ID
+               FROM dbo.PV_TICKET_LOG WHERE ${conditions.join(' OR ')}`
+            : `SELECT ORD, IDFOL, NoIdentificacion AS ART, ValorUnitario AS PVTA,
+                      PVTAT, Cantidad AS CTD, CAST(NULL AS DATETIME) AS UPDATED_AT, IDD AS ID
+               FROM dbo.FACT_TICKET_SHP WHERE ${conditions
+                 .map((condition) =>
+                   condition.replaceAll('ART', 'NoIdentificacion'),
+                 )
+                 .join(' OR ')}`;
+        const rows = await this.dataSource.query(ticketSql, params);
+        const candidates = Array.isArray(rows)
+          ? (rows as Record<string, unknown>[])
+          : [];
+        for (const reference of batch) {
+          const key = itemKey(reference);
+          if (!key || prices.has(key)) continue;
+          const matching = candidates
+            .filter((row) => {
+              const rowIord = this.normalizeUpper(row.ORD);
+              const rowFolio = this.normalizeUpper(row.IDFOL);
+              const rowArticle = this.normalizeUpper(row.ART);
+              return (
+                (rowIord === reference.iord &&
+                  (reference.art == null || rowArticle === reference.art)) ||
+                (reference.idfol != null &&
+                  reference.art != null &&
+                  rowFolio === reference.idfol &&
+                  rowArticle === reference.art)
+              );
+            })
+            .sort((left, right) => {
+              const leftExact =
+                this.normalizeUpper(left.ORD) === reference.iord ? 0 : 1;
+              const rightExact =
+                this.normalizeUpper(right.ORD) === reference.iord ? 0 : 1;
+              if (leftExact !== rightExact) return leftExact - rightExact;
+              const byUpdatedAt =
+                this.toTime(right.UPDATED_AT) - this.toTime(left.UPDATED_AT);
+              return byUpdatedAt !== 0
+                ? byUpdatedAt
+                : String(right.ID ?? '').localeCompare(String(left.ID ?? ''));
+            });
+          const price = matching.length
+            ? priceFrom(matching[0], 'PVTA', 'PVTAT', 'CTD')
+            : null;
+          if (price != null) prices.set(key, price);
+        }
+      }
+    };
+
+    await attachFromTicketSource('PV_TICKET_LOG');
+    await attachFromTicketSource('FACT_TICKET_SHP');
+    return references.map((reference) => ({
+      ...reference.item,
+      PRECIO_COBRADO: prices.get(itemKey(reference)) ?? null,
+    }));
   }
 
   private async listMb51Movimiento455Report(
@@ -1071,7 +1910,7 @@ export class OrdenesTrabajoService {
         o.OPV AS OPV,
         o.CLIEN AS CLIEN,
         o.NCLIENTE AS NCLIENTE,
-        o.CTORD AS COSTO_SERVICIO,
+        a.PVTA AS COSTO_SERVICIO,
         COALESCE(
           NULLIF(LTRIM(RTRIM(CONCAT(
             ISNULL(responsable.NOMB, ''),
@@ -1084,13 +1923,22 @@ export class OrdenesTrabajoService {
         o.ESTSEGU AS ESTSEGU,
         o.ESTSEGU AS ESTSEGU_DESC,
         o.ASIGN AS ASIGN,
+        o.ASIGN AS ASIGN_ID,
+        COALESCE(
+          NULLIF(LTRIM(RTRIM(CONCAT(
+            ISNULL(responsable.NOMB, ''),
+            CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(responsable.APELP, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(responsable.APELP)) END,
+            CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(responsable.APELM, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(responsable.APELM)) END
+          ))), ''),
+          LTRIM(RTRIM(ISNULL(o.ASIGN, '')))
+        ) AS ASIGN_LABEL,
         o.LABOR AS LABOR,
         o.TIPOM AS TIPOM,
         o.MOTR AS MOTR,
         o.FCNTE AS FCNTE
       FROM dbo.DAT_MB51 m
       OUTER APPLY (
-        SELECT TOP 1 DES, CTOP
+        SELECT TOP 1 DES, CTOP, PVTA
         FROM dbo.DAT_ART art
         WHERE art.ART = m.ART
         ORDER BY CASE WHEN art.SUC = m.SUC THEN 0 ELSE 1 END
@@ -1143,6 +1991,10 @@ export class OrdenesTrabajoService {
       params,
     );
     const total = this.toInt(rows?.[0]?.TOTAL_COUNT) ?? 0;
+    const items =
+      query.reportMode === true
+        ? await this.attachChargedArticlePrices(rows)
+        : rows;
     return {
       ok: true,
       page: context.page,
@@ -1156,7 +2008,7 @@ export class OrdenesTrabajoService {
       incidenciaOptions: context.incidenciaOptions,
       laboratorios: context.laboratorios,
       otrosOptions: context.otrosOptions,
-      items: rows,
+      items,
     };
   }
 
@@ -1294,10 +2146,20 @@ export class OrdenesTrabajoService {
       query.otros !== true;
     const includeFlow10ServiceCost =
       selectedReportFlow10 && report.roleCode === 'JEF_TALLER';
+    const includeOtrosServiceCost =
+      query.reportMode === true &&
+      query.otros === true &&
+      report.roleCode === 'JEF_TALLER';
+    const includeFlow10MaterialCost =
+      query.reportMode === true &&
+      this.toFloat(query.estsegu) === 10 &&
+      query.otros !== true &&
+      report.roleCode === 'JEF_TALLER';
+    const includeChargedArticlePrice = query.reportMode === true;
     const includeAnulacionMotivo =
       query.reportMode === true &&
       this.toFloat(query.estsegu) === 4 &&
-      report.roleCode === 'ANALISTA_ORD';
+      ['ANALISTA_ORD', 'CONTROL_CALIDAD'].includes(report.roleCode);
     const includeFlowMovementActor =
       query.reportMode !== true &&
       this.normalizePanelMode(query.panelMode) === 'estado' &&
@@ -1312,7 +2174,13 @@ export class OrdenesTrabajoService {
       { header: 'Articulo', key: 'articulo', width: 16 },
       { header: 'Descripcion', key: 'descripcion', width: 42 },
       { header: 'CTD', key: 'ctd', width: 10 },
-      ...(includeFlow10ServiceCost
+      ...(includeChargedArticlePrice
+        ? [{ header: 'Precio cobrado', key: 'precioCobrado', width: 18 }]
+        : []),
+      ...(includeFlow10MaterialCost
+        ? [{ header: 'Costo del material', key: 'costoMaterial', width: 20 }]
+        : []),
+      ...(includeFlow10ServiceCost || includeOtrosServiceCost
         ? [{ header: 'Costo del servicio', key: 'costoServicio', width: 18 }]
         : []),
       ...(includeAnulacionMotivo
@@ -1343,12 +2211,17 @@ export class OrdenesTrabajoService {
       fgColor: { argb: 'FF0B1B33' },
     };
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
-    const lastColumn =
-      includeFlow10ServiceCost ||
-      includeAnulacionMotivo ||
-      includeFlowMovementActor
-        ? 'N'
-        : 'M';
+    const optionalColumnCount = [
+      includeFlow10ServiceCost,
+      includeOtrosServiceCost,
+      includeFlow10MaterialCost,
+      includeChargedArticlePrice,
+      includeAnulacionMotivo,
+      includeFlowMovementActor,
+    ].filter(Boolean).length;
+    const lastColumn = String.fromCharCode(
+      'M'.charCodeAt(0) + optionalColumnCount,
+    );
     sheet.autoFilter = `A1:${lastColumn}1`;
     const text = (value: unknown) =>
       value == null ? '' : String(value).trim();
@@ -1387,11 +2260,20 @@ export class OrdenesTrabajoService {
         articulo: text(item.ART),
         descripcion: text(item.DESCART),
         ctd: item.CTD ?? '',
-        ...(includeFlow10ServiceCost
+        ...(includeChargedArticlePrice
+          ? { precioCobrado: item.PRECIO_COBRADO ?? '' }
+          : {}),
+        ...(includeFlow10MaterialCost
+          ? { costoMaterial: item.COSTO_MATERIAL ?? '' }
+          : {}),
+        ...(includeFlow10ServiceCost || includeOtrosServiceCost
           ? { costoServicio: item.COSTO_SERVICIO ?? '' }
           : {}),
         ...(includeAnulacionMotivo ? { motivo: text(item.MOTIVO) } : {}),
-        flujo: `${text(item.ESTSEGU)} ${text(item.ESTSEGU_DESC)}`.trim(),
+        flujo:
+          selectedHistoricalFlow?.toUpperCase() === 'NULL'
+            ? 'SIN FLUJO'
+            : `${text(item.ESTSEGU)} ${text(item.ESTSEGU_DESC)}`.trim(),
         ...(includeFlowMovementActor
           ? { quienRealizo: text(item.QUIEN_REALIZO) }
           : {}),
@@ -1542,6 +2424,226 @@ export class OrdenesTrabajoService {
     );
   }
 
+  async cancelarCambioMerma(
+    iordRaw: string,
+    dto: CancelarCambioMermaDto,
+    user: JwtPayload,
+    ip: string | null,
+  ) {
+    const iord = this.requireIord(iordRaw);
+    const tipo = this.normalizeCambioMermaTipo(dto.tipo);
+    const motivoCancelacion = this.normalizeText(dto.motivoCancelacion);
+    if (!motivoCancelacion || motivoCancelacion.length < 3) {
+      throw new BadRequestException(
+        'El motivo de cancelación es obligatorio y debe tener al menos 3 caracteres.',
+      );
+    }
+    if (motivoCancelacion.length > 255) {
+      throw new BadRequestException(
+        'El motivo de cancelación no puede exceder 255 caracteres.',
+      );
+    }
+    if (!this.isAdmin(user)) {
+      const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
+      const allowedRoles =
+        tipo === 1
+          ? ['JEF_TALLER', 'ANALISTA_ORD', 'ENC_MAQUILA', 'ENC_BISEL']
+          : [
+              'JEF_TALLER',
+              'ANALISTA_ORD',
+              'ANALISTA',
+              'ENC_MAQUILA',
+              'ENC_BISEL',
+              'AUX_JEF_TALLER',
+              'AUX_JEFE_TALLER',
+              'AUXILIAR_JEF_TALLER',
+              'AUXILIAR_JEFE_TALLER',
+            ];
+      if (!roleCode || !allowedRoles.includes(roleCode)) {
+        throw new ForbiddenException(
+          'Tu rol no puede cancelar esta solicitud de cambio/merma.',
+        );
+      }
+    }
+    await this.assertCambioMermaStagingTable();
+
+    // Este contexto valida el acceso por sucursal antes de tomar los bloqueos.
+    await this.fetchCambioMermaOriginalContext(iord, user, tipo);
+    const hasTipom = await this.hasColumn('PV_CTR_ORDS', 'TIPOM');
+    const hasTpom = await this.hasColumn('PV_CTR_ORDS', 'TPOM');
+    const hasReeord = await this.hasColumn('PV_CTR_ORDS', 'REEORD');
+    const hasReoord = await this.hasColumn('PV_CTR_ORDS', 'REOORD');
+    const hasUsrAut = await this.hasColumn('PV_CTR_ORDS', 'USR_AUT_CYM');
+    const hasFcnAut = await this.hasColumn('PV_CTR_ORDS', 'FCN_AUT_CYM');
+    const hasMotr = await this.hasColumn('PV_CTR_ORDS', 'MOTR');
+    const hasSelCtrlOrd = await this.hasColumn('PV_CTR_ORDS', 'selCtrlOrd');
+    const hasCtdCM = await this.hasColumn('PV_CTR_ORDS', 'CTD_C_M');
+    const hasNvaIord = await this.hasColumn(
+      'PV_ORD_CAMBIO_MERMA_TMP',
+      'NVA_IORD',
+    );
+
+    const tipoSql = [
+      ...(hasTipom ? ['TRY_CONVERT(INT, o.TIPOM)'] : []),
+      ...(hasTpom ? ['TRY_CONVERT(INT, o.TPOM)'] : []),
+    ];
+    const relationSql = [
+      ...(hasReeord
+        ? ["NULLIF(LTRIM(RTRIM(ISNULL(CAST(o.REEORD AS NVARCHAR(255)), ''))), '')"]
+        : []),
+      ...(hasReoord
+        ? ["NULLIF(LTRIM(RTRIM(ISNULL(CAST(o.REOORD AS NVARCHAR(255)), ''))), '')"]
+        : []),
+    ];
+    const hasRelatedOrderSql = relationSql.length
+      ? `CASE WHEN ${relationSql.map((expression) => `${expression} IS NOT NULL`).join(' OR ')} THEN 1 ELSE 0 END`
+      : '0';
+    const authorizedBySql = [
+      ...(hasUsrAut
+        ? ["NULLIF(LTRIM(RTRIM(ISNULL(o.USR_AUT_CYM, ''))), '') IS NOT NULL"]
+        : []),
+      ...(hasFcnAut ? ['o.FCN_AUT_CYM IS NOT NULL'] : []),
+    ];
+    const hasAuthorizationSql = authorizedBySql.length
+      ? `CASE WHEN ${authorizedBySql.join(' OR ')} THEN 1 ELSE 0 END`
+      : '0';
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    try {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+      const rows = await queryRunner.query(
+        `
+        SELECT TOP 1
+          o.IORD,
+          o.SUC,
+          TRY_CONVERT(FLOAT, o.ESTSEGU) AS ESTSEGU,
+          ${tipoSql.length > 1 ? `COALESCE(${tipoSql.join(', ')})` : tipoSql[0] ?? 'CAST(NULL AS INT)'} AS TIPOM,
+          TRY_CONVERT(INT, o.selCtrlOrd) AS selCtrlOrd,
+          ${hasMotr ? 'TRY_CONVERT(INT, o.MOTR)' : 'CAST(NULL AS INT)'} AS MOTR,
+          ${hasCtdCM ? 'TRY_CONVERT(FLOAT, o.CTD_C_M)' : 'CAST(NULL AS FLOAT)'} AS CTD_C_M,
+          o.ASIGN,
+          o.LABOR,
+          ${hasRelatedOrderSql} AS HAS_RELATED_ORDER,
+          ${hasAuthorizationSql} AS HAS_AUTHORIZATION,
+          ${hasNvaIord ? "NULLIF(LTRIM(RTRIM(ISNULL(t.NVA_IORD, ''))), '')" : 'CAST(NULL AS NVARCHAR(255))'} AS NVA_IORD,
+          t.ART_NUEVO AS STAGING_ART_NUEVO,
+          t.MOTR AS STAGING_MOTR,
+          t.MOTIVO AS STAGING_MOTIVO,
+          TRY_CONVERT(FLOAT, t.CTD_C_M) AS STAGING_CTD_C_M,
+          t.USER_MOD AS STAGING_USER_MOD,
+          ${hasNvaIord ? `CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.NVA_IORD, ''))), '') IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.PV_CTR_ORDS child WHERE UPPER(LTRIM(RTRIM(ISNULL(child.IORD, '')))) = UPPER(LTRIM(RTRIM(ISNULL(t.NVA_IORD, ''))))) THEN 1 ELSE 0 END` : '0'} AS HAS_CREATED_NVA_IORD
+        FROM dbo.PV_CTR_ORDS o WITH (UPDLOCK, HOLDLOCK)
+        LEFT JOIN dbo.PV_ORD_CAMBIO_MERMA_TMP t WITH (UPDLOCK, HOLDLOCK)
+          ON UPPER(LTRIM(RTRIM(ISNULL(t.IORD, '')))) = UPPER(LTRIM(RTRIM(ISNULL(o.IORD, ''))))
+         AND TRY_CONVERT(INT, t.TIPOM) = @1
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = UPPER(@0)
+        `,
+        [iord, tipo],
+      );
+      const locked = this.firstRow(rows);
+      if (!locked) {
+        throw new NotFoundException(`No existe la ORD ${iord}.`);
+      }
+
+      const currentFlow = this.toFloat(locked.ESTSEGU);
+      const requiredFlow = tipo === 1 ? 9.1 : 9.2;
+      if (
+        currentFlow == null ||
+        Math.abs(currentFlow - requiredFlow) > 0.0001 ||
+        this.toInt(locked.TIPOM) !== tipo
+      ) {
+        throw new BadRequestException(
+          `Solo se puede cancelar una solicitud de ${tipo === 1 ? 'cambio' : 'merma'} en flujo ${requiredFlow}.`,
+        );
+      }
+      if (!this.normalizeText(locked.ASIGN)) {
+        throw new BadRequestException(
+          'No se puede regresar la ORD al colaborador porque no tiene una asignación vigente.',
+        );
+      }
+      if (
+        this.toInt(locked.HAS_RELATED_ORDER) === 1 ||
+        this.toInt(locked.HAS_AUTHORIZATION) === 1 ||
+        this.toInt(locked.HAS_CREATED_NVA_IORD) === 1
+      ) {
+        throw new BadRequestException(
+          'La solicitud ya fue autorizada o tiene una ORD derivada; no se puede cancelar desde este flujo.',
+        );
+      }
+      const selCtrlOrd = this.toInt(locked.selCtrlOrd);
+      if (
+        selCtrlOrd != null &&
+        ![0, 13, 14, 15, 16].includes(selCtrlOrd)
+      ) {
+        throw new BadRequestException(
+          `La solicitud no se puede cancelar desde selCtrlOrd=${selCtrlOrd}.`,
+        );
+      }
+
+      const setClauses = [
+        'ESTSEGU = 8',
+        'ESTATUS = 2',
+        'FCNMOD = GETDATE()',
+        ...(hasTipom ? ['TIPOM = 0'] : []),
+        ...(hasTpom ? ['TPOM = 0'] : []),
+        ...(hasMotr ? ['MOTR = NULL'] : []),
+        ...(hasSelCtrlOrd ? ['selCtrlOrd = NULL'] : []),
+        ...(hasCtdCM ? ['CTD_C_M = NULL'] : []),
+      ];
+      await queryRunner.query(
+        `UPDATE dbo.PV_CTR_ORDS SET ${setClauses.join(', ')} WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0)`,
+        [iord],
+      );
+      await queryRunner.query(
+        `DELETE FROM dbo.PV_ORD_CAMBIO_MERMA_TMP WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0) AND TRY_CONVERT(INT, TIPOM) = @1`,
+        [iord, tipo],
+      );
+      await queryRunner.commitTransaction();
+
+      await this.auditMutation('ORD_CAMBIO_MERMA_CANCELAR', user, ip, {
+        iord,
+        tipo,
+        flujoAnterior: currentFlow,
+        selCtrlOrdAnterior: selCtrlOrd,
+        motrAnterior: this.toInt(locked.MOTR),
+        ctdCMAnterior: this.toFloat(locked.CTD_C_M),
+        capturaTemporal: {
+          articuloNuevo: this.normalizeText(locked.STAGING_ART_NUEVO),
+          motr: this.toInt(locked.STAGING_MOTR),
+          motivo: this.normalizeText(locked.STAGING_MOTIVO),
+          ctdCM: this.toFloat(locked.STAGING_CTD_C_M),
+          nvaIordReservada: this.normalizeText(locked.NVA_IORD),
+          usuarioModifico: this.normalizeText(locked.STAGING_USER_MOD),
+        },
+        asign: this.normalizeText(locked.ASIGN),
+        labor: this.toInt(locked.LABOR),
+        motivoCancelacion,
+      });
+
+      return {
+        ok: true,
+        message: 'Solicitud cancelada. La ORD regresó al colaborador asignado.',
+        data: {
+          IORD: iord,
+          ESTSEGU: 8,
+          ASIGN: this.normalizeText(locked.ASIGN),
+          LABOR: this.toInt(locked.LABOR),
+        },
+      };
+    } catch (error) {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
+      throw this.mapError(
+        error,
+        'No se pudo cancelar la solicitud de cambio/merma.',
+      );
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
   async prepararCambioMerma(
     iordRaw: string,
     dto: PrepararCambioMermaDto,
@@ -1575,8 +2677,9 @@ export class OrdenesTrabajoService {
       dto.ctdCM,
       original.row.CTD_C_M,
       ctdOriginal,
+      tipo,
     );
-    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal, tipo);
     const motivo = await this.resolveMovimientoMotrAndLabel(
       tipo,
       dto.motivo,
@@ -1615,7 +2718,14 @@ export class OrdenesTrabajoService {
       this.auditActor(user),
     );
 
-    await this.updateCambioMermaOriginalState(iord, 13, ctdCM, motivo.id);
+    await this.updateCambioMermaOriginalState(
+      iord,
+      13,
+      ctdCM,
+      motivo.id,
+      undefined,
+      tipo,
+    );
 
     await this.auditMutation('ORD_CAMBIO_MERMA_PREPARAR', user, ip, {
       iord,
@@ -1704,8 +2814,9 @@ export class OrdenesTrabajoService {
       staging.CTD_C_M,
       original.row.CTD_C_M,
       ctdOriginal,
+      tipo,
     );
-    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal, tipo);
 
     const nvaIord = await this.resolveCambioMermaReservedIord(suc, staging, {
       iord,
@@ -1794,8 +2905,9 @@ export class OrdenesTrabajoService {
       dto.ctdCM,
       original.row.CTD_C_M,
       ctdOriginal,
+      tipo,
     );
-    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal, tipo);
 
     const artOriginal = this.normalizeText(original.row.ART) ?? '';
     const artNuevo = this.normalizeText(dto.artNuevo) ?? artOriginal;
@@ -1816,20 +2928,33 @@ export class OrdenesTrabajoService {
         : this.toInt(dto.labor);
     const asign = this.normalizeText(dto.asign);
     if (asign && tipo === 2) {
-      const sucAsign = this.normalizeUpper(original.row.SUC);
+      const laboratorioRows = await this.dataSource.query(
+        `
+        SELECT TOP 1 UPPER(LTRIM(RTRIM(ISNULL(l.SUC, '')))) AS SUC
+        FROM dbo.DAT_LAB l
+        WHERE TRY_CONVERT(INT, l.ID) = TRY_CONVERT(INT, @0)
+        `,
+        [labor],
+      );
+      const sucAsign =
+        this.normalizeUpper(this.firstRow(laboratorioRows)?.SUC) ??
+        this.normalizeUpper(original.row.SUC);
+      const collaboratorSucs = this.normalizeUnique([
+        ...(sucAsign ? [sucAsign] : []),
+        ...(sucAsign ? await this.resolveAsignadoSharedSucs(sucAsign) : []),
+      ]);
+      const sucPlaceholders = collaboratorSucs
+        .map((_, idx) => `@${idx + 1}`)
+        .join(',');
       const collaboratorRows = await this.dataSource.query(
         `
         SELECT TOP 1 1 AS ok
         FROM dbo.PV_OPV o
-        LEFT JOIN dbo.DAT_LAB l
-          ON TRY_CONVERT(INT, l.ID) = TRY_CONVERT(INT, @2)
         WHERE LTRIM(RTRIM(ISNULL(CAST(o.IDOPV AS NVARCHAR(100)), ''))) = @0
           AND TRY_CONVERT(INT, o.NIVEL) = 41
-          AND UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) = UPPER(
-            LTRIM(RTRIM(ISNULL(l.SUC, @1)))
-          )
+          AND UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (${sucPlaceholders || 'NULL'})
         `,
-        [asign, sucAsign, original.row.LABOR],
+        [asign, ...collaboratorSucs],
       );
       if (!this.firstRow(collaboratorRows)) {
         throw new BadRequestException(
@@ -1993,8 +3118,9 @@ export class OrdenesTrabajoService {
       staging.CTD_C_M,
       original.row.CTD_C_M,
       ctdOriginal,
+      tipo,
     );
-    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal, tipo);
     const motr = this.toInt(staging.MOTR) ?? this.toInt(original.row.MOTR);
 
     await this.updateCambioMermaOriginalState(iord, 15, ctdCM, motr);
@@ -2093,6 +3219,7 @@ export class OrdenesTrabajoService {
       );
     }
     const rows = Array.isArray(dto.details) ? dto.details : [];
+    const hasSelCtrlOrd = await this.hasColumn('PV_CTR_ORDS', 'selCtrlOrd');
 
     const exists = await this.dataSource.query(
       `
@@ -2117,8 +3244,10 @@ export class OrdenesTrabajoService {
       throw new NotFoundException(`No existe ORD ${iord} o no tiene acceso`);
     }
 
-    await this.dataSource.query(
-      `
+    await this.dataSource.transaction(async (manager) => {
+      const savedOrderRows = await manager.query(
+        `
+      DECLARE @savedOrd TABLE (IORD NVARCHAR(255));
       UPDATE dbo.PV_CTR_ORDS
       SET
         ESTSEGU = CASE
@@ -2147,22 +3276,31 @@ export class OrdenesTrabajoService {
           )
         END,
         FCNMOD = GETDATE()
+      OUTPUT inserted.IORD INTO @savedOrd (IORD)
       WHERE IORD = @0
+        ${hasSelCtrlOrd ? 'AND ISNULL(TRY_CONVERT(INT, selCtrlOrd), -1) <> 14' : ''};
+
+      SELECT IORD FROM @savedOrd;
       `,
-      [iord, laborValue, commentsValue, tipoValue || null, hrEntValue],
-    );
+        [iord, laborValue, commentsValue, tipoValue || null, hrEntValue],
+      );
+      if (hasSelCtrlOrd && !this.firstRow(savedOrderRows)) {
+        throw new BadRequestException(
+          `No se puede guardar el detalle de la ORD ${iord} mientras su solicitud de cambio o merma está pendiente de autorización.`,
+        );
+      }
 
-    if (rows.length) {
-      for (const line of rows) {
-        const iordp = this.normalizeText(line.iordp);
-        const job = this.normalizeUpper(line.job);
-        const esf = this.normalizeText(line.esf);
-        const cil = this.normalizeText(line.cil);
-        const eje = this.normalizeText(line.eje);
-        if (!iordp && !job) continue;
+      if (rows.length) {
+        for (const line of rows) {
+          const iordp = this.normalizeText(line.iordp);
+          const job = this.normalizeUpper(line.job);
+          const esf = this.normalizeText(line.esf);
+          const cil = this.normalizeText(line.cil);
+          const eje = this.normalizeText(line.eje);
+          if (!iordp && !job) continue;
 
-        await this.dataSource.query(
-          `
+          await manager.query(
+            `
           UPDATE d
           SET
             d.ESF = @3,
@@ -2175,10 +3313,11 @@ export class OrdenesTrabajoService {
               OR (@1 IS NULL AND @2 <> '' AND UPPER(LTRIM(RTRIM(ISNULL(d.JOB, '')))) = @2)
             )
           `,
-          [iord, iordp, job, esf, cil, eje],
-        );
+            [iord, iordp, job, esf, cil, eje],
+          );
+        }
       }
-    }
+    });
 
     await this.auditMutation('ORD_GUARDAR_DETALLE', user, ip, {
       iord,
@@ -2310,7 +3449,11 @@ export class OrdenesTrabajoService {
       throw new BadRequestException('suc es requerida');
     }
     const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
-    if (!this.canAccessAsignadoOptions(user, roleCode)) {
+    const hasReadOnlyAssignedLookup = await this.isControlCalidadRole(user);
+    if (
+      !this.canAccessAsignadoOptions(user, roleCode) &&
+      !hasReadOnlyAssignedLookup
+    ) {
       throw new ForbiddenException(
         'Rol no autorizado para consultar asignados del panel',
       );
@@ -2349,6 +3492,7 @@ export class OrdenesTrabajoService {
         UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) AS SUC
       FROM dbo.PV_OPV o
       WHERE TRY_CONVERT(INT, o.NIVEL) = 41
+        AND UPPER(LTRIM(RTRIM(ISNULL(o.ESTATUS, '')))) = 'ACTIVO'
         AND UPPER(LTRIM(RTRIM(ISNULL(o.SUC, '')))) IN (${sucPlaceholders})
         AND UPPER(LTRIM(RTRIM(ISNULL(o.DEPTO, '')))) IN (${deptPlaceholders})
       ORDER BY NOMB, APELP, APELM, IDOPV
@@ -2546,9 +3690,9 @@ export class OrdenesTrabajoService {
       fallbackError:
         'No se pudo regresar a tienda. Verifique estado y permisos.',
       singleMessage:
-        '1 ORD recibida en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2; ORDs derivadas o sin incidencia -> 10)',
+        '1 ORD recibida en tienda (derivada de merma: padre con entrega 11 -> 10, sin entrega 11 -> 9.2; no derivada: TIPOM=1 -> 9.1, TIPOM=2 -> 9.2)',
       pluralMessagePrefix:
-        'ORDs recibidas en tienda (TIPOM=1 -> 9.1, TIPOM=2 -> 9.2; ORDs derivadas o sin incidencia -> 10)',
+        'ORDs recibidas en tienda (derivada de merma: padre con entrega 11 -> 10, sin entrega 11 -> 9.2; no derivada: TIPOM=1 -> 9.1, TIPOM=2 -> 9.2)',
       notFoundMessage:
         'No fue posible procesar las ORDs para regresar a tienda',
     });
@@ -3439,18 +4583,24 @@ export class OrdenesTrabajoService {
       this.normalizeUpper(roleCodeHint) ||
       this.normalizeUpper(await this.resolveRoleCode(user));
     const moduleCodes = this.resolveScopeModuleCodes(roleCode);
-
-    const rows = await this.dataSource.query(
-      `
-      SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) AS SUC
-      FROM dbo.USR_MOD_SUC
-      WHERE UPPER(LTRIM(RTRIM(ISNULL(USUARIO, '')))) = UPPER(@0)
-        AND ACTIVO = 1
-        AND UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) IN (${moduleCodes.map((_, idx) => `@${idx + 1}`).join(',')})
-      `,
-      [username, ...moduleCodes],
-    );
-
+    const isInventoryOrdReviewer =
+      roleCode === 'ANALISTA_INV' || roleCode === 'INVJEF';
+    const rows = isInventoryOrdReviewer
+      ? await this.dataSource.query(`
+          SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) AS SUC
+          FROM dbo.DAT_SUC
+          WHERE NULLIF(LTRIM(RTRIM(ISNULL(SUC, ''))), '') IS NOT NULL
+        `)
+      : await this.dataSource.query(
+          `
+          SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(SUC, '')))) AS SUC
+          FROM dbo.USR_MOD_SUC
+          WHERE UPPER(LTRIM(RTRIM(ISNULL(USUARIO, '')))) = UPPER(@0)
+            AND ACTIVO = 1
+            AND UPPER(LTRIM(RTRIM(ISNULL(MODULO, '')))) IN (${moduleCodes.map((_, idx) => `@${idx + 1}`).join(',')})
+          `,
+          [username, ...moduleCodes],
+        );
     const ownSuc = this.normalizeUpper(user?.suc);
     const allowed = this.normalizeUnique([
       ownSuc,
@@ -3551,6 +4701,22 @@ export class OrdenesTrabajoService {
     );
 
     return this.normalizeUpper(this.firstRow(rows)?.CODIGO);
+  }
+
+  private async isControlCalidadRole(user: JwtPayload) {
+    const userId = Number(user?.sub ?? 0);
+    if (!Number.isFinite(userId) || userId <= 0) return false;
+    const rows = await this.dataSource.query(
+      `
+      SELECT TOP 1 1 AS ENABLED
+      FROM dbo.USUARIO u
+      LEFT JOIN dbo.ROL r ON r.IDROL = u.IDROL
+      WHERE u.IDUSUARIO = @0
+        AND UPPER(LTRIM(RTRIM(ISNULL(r.NOMBRE, '')))) LIKE '%CONTROL%CALIDAD%'
+      `,
+      [userId],
+    );
+    return this.firstRow(rows) != null;
   }
 
   private resolveScopeModuleCodes(roleCodeRaw: string) {
@@ -3873,6 +5039,18 @@ export class OrdenesTrabajoService {
       return [...configuredCodes].sort((a, b) => a - b);
     }
 
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    // Inventarios comparte el panel operativo de DAT_JAO_ORD, pero su matriz
+    // puede no estar sembrada en una base donde ya existen filas para otros
+    // roles. Conserva el alcance funcional de revisión de cambio/merma y deja
+    // que includeNullFlow habilite la cola de autorización pendiente.
+    if (
+      panelMode === 'operativo' &&
+      (roleCode === 'ANALISTA_INV' || roleCode === 'INVJEF')
+    ) {
+      return [9.1, 9.2, 9.3];
+    }
+
     if (tableExists) {
       const panelConfigured =
         await this.hasFlowVisibilityPanelConfig(panelMode);
@@ -3888,7 +5066,6 @@ export class OrdenesTrabajoService {
       return [2, 3, 3.1, 5, 7, 8, 9, 9.1, 9.2, 9.3, 10, 12];
     }
 
-    const roleCode = this.normalizeUpper(roleCodeRaw);
     if (panelMode === 'estado') {
       return roleCode === 'JEF_TALLER' ||
         roleCode === 'ANALISTA_ORD' ||
@@ -4014,7 +5191,12 @@ export class OrdenesTrabajoService {
     if (this.isAdmin(user)) return true;
 
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    return roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD';
+    return (
+      roleCode === 'JEF_TALLER' ||
+      roleCode === 'ANALISTA_ORD' ||
+      (panelMode === 'operativo' &&
+        (roleCode === 'ANALISTA_INV' || roleCode === 'INVJEF'))
+    );
   }
 
   private async attachFlowHistory(
@@ -4814,9 +5996,11 @@ export class OrdenesTrabajoService {
       flow != null &&
       Math.abs(flow - 4) <= 0.0001 &&
       reeord.length > 0;
+    const allowCambioMaterialSinFlujo = tipo === 1 && flow == null;
     if (
       (flow == null || Math.abs(flow - requiredFlow) > 0.0001) &&
-      !allowFinalized
+      !allowFinalized &&
+      !allowCambioMaterialSinFlujo
     ) {
       const flowLabel = this.normalizeText(row.DESCFLUJO) ?? 'SIN FLUJO';
       const flowText = flow == null ? 'SIN FLUJO' : this.formatStatusCode(flow);
@@ -4826,7 +6010,7 @@ export class OrdenesTrabajoService {
     }
 
     const tipom = this.toInt(row.TIPOM) ?? this.toInt(row.TPOM) ?? 0;
-    if (tipom !== tipo) {
+    if (tipom !== tipo && !allowCambioMaterialSinFlujo) {
       throw new BadRequestException(
         `La ORD ${iord} debe tener TIPOM ${tipo} (${requiredTipomLabel}) para continuar.`,
       );
@@ -4885,8 +6069,9 @@ export class OrdenesTrabajoService {
       stagingRow?.CTD_C_M,
       originalRow.CTD_C_M,
       ctdOriginal,
+      tipo,
     );
-    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal, tipo);
 
     const artNuevo =
       this.normalizeText(stagingRow?.ART_NUEVO) ??
@@ -4917,7 +6102,6 @@ export class OrdenesTrabajoService {
       artNuevo,
       this.toFloat(stagingRow?.PVTA_NUEVO),
     );
-
     const tipoTran = this.resolveCambioMermaTipoTran(
       originalRow.TIPOTRAN ??
         originalRow.TIPO_TRAN ??
@@ -5136,8 +6320,9 @@ export class OrdenesTrabajoService {
       staging.CTD_C_M,
       original.row.CTD_C_M,
       ctdOriginal,
+      tipo,
     );
-    this.assertCtdCMCompatible(ctdCM, ctdOriginal);
+    this.assertCtdCMCompatible(ctdCM, ctdOriginal, tipo);
 
     const suc = this.normalizeText(original.row.SUC) ?? '';
     const artOriginal = this.normalizeText(original.row.ART) ?? '';
@@ -5876,8 +7061,9 @@ export class OrdenesTrabajoService {
     primary: unknown,
     secondary: unknown,
     ctdOriginal: number,
+    tipo: number,
   ) {
-    const allowed = this.resolveAllowedCtdCM(ctdOriginal);
+    const allowed = this.resolveAllowedCtdCM(ctdOriginal, tipo);
     const fromPrimary = this.toFloat(primary);
     if (fromPrimary != null) {
       for (const value of allowed) {
@@ -5893,12 +7079,12 @@ export class OrdenesTrabajoService {
     return allowed[0];
   }
 
-  private resolveAllowedCtdCM(ctdOriginal: number) {
+  private resolveAllowedCtdCM(ctdOriginal: number, tipo: number) {
     if (Math.abs(ctdOriginal - 1) <= 0.0001) {
       return [1, 0.5];
     }
     if (Math.abs(ctdOriginal - 0.5) <= 0.0001) {
-      return [0.5];
+      return tipo === 1 ? [0.5, 1] : [0.5];
     }
     throw new BadRequestException(
       'La ORD origen debe tener cantidad 1 o 0.5 para procesar cambio/merma.',
@@ -5919,9 +7105,18 @@ export class OrdenesTrabajoService {
     throw new BadRequestException('CTD_C_M solo permite valores 1 o 0.5.');
   }
 
-  private assertCtdCMCompatible(ctdCM: number, ctdOriginal: number) {
-    const allowed = this.resolveAllowedCtdCM(ctdOriginal);
+  private assertCtdCMCompatible(
+    ctdCM: number,
+    ctdOriginal: number,
+    tipo: number,
+  ) {
+    const allowed = this.resolveAllowedCtdCM(ctdOriginal, tipo);
     if (!allowed.some((value) => Math.abs(ctdCM - value) <= 0.0001)) {
+      if (tipo === 1) {
+        throw new BadRequestException(
+          'Para cambio de material, CTD_C_M solo permite 1 o 0.5.',
+        );
+      }
       throw new BadRequestException(
         allowed.length === 1
           ? 'CTD_C_M solo permite 0.5 cuando la ORD origen fue creada con 0.5.'
@@ -5933,7 +7128,7 @@ export class OrdenesTrabajoService {
         'La ORD no tiene cantidad válida para procesar cambio/merma.',
       );
     }
-    if (ctdCM - ctdOriginal > 0.0001) {
+    if (tipo !== 1 && ctdCM - ctdOriginal > 0.0001) {
       throw new BadRequestException(
         'CTD_C_M no puede exceder la cantidad disponible de la ORD origen.',
       );
@@ -6080,6 +7275,7 @@ export class OrdenesTrabajoService {
     ctdCM: number,
     motr?: number | null,
     asign?: string | null,
+    tipom?: number | null,
   ) {
     await this.dataSource.query(
       `
@@ -6089,10 +7285,11 @@ export class OrdenesTrabajoService {
         CTD_C_M = @2,
         MOTR = COALESCE(@3, MOTR),
         ASIGN = COALESCE(@4, ASIGN),
+        TIPOM = COALESCE(@5, TIPOM),
         FCNMOD = GETDATE()
       WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0)
       `,
-      [iord, selCtrlOrd, ctdCM, motr ?? null, asign ?? null],
+      [iord, selCtrlOrd, ctdCM, motr ?? null, asign ?? null, tipom ?? null],
     );
   }
 

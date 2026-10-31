@@ -726,21 +726,59 @@ export class TransferenciasService {
       `UPDATE dbo.TRAN_DET_ART SET ${setParts.join(', ')} WHERE DOC=@0 AND IDPD=@1`,
       params,
     );
-    const previousDetailStatus = this.normalizeText(
-      currentRows[0].ESTATUS_R,
-    ).toUpperCase();
-    const newDetailStatus = this.normalizeText(dto.estatusR).toUpperCase();
-    const keepsIncidenceWorkflow =
-      header.estatus === 'REVISANDO' &&
-      (previousDetailStatus === 'INCIDENCIA' ||
-        newDetailStatus === 'INCIDENCIA');
-    if (keepsIncidenceWorkflow) {
-      await this.dataSource.query(
-        `UPDATE dbo.TRAN_CTR_DOCPRE SET ESTATUS='INCIDENCIA', FCNM=GETDATE() WHERE DOC=@0 AND UPPER(LTRIM(RTRIM(ISNULL(ESTATUS, ''))))='REVISANDO'`,
-        [doc],
+    await this.dataSource.query(`EXEC dbo.sp_trans_recalcular @DOC=@0`, [doc]);
+    return this.findOne(doc, user);
+  }
+
+  async contabilizarTodoDetalle(docRaw: string, user: JwtPayload) {
+    const ctx = await this.resolveUserContext(user);
+    if (ctx.roleId !== 13008) {
+      throw new ForbiddenException(
+        'Accion reservada al encargado de sucursal.',
       );
     }
-    await this.dataSource.query(`EXEC dbo.sp_trans_recalcular @DOC=@0`, [doc]);
+    const doc = this.requireText(docRaw, 'doc');
+    const header = await this.fetchHeader(doc);
+    await this.assertDocAccess(
+      header.sucEnt,
+      header.sucSal,
+      ctx,
+      header.estatus,
+    );
+    if (header.estatus !== 'REVISANDO') {
+      throw new BadRequestException(
+        'Solo se pueden contabilizar articulos de documentos REVISANDO.',
+      );
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const lockedHeader = await manager.query(
+        `SELECT UPPER(LTRIM(RTRIM(ISNULL(ESTATUS, '')))) AS ESTATUS FROM dbo.TRAN_CTR_DOCPRE WITH (UPDLOCK, HOLDLOCK) WHERE DOC=@0`,
+        [doc],
+      );
+      if (
+        this.normalizeText(lockedHeader?.[0]?.ESTATUS).toUpperCase() !==
+        'REVISANDO'
+      ) {
+        throw new BadRequestException(
+          'Solo se pueden contabilizar articulos de documentos REVISANDO.',
+        );
+      }
+      const activeRows = await manager.query(
+        `SELECT COUNT(1) AS TOTAL FROM dbo.TRAN_DET_ART WITH (UPDLOCK, HOLDLOCK) WHERE DOC=@0 AND ISNULL(BLOQ, 0) <> -1`,
+        [doc],
+      );
+      if (!(this.toNumber(activeRows?.[0]?.TOTAL) ?? 0)) {
+        throw new BadRequestException(
+          'El documento no tiene articulos activos para contabilizar.',
+        );
+      }
+      await manager.query(
+        `UPDATE dbo.TRAN_DET_ART SET ESTATUS_R='CONTABILIZADO' WHERE DOC=@0 AND ISNULL(BLOQ, 0) <> -1`,
+        [doc],
+      );
+    });
+
     return this.findOne(doc, user);
   }
 

@@ -288,4 +288,115 @@ describe('OrdenesTrabajoService cambio material/merma', () => {
       ).toBe(0);
     });
   });
+
+  describe('cancelación de solicitud de cambio/merma', () => {
+    function createCancellationSimulation(row: Record<string, unknown>) {
+      const queryRunnerQuery = jest.fn().mockResolvedValueOnce([row]);
+      const queryRunner = {
+        connect: jest.fn().mockResolvedValue(undefined),
+        startTransaction: jest.fn().mockResolvedValue(undefined),
+        query: queryRunnerQuery,
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+        release: jest.fn().mockResolvedValue(undefined),
+        isTransactionActive: true,
+      };
+      const service = createService();
+      (service as any).dataSource = {
+        createQueryRunner: jest.fn(() => queryRunner),
+      };
+      (service as any).isAdmin = jest.fn(() => true);
+      (service as any).assertCambioMermaStagingTable = jest
+        .fn()
+        .mockResolvedValue(undefined);
+      (service as any).fetchCambioMermaOriginalContext = jest
+        .fn()
+        .mockResolvedValue({ row: { IORD: 'DF01001' } });
+      (service as any).hasColumn = jest.fn().mockResolvedValue(true);
+      (service as any).auditMutation = jest.fn().mockResolvedValue(undefined);
+
+      return { service, queryRunner };
+    }
+
+    const pendingRow = (tipo: number, flow: number) => ({
+      IORD: 'DF01001',
+      SUC: 'DF01',
+      ESTSEGU: flow,
+      TIPOM: tipo,
+      selCtrlOrd: 14,
+      MOTR: 5,
+      CTD_C_M: 0.5,
+      ASIGN: 'COLABORADOR 1',
+      LABOR: 2,
+      HAS_RELATED_ORDER: 0,
+      HAS_AUTHORIZATION: 0,
+      NVA_IORD: null,
+      STAGING_ART_NUEVO: 'ART-1',
+      STAGING_MOTR: 5,
+      STAGING_MOTIVO: 'Motivo simulado',
+      STAGING_CTD_C_M: 0.5,
+      STAGING_USER_MOD: 'USUARIO1',
+      HAS_CREATED_NVA_IORD: 0,
+    });
+
+    it.each([
+      { tipo: 1, flow: 9.1, label: 'cambio de material' },
+      { tipo: 2, flow: 9.2, label: 'merma' },
+    ])('simula cancelación válida de $label', async ({ tipo, flow }) => {
+      const { service, queryRunner } = createCancellationSimulation(
+        pendingRow(tipo, flow),
+      );
+
+      await expect(
+        service.cancelarCambioMerma(
+          'DF01001',
+          { tipo, motivoCancelacion: 'Captura incorrecta' } as any,
+          { username: 'ADMIN', sub: 1 } as any,
+          '127.0.0.1',
+        ),
+      ).resolves.toMatchObject({
+        ok: true,
+        data: { IORD: 'DF01001', ESTSEGU: 8, ASIGN: 'COLABORADOR 1', LABOR: 2 },
+      });
+
+      expect(queryRunner.query).toHaveBeenCalledTimes(3);
+      expect(queryRunner.query.mock.calls[1][0]).toContain('ESTSEGU = 8');
+      expect(queryRunner.query.mock.calls[1][0]).toContain('ESTATUS = 2');
+      expect(queryRunner.query.mock.calls[1][0]).not.toMatch(/ASIGN\s*=/i);
+      expect(queryRunner.query.mock.calls[2][0]).toContain(
+        'DELETE FROM dbo.PV_ORD_CAMBIO_MERMA_TMP',
+      );
+      expect(queryRunner.commitTransaction).toHaveBeenCalledTimes(1);
+      expect(queryRunner.rollbackTransaction).not.toHaveBeenCalled();
+      expect(queryRunner.release).toHaveBeenCalledTimes(1);
+      expect((service as any).auditMutation).toHaveBeenCalledWith(
+        'ORD_CAMBIO_MERMA_CANCELAR',
+        expect.anything(),
+        '127.0.0.1',
+        expect.objectContaining({ motivoCancelacion: 'Captura incorrecta' }),
+      );
+    });
+
+    it('rechaza la cancelación si ya se creó una ORD derivada', async () => {
+      const { service, queryRunner } = createCancellationSimulation({
+        ...pendingRow(2, 9.2),
+        HAS_CREATED_NVA_IORD: 1,
+      });
+
+      await expect(
+        service.cancelarCambioMerma(
+          'DF01001',
+          { tipo: 2, motivoCancelacion: 'Captura incorrecta' } as any,
+          { username: 'ADMIN', sub: 1 } as any,
+          null,
+        ),
+      ).rejects.toThrow('ya fue autorizada o tiene una ORD derivada');
+
+      expect(queryRunner.query).toHaveBeenCalledTimes(1);
+      expect(queryRunner.commitTransaction).not.toHaveBeenCalled();
+      expect(queryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+      expect(queryRunner.release).toHaveBeenCalledTimes(1);
+      expect((service as any).auditMutation).not.toHaveBeenCalled();
+    });
+  });
 });

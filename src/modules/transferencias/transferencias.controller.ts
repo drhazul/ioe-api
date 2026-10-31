@@ -137,6 +137,14 @@ export class TransferenciasController {
     return this.service.updateDetalle(doc, idpd, dto, user);
   }
 
+  @Post(':doc/detalle/contabilizar-todo')
+  contabilizarTodoDetalle(
+    @Param('doc') doc: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.contabilizarTodoDetalle(doc, user);
+  }
+
   @Delete(':doc/detalle/:idpd')
   removeDetalle(
     @Param('doc') doc: string,
