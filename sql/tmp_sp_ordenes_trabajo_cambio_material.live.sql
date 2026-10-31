@@ -200,11 +200,13 @@ BEGIN
 
     UPDATE dbo.PV_CTR_ORDS
     SET
-      CTD = @ctdOrig,
-      CTD_C_M = @ctdAfectada,
-      REEORD = @newIord,
+      CTD = CASE WHEN @remanente > 0.0001 THEN @remanente ELSE @ctdOrig END,
+      CTD_C_M = CASE WHEN @remanente > 0.0001 THEN NULL ELSE @ctdAfectada END,
+      MOTR = CASE WHEN @remanente > 0.0001 THEN NULL ELSE MOTR END,
+      TIPOM = CASE WHEN @remanente > 0.0001 THEN 0 ELSE TIPOM END,
+      REEORD = CASE WHEN @remanente > 0.0001 THEN NULL ELSE @newIord END,
       selCtrlOrd = NULL,
-      ESTSEGU = 4,
+      ESTSEGU = CASE WHEN @remanente > 0.0001 THEN 3 ELSE 4 END,
       ESTATUS = 2,
       FCNMOD = GETDATE(),
       COMAD = LEFT(

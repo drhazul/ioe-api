@@ -2367,23 +2367,42 @@ export class OrdenesTrabajoService {
     await this.assertCambioMermaContextPermission(tipo, user);
 
     let staging = await this.fetchCambioMermaStagingIfAny(iord, tipo);
+    const stagedIord = this.normalizeText(staging?.NVA_IORD) ?? '';
+    const stagedOrdCreated = stagedIord
+      ? await this.hasOrdHeader(stagedIord)
+      : false;
     const original = await this.fetchCambioMermaOriginalContext(
       iord,
       user,
       tipo,
-      { allowFinalized: true },
+      {
+        allowFinalized: true,
+        allowPartialMaterialFinalized: tipo === 1 && stagedOrdCreated,
+      },
     );
     if (staging) {
       const actor = this.auditActor(user);
-      const finalIord =
+      const linkedFinalIord =
         this.normalizeText(original.row.REEORD) ??
         this.normalizeText(original.row.REOORD) ??
         '';
       const estsegu = this.toFloat(original.row.ESTSEGU) ?? 0;
-      const isFinalizedFlow = Math.abs(estsegu - 4) <= 0.0001;
-      const finalIordExists = finalIord
-        ? await this.hasOrdHeader(finalIord)
-        : false;
+      const isFullChangeFinalized = Math.abs(estsegu - 4) <= 0.0001;
+      const isPartialMaterialFinalized =
+        tipo === 1 &&
+        Math.abs(estsegu - 3) <= 0.0001 &&
+        this.toInt(original.row.TIPOM) === 0 &&
+        stagedOrdCreated;
+      const finalIord = isPartialMaterialFinalized
+        ? stagedIord
+        : linkedFinalIord;
+      const isFinalizedFlow =
+        isFullChangeFinalized || isPartialMaterialFinalized;
+      const finalIordExists = isPartialMaterialFinalized
+        ? true
+        : finalIord
+          ? await this.hasOrdHeader(finalIord)
+          : false;
 
       // Cuando la ORD ya está finalizada, staging debe reflejar la IORD real creada
       // y nunca regenerar una nueva reserva para evitar "fantasmas" en contexto.
@@ -5918,6 +5937,7 @@ export class OrdenesTrabajoService {
     tipo: number,
     options: {
       allowFinalized?: boolean;
+      allowPartialMaterialFinalized?: boolean;
     } = {},
   ): Promise<CambioMermaOriginalContext> {
     const iord = this.requireIord(iordRaw);
@@ -5996,10 +6016,19 @@ export class OrdenesTrabajoService {
       flow != null &&
       Math.abs(flow - 4) <= 0.0001 &&
       reeord.length > 0;
+    const allowPartialMaterialFinalized =
+      options.allowFinalized === true &&
+      options.allowPartialMaterialFinalized === true &&
+      tipo === 1 &&
+      flow != null &&
+      Math.abs(flow - 3) <= 0.0001 &&
+      (this.toInt(row.TIPOM) ?? this.toInt(row.TPOM) ?? 0) === 0 &&
+      this.toInt(row.selCtrlOrd) == null;
     const allowCambioMaterialSinFlujo = tipo === 1 && flow == null;
     if (
       (flow == null || Math.abs(flow - requiredFlow) > 0.0001) &&
       !allowFinalized &&
+      !allowPartialMaterialFinalized &&
       !allowCambioMaterialSinFlujo
     ) {
       const flowLabel = this.normalizeText(row.DESCFLUJO) ?? 'SIN FLUJO';
@@ -6500,6 +6529,7 @@ export class OrdenesTrabajoService {
       ctdCM,
       motivo.id,
       actor,
+      tipo,
     );
     await this.markCambioMermaStagingCreated(
       iord,
@@ -6524,7 +6554,11 @@ export class OrdenesTrabajoService {
       iord,
       user,
       tipo,
-      { allowFinalized: true },
+      {
+        allowFinalized: true,
+        allowPartialMaterialFinalized:
+          tipo === 1 && ctdOriginal - ctdCM > 0.0001,
+      },
     );
     const refreshedStaging = await this.fetchCambioMermaStaging(iord, tipo);
     const context = await this.buildCambioMermaContextResponse(
@@ -7300,27 +7334,31 @@ export class OrdenesTrabajoService {
     ctdCM: number,
     motr: number | null,
     actor: string,
+    tipo: number,
   ) {
     const hasUsrAut = await this.hasColumn('PV_CTR_ORDS', 'USR_AUT_CYM');
     const hasFcnAut = await this.hasColumn('PV_CTR_ORDS', 'FCN_AUT_CYM');
+    const remanente = Math.max(0, ctdOriginal - ctdCM);
+    const conservarOriginal = tipo === 1 && remanente > 0.0001;
 
     await this.dataSource.query(
       `
       UPDATE dbo.PV_CTR_ORDS
       SET
-        CTD = @2,
-        CTD_C_M = @3,
-        MOTR = COALESCE(@4, MOTR),
-        REEORD = @1,
+        CTD = ${conservarOriginal ? '@6' : '@2'},
+        CTD_C_M = ${conservarOriginal ? 'NULL' : '@3'},
+        MOTR = ${conservarOriginal ? 'NULL' : 'COALESCE(@4, MOTR)'},
+        TIPOM = ${conservarOriginal ? '0' : 'TIPOM'},
+        REEORD = ${conservarOriginal ? 'NULL' : '@1'},
         selCtrlOrd = NULL,
-        ESTSEGU = 4,
+        ESTSEGU = ${conservarOriginal ? '3' : '4'},
         ESTATUS = 2,
         ${hasUsrAut ? 'USR_AUT_CYM = @5,' : ''}
         ${hasFcnAut ? 'FCN_AUT_CYM = GETDATE(),' : ''}
         FCNMOD = GETDATE()
       WHERE UPPER(LTRIM(RTRIM(ISNULL(IORD, '')))) = UPPER(@0)
       `,
-      [iord, newIord, ctdOriginal, ctdCM, motr ?? null, actor],
+      [iord, newIord, ctdOriginal, ctdCM, motr ?? null, actor, remanente],
     );
   }
 
