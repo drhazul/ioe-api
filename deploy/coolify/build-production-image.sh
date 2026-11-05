@@ -40,8 +40,16 @@ app_short="${expected_app_sha:0:12}"
 image_tag="ioe-allinone:production-${api_short}-${app_short}"
 docker image inspect "$image_tag" >/dev/null 2>&1 && fail "Candidate tag already exists: $image_tag"
 
-work_dir="$(mktemp -d "${TMPDIR:-/tmp}/ioe-production-build.XXXXXXXX")"
-trap 'rm -rf -- "$work_dir"' EXIT
+temp_root="$(cd -- "${TMPDIR:-/tmp}" && pwd -P)"
+work_dir="$(mktemp -d "$temp_root/ioe-production-build.XXXXXXXX")"
+cleanup() {
+  [[ -d "$work_dir" ]] || return 0
+  local resolved
+  resolved="$(cd -- "$work_dir" && pwd -P)"
+  [[ "$resolved" == "$temp_root/ioe-production-build."* ]] || fail 'Unsafe build cleanup target.'
+  rm -rf -- "$resolved"
+}
+trap cleanup EXIT
 context="$work_dir/context"
 mkdir -p "$context/ioe-api" "$context/ioe_app" "$context/deploy"
 
