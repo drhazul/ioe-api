@@ -1,6 +1,6 @@
 # Contrato compartido de fechas IOE
 
-Integración local del 4 de noviembre de 2026. Reparación de datos NC300007708 aplicada por separado en IOELOCAL. Código, DDL y configuración de infraestructura requieren pase conjunto durante mantenimiento; este documento no acredita despliegue.
+Activación productiva completada el 5 de noviembre de 2026, CDMX, por autorización del titular. Reparación NC300007708, migración SQL, CT/SQL/API/App y cruce real de medianoche verificados. [Acta de activación, versiones, evidencia y reversa](ACTIVACION_CDMX_20261105.md). Las secciones de procedimiento conservan diseño y comandos de referencia; no volver a aplicar sobre postimágenes sin revisar estado.
 
 ## Causa demostrada
 
@@ -63,7 +63,7 @@ Imagen conjunta: `deploy/coolify/Dockerfile.production` incorpora tzdata, /etc/l
 
 SQL: `deploy/coolify/sql-timezone.compose.yaml` conserva imagen exacta CU25, hostname dd7842d7ba7e, usuario, volumen sqlserver_cu25_alignment_data, puerto local 1434 y red bridge. La conexión adicional ioe_ha se realiza antes de arrancar, con alias ioe-sql-standby. `prepare-sql-timezone.py` solo valida/captura configuración original y entorno en directorio privado 0700/archivos 0600, sin imprimir secretos ni detener Docker. El env_file raw evita interpolar contraseñas; requiere Compose >=2.30, CT observado usa 5.5.1. [Contrato Compose](https://docs.docker.com/reference/compose-file/services/#format).
 
-Secuencia revisable, todavía no ejecutada:
+Secuencia de referencia, ejecutada en ventana y documentada en acta de activación:
 
 1. Integrar historias sin descartar cambios, commits de API/App y construir imagen conjunta localmente. Confirmar UAT de fuente pendiente ajena a fechas, bindings CFDI y estado de réplica/log shipping. No publicar funcionalidades DEV ONLY por efecto lateral.
 2. Inventariar y congelar cron/timers externos que puedan escribir; registrar zona de su agenda. Cerrar acceso operativo y detener una sola API y front. Obtener respaldo fresco verificado, preflight DDL sin deriva y snapshot privado de configuración; el respaldo de la reparación no sustituye uno fresco de la ventana.
@@ -85,3 +85,7 @@ Evidencia privada fuera de Git: `outputs/fecha_inventarios_20261104/NC300007708/
 ## Validación final de esta integración
 
 API: npm run build correcto, 445 pruebas en 67 suites. Flutter: analyze sin incidencias y 36 pruebas correctas, incluida fecha elegida de ORD. SQL: ensayo de 75 módulos/89 defaults revertido y postflight confirma restauración de definiciones originales; preflight productivo sin deriva. Compose de ambos servicios y SQL validado; configuración viva SQL coincide con candidato. Guardia nueva probada mediante SELECT contra SQL productivo UTC: devuelve bloqueo 503 esperado, sin arrancar API ni activar código. Lectura TypeORM posterior a reparación confirmó 15 FCNC 04/nov 12:39:38.623, JSON actual 04/nov 18:39:38.623Z. No hubo UAT visual: hot reload intentado, sin app DTD conectada. Imagen conjunta no construida/publicada todavía; activación y UAT corresponden a mantenimiento.
+
+## Cierre productivo
+
+Estado vigente y límites en [ACTIVACION_CDMX_20261105.md](ACTIVACION_CDMX_20261105.md). Prevención activa; 75 módulos/89 defaults en AFTER, CT/SQL/API/front CDMX y 34 muestras de medianoche correctas. Cierre final validado con 448 pruebas API y 36 Flutter; notas de integración local anteriores quedan como evidencia de esa fase, no como estado actual.

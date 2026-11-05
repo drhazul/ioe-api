@@ -91,3 +91,7 @@ Conservar `ioe-standby-front` anterior en `127.0.0.1:8085` hasta validar el recu
 ## Zona horaria persistente (2026-11-04)
 
 Dockerfile conjunto incorpora tzdata/TZ CDMX y ambos servicios la declaran. SQL conserva digest/volumen/hostname en sql-timezone.compose.yaml; prepare-sql-timezone.py genera respaldo privado sin tocar ejecución. Conectar ioe_ha/alias antes de arrancar SQL creado en bridge. No usar up indiscriminado ni iniciar dos SQL contra mismo volumen. [Secuencia y reversa](../../docs/CONTRATO_FECHAS_CDMX.md). Archivos integrados; runtime actual no fue recreado.
+
+## Activación productiva CDMX completada (2026-11-05)
+
+Contrato comercial y guardia global activos. CT/SQL/API/App operan CDMX; migración 75/89 aplicada, versiones coordinadas saludables y 34 muestras reales de medianoche correctas. Código experimental de créditos/entidades fiscales permanece desactivado en producción. [Acta, versiones y reversa](../../docs/ACTIVACION_CDMX_20261105.md).

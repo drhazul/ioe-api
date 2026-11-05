@@ -271,3 +271,7 @@ Corrección local autorizada: CancelacionService usa assertCancelacionQuadrum, q
 ## Contrato horario compartido (2026-11-04)
 
 Integración local SQL/API/Flutter: calendario comercial CDMX sin Z, auditoría UTC, guardia global de escrituras y migración por manifiesto. Reparación FCNC de NC300007708 aplicada en IOELOCAL; activación de código/TZ pendiente de mantenimiento conjunto. [Contrato, validación y secuencia](docs/CONTRATO_FECHAS_CDMX.md).
+
+## Activación productiva CDMX completada (2026-11-05)
+
+Contrato comercial y guardia global activos. CT/SQL/API/App operan CDMX; migración 75/89 aplicada, versiones coordinadas saludables y 34 muestras reales de medianoche correctas. Código experimental de créditos/entidades fiscales permanece desactivado en producción. [Acta, versiones y reversa](docs/ACTIVACION_CDMX_20261105.md).
