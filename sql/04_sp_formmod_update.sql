@@ -76,7 +76,7 @@ BEGIN
     INNER JOIN dbo.PV_CTR_FOL_ASVR AS A WITH (UPDLOCK, HOLDLOCK)
       ON A.IDFOL = F.IDFOL
     WHERE CAST(F.IDF AS nvarchar(255)) = @idfNorm
-      AND CONVERT(date, A.FCN) = CONVERT(date, GETDATE())
+      AND CONVERT(date, A.FCN) = CONVERT(date, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'))
       AND A.AUT IN (N'AD', N'AP', N'CR', N'VF')
       AND UPPER(LTRIM(RTRIM(ISNULL(A.OPVM, N'')))) = @opvNorm;
 

@@ -1,4 +1,8 @@
 import {
+  businessDateTime,
+  businessSqlDate,
+} from '../../common/time/fecha-negocio';
+import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -195,11 +199,9 @@ export class PvCtrOrdsService {
     const suc = dto.suc.trim().toUpperCase();
     const opvInput = dto.opv.trim();
     const fechaEntregaRaw = String(dto.fechaEntrega ?? '').trim();
-    const fechaEntregaDate = fechaEntregaRaw ? new Date(fechaEntregaRaw) : null;
-    const fechaEntrega =
-      fechaEntregaDate && !Number.isNaN(fechaEntregaDate.getTime())
-        ? fechaEntregaDate.toISOString()
-        : null;
+    const fechaEntrega = fechaEntregaRaw
+      ? businessDateTime(businessSqlDate(fechaEntregaRaw))
+      : null;
     const comad = (dto.comad ?? '').trim();
     const clien = Number(dto.clien);
     const clienKey = this.normalizeClientKey(dto.clien);
@@ -527,9 +529,9 @@ export class PvCtrOrdsService {
     if (dto.TIPO !== undefined) partial.TIPO = dto.TIPO ?? null;
     if (dto.OPV !== undefined) partial.OPV = dto.OPV ?? null;
     if (dto.FCNS !== undefined)
-      partial.FCNS = dto.FCNS ? new Date(dto.FCNS) : null;
+      partial.FCNS = dto.FCNS ? businessSqlDate(dto.FCNS) : null;
     if (dto.FCNM !== undefined)
-      partial.FCNM = dto.FCNM ? new Date(dto.FCNM) : null;
+      partial.FCNM = dto.FCNM ? businessSqlDate(dto.FCNM) : null;
     if (dto.CLIEN !== undefined) partial.CLIEN = dto.CLIEN ?? null;
     if (dto.MAT !== undefined) partial.MAT = dto.MAT ?? null;
     if (dto.CTD !== undefined) partial.CTD = dto.CTD ?? null;
@@ -539,15 +541,15 @@ export class PvCtrOrdsService {
     if (dto.ESTSEGU !== undefined) partial.ESTSEGU = dto.ESTSEGU ?? null;
     if (dto.ASIGN !== undefined) partial.ASIGN = dto.ASIGN ?? null;
     if (dto.FCNRT !== undefined)
-      partial.FCNRT = dto.FCNRT ? new Date(dto.FCNRT) : null;
+      partial.FCNRT = dto.FCNRT ? businessSqlDate(dto.FCNRT) : null;
     if (dto.FCNAS !== undefined)
-      partial.FCNAS = dto.FCNAS ? new Date(dto.FCNAS) : null;
+      partial.FCNAS = dto.FCNAS ? businessSqlDate(dto.FCNAS) : null;
     if (dto.FCNTE !== undefined)
-      partial.FCNTE = dto.FCNTE ? new Date(dto.FCNTE) : null;
+      partial.FCNTE = dto.FCNTE ? businessSqlDate(dto.FCNTE) : null;
     if (dto.FCNTD !== undefined)
-      partial.FCNTD = dto.FCNTD ? new Date(dto.FCNTD) : null;
+      partial.FCNTD = dto.FCNTD ? businessSqlDate(dto.FCNTD) : null;
     if (dto.FCNEN !== undefined)
-      partial.FCNEN = dto.FCNEN ? new Date(dto.FCNEN) : null;
+      partial.FCNEN = dto.FCNEN ? businessSqlDate(dto.FCNEN) : null;
     if (dto.LABOR !== undefined) partial.LABOR = dto.LABOR ?? null;
     if (dto.TPOM !== undefined) partial.TPOM = dto.TPOM ?? null;
     if (dto.MOTR !== undefined) partial.MOTR = dto.MOTR ?? null;
@@ -555,7 +557,7 @@ export class PvCtrOrdsService {
     if (dto.DOCIF !== undefined) partial.DOCIF = dto.DOCIF ?? null;
     if (dto.SEL !== undefined) partial.SEL = dto.SEL ?? null;
     if (dto.FCNMOD !== undefined)
-      partial.FCNMOD = dto.FCNMOD ? new Date(dto.FCNMOD) : null;
+      partial.FCNMOD = dto.FCNMOD ? businessSqlDate(dto.FCNMOD) : null;
     if (dto.SUC !== undefined) partial.SUC = dto.SUC ?? null;
     if (dto.NCLIENTE !== undefined) partial.NCLIENTE = dto.NCLIENTE ?? null;
     if (dto.RQFAC !== undefined) partial.RQFAC = dto.RQFAC ?? null;

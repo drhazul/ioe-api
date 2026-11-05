@@ -1,0 +1,73 @@
+name: ioe-odoo
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:17}
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgresql_password
+    secrets: [postgresql_password]
+    volumes:
+      - odoo-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [odoo-private]
+
+  odoo:
+    image: ${ODOO_IMAGE:-odoo:19.0}
+    restart: unless-stopped
+    mem_limit: 1536m
+    cpus: 1.5
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      HOST: db
+      PORT: "5432"
+      USER: odoo
+      PASSWORD_FILE: /run/secrets/postgresql_password
+    secrets: [postgresql_password]
+    command: ["odoo", "--proxy-mode"]
+    ports:
+      - "${ODOO_BIND_IP:-172.16.100.40}:${ODOO_BIND_PORT:-18069}:8069"
+    volumes:
+      - odoo-data:/var/lib/odoo
+      - "${ODOO_CONFIG_PATH:-/root/ioe_odoo_pilot/secrets/odoo.conf}:/etc/odoo/odoo.conf:ro"
+    networks: [odoo-private]
+
+  pgadmin:
+    image: ${PGADMIN_IMAGE:-dpage/pgadmin4:9}
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-drhazul2013@gmail.com}
+      PGADMIN_DEFAULT_PASSWORD_FILE: /run/secrets/pgadmin_password
+    secrets: [pgadmin_password]
+    ports:
+      - "127.0.0.1:${PGADMIN_BIND_PORT:-15050}:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks: [odoo-private]
+
+networks:
+  odoo-private:
+    internal: false
+
+volumes:
+  odoo-postgres:
+  odoo-data:
+  pgadmin-data:
+
+secrets:
+  postgresql_password:
+    file: ${ODOO_DB_PASSWORD_FILE:-/root/ioe_odoo_pilot/secrets/postgresql_password}
+  pgadmin_password:
+    file: ${PGADMIN_PASSWORD_FILE:-/root/ioe_odoo_pilot/secrets/pgadmin_password}

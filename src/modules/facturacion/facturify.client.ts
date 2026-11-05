@@ -1,3 +1,4 @@
+import { fechaEnZona } from '../../common/time/fecha-zona';
 import {
   Injectable,
   ServiceUnavailableException,
@@ -241,7 +242,7 @@ export class FacturifyClient {
     const page = params?.page ?? 1;
     const limit = params?.limit ?? 50;
     const from = params?.from ?? '2018-01-01';
-    const to = params?.to ?? new Date().toISOString().slice(0, 10);
+    const to = params?.to ?? fechaEnZona(new Date());
     const search = encodeURIComponent(params?.search ?? '');
 
     const url = `${this.getBaseUrl()}/api/v1/factura/?page=${page}&limit=${limit}&orderBy=created_at&sort=DESC&from=${from}&to=${to}&search=${search}&invoiceType&invoiceSource&download=&empresa_session_rfc=&include=documentos_relacionados`;

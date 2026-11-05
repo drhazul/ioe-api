@@ -22,8 +22,9 @@ BEGIN
   DECLARE @tipotranNorm NVARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPOTRAN, ''))));
   DECLARE @opvNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@IDOPV, ''))), '');
   DECLARE @epsilon DECIMAL(18, 6) = 0.0001;
-  DECLARE @fechaProceso DATETIME = GETDATE();
-  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, GETDATE());
+  DECLARE @instanteUtc DATETIME2(7) = SYSUTCDATETIME();
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((@instanteUtc AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
+  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, @fechaProceso);
 
   DECLARE @idfolActual NVARCHAR(255);
   DECLARE @idfolInicial NVARCHAR(255);
@@ -899,7 +900,7 @@ DECLARE @sql NVARCHAR(MAX) = N'
 UPDATE o
 SET
   o.RQFAC = fl.REQF_VALUE,
-  o.FCNMOD = GETDATE()
+  o.FCNMOD = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE ''Central Standard Time (Mexico)''))
 FROM dbo.PV_CTR_ORDS o
 INNER JOIN folio_latest fl
   ON fl.RN = 1

@@ -94,16 +94,20 @@ function clave2(valor: string): string {
 }
 
 /**
- * Nombre como lo quiere el CFDI 4.0: en mayusculas y SIN el regimen de
- * capital. "Grupo A & B, S.A. de C.V." va como "GRUPO A & B".
+ * Conserva el nombre fiscal completo de personas fisicas. Solo retira una
+ * forma societaria separada del nombre cuando el RFC tiene estructura de
+ * persona moral. Sin RFC reconocible no se infiere el tipo por el nombre.
  */
-export function normalizarNombreSat(valor: string): string {
-  return valor
-    .toUpperCase()
-    .replace(/\s+/g, ' ')
-    .trim()
+export function normalizarNombreSat(valor: string, rfcReceptor = ''): string {
+  const nombre = valor.toUpperCase().replace(/\s+/g, ' ').trim();
+  const esPersonaMoral = /^[A-ZÑ&]{3}\d{6}[A-Z0-9]{3}$/.test(
+    rfcReceptor.trim().toUpperCase(),
+  );
+  if (!esPersonaMoral) return nombre;
+
+  return nombre
     .replace(
-      /[,.]?\s*(S\.?\s?A\.?\s?P\.?\s?I\.?|S\.?\s?A\.?|S\.?\s?DE\s?R\.?\s?L\.?|S\.?\s?C\.?|A\.?\s?C\.?)(\s?DE\s?C\.?\s?V\.?)?\s*$/,
+      /(?:,\s*|\s+)(S\.?\s?A\.?\s?P\.?\s?I\.?|S\.?\s?A\.?|S\.?\s?DE\s?R\.?\s?L\.?|S\.?\s?C\.?|A\.?\s?C\.?)(\s?DE\s?C\.?\s?V\.?)?\s*$/,
       '',
     )
     .trim();
@@ -229,6 +233,7 @@ export function mapearVenta(
             normalizarNombreSat(
               columna(header, 'RazonSocialReceptor') ||
                 columna(cliente, 'RazonSocialReceptor', 'RAZONSOCIALRECEPTOR'),
+              rfcReceptor,
             ),
             'razon social del receptor',
             idFol,

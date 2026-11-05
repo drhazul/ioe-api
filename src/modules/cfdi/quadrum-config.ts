@@ -63,6 +63,10 @@ export function assertOperacionQuadrum(
   rfc: string,
   operacion: OperacionQuadrum,
 ): void {
+  if (operacion === 'CANCELACION') {
+    assertCancelacionQuadrum(config, rfc);
+    return;
+  }
   if (!quadrumProduccion(config)) return;
   const habilitada =
     String(config.get('QUADRUM_PRODUCCION_HABILITADA') ?? '').toLowerCase() ===
@@ -85,6 +89,15 @@ export function assertOperacionQuadrum(
       `Operación Quadrum ${operacion} no habilitada en producción para ese RFC.`,
     );
   }
+}
+
+/** Cancelar no depende de listas ni del interruptor de habilitación de emisión. */
+export function assertCancelacionQuadrum(
+  config: ConfigService,
+  rfc: string,
+): void {
+  endpointQuadrum(config, 'cancelar');
+  validarRfcEmisor(rfc);
 }
 
 export function validarRfcEmisor(rfc: string): string {

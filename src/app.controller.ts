@@ -1,5 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
+import { businessFromInstant } from './common/time/fecha-negocio';
+import { ZONA_NEGOCIO_DEFAULT } from './common/time/fecha-zona';
 
 @Controller()
 export class AppController {
@@ -16,10 +18,13 @@ export class AppController {
   // Cuando Flutter pregunte por /health, el servidor responderá que está "ok"
   @Get('health')
   checkHealth() {
+    const now = new Date();
     return {
       status: 'ok',
       message: 'Conexión exitosa desde Codex',
-      timestamp: new Date().toISOString(),
+      timestamp: now.toISOString(),
+      timeZone: ZONA_NEGOCIO_DEFAULT,
+      businessDateTime: businessFromInstant(now),
       service: 'IOE-API',
     };
   }

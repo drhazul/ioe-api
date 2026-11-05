@@ -4,8 +4,10 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { developmentBusinessEnabled } from '../../common/guards/development-business.guard';
 import { DataSource, QueryFailedError } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
@@ -610,9 +612,82 @@ export class PagosServiciosService {
     }
   }
 
+  async getCreditosContexto(idFolRaw: string, user: JwtPayload) {
+    if (!developmentBusinessEnabled(this.config))
+      throw new ServiceUnavailableException(
+        'Configuración de créditos disponible únicamente en desarrollo',
+      );
+    try {
+      const folio = await this.loadFolio(idFolRaw, user);
+      const items = await this.dataSource.query(
+        `
+        SELECT t.ART art,t.ORD referencia,p.IDFOL idfol,p.SUC suc,
+          cfg.PERMITIR_PARCIAL permitir,
+          CONVERT(varchar(40),-a.saldo) saldo,
+          CONVERT(varchar(40),CONVERT(decimal(19,4),t.CTD)) cantidad
+        FROM dbo.PV_TICKET_LOG t
+        OUTER APPLY(SELECT x.IDFOL,x.SUC FROM dbo.PV_CTR_FOL_ASVR x
+          WHERE x.IDFOL=t.ORD OR (x.IDFOLINICIAL=t.ORD
+            AND NOT EXISTS(SELECT 1 FROM dbo.PV_CTR_FOL_ASVR z WHERE z.IDFOL=t.ORD)
+            AND (SELECT COUNT(*) FROM dbo.PV_CTR_FOL_ASVR z WHERE z.IDFOLINICIAL=t.ORD)=1)) p
+        OUTER APPLY dbo.fn_creditos_config_efectiva(p.SUC) cfg
+        OUTER APPLY(SELECT SUM(CONVERT(decimal(19,4),d.IMPT)) saldo FROM dbo.DAT_CTRL_CTAS d
+          WHERE d.IDFOL=p.IDFOL AND d.CLIENT=@1 AND d.CTA='101001002') a
+        WHERE t.IDFOL=@0 AND UPPER(LTRIM(RTRIM(t.UPC)))='CR'
+        ORDER BY t.ART`,
+        [folio.IDFOL, folio.CLIEN],
+      );
+      return { items };
+    } catch (error) {
+      throw this.mapError(
+        error,
+        'No se pudo consultar configuración de créditos',
+      );
+    }
+  }
+
+  private async validarCreditosAntesDeProcesar(folio: FolioRow) {
+    if (!developmentBusinessEnabled(this.config)) return;
+    // Reuse the authoritative SQL validation, rolling back alias normalization.
+    // Finalize repeats this under its own lock; this precheck is only early feedback.
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    let validationFailed = false;
+    try {
+      await runner.startTransaction();
+      await runner.query(
+        `DECLARE @ctx nvarchar(max);
+        EXEC dbo.sp_ps_creditos_preparar @IDFOL_PS=@0,@CLIENT=@1,@SUC_COBRO=@2,@CONTEXTO=@ctx OUTPUT;`,
+        [folio.IDFOL, folio.CLIEN, folio.SUC],
+      );
+    } catch (error) {
+      validationFailed = true;
+      throw error;
+    } finally {
+      try {
+        if (runner.isTransactionActive) {
+          try {
+            await runner.rollbackTransaction();
+          } catch (error) {
+            // SQL XACT_ABORT can already have rolled back the driver transaction.
+            const code = (error as { code?: string })?.code;
+            if (
+              !validationFailed ||
+              !['EABORT', 'ENOTBEGUN'].includes(code ?? '')
+            )
+              throw error;
+          }
+        }
+      } finally {
+        await runner.release();
+      }
+    }
+  }
+
   async procesar(idFolRaw: string, user: JwtPayload, ip: string | null) {
     try {
       const folio = await this.loadFolio(idFolRaw, user);
+      await this.validarCreditosAntesDeProcesar(folio);
       const rows = await this.dataSource.query(
         'EXEC dbo.sp_ps_procesar @IDFOL=@0, @USER=@1',
         [folio.IDFOL, this.auditActor(user)],

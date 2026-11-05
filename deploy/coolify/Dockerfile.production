@@ -26,7 +26,9 @@ LABEL org.opencontainers.image.source-api="https://github.com/drhazul/ioe-api" \
       org.opencontainers.image.source-app="https://github.com/drhazul/ioe_app" \
       org.opencontainers.image.revision-api="${API_SHA}" \
       org.opencontainers.image.revision-app="${APP_SHA}"
-RUN apk add --no-cache nginx
+RUN apk add --no-cache nginx tzdata \
+    && ln -snf /usr/share/zoneinfo/America/Mexico_City /etc/localtime \
+    && echo America/Mexico_City > /etc/timezone
 WORKDIR /srv/api
 COPY --from=api_build /api/ioe-api/dist ./dist
 COPY --from=api_build /api/ioe-api/node_modules ./node_modules
@@ -35,6 +37,6 @@ WORKDIR /srv/www
 COPY --from=flutter_build /app/ioe_app/build/web ./web
 COPY deploy/nginx-production.conf /etc/nginx/nginx.conf
 EXPOSE 3001 8081 8085
-ENV NODE_ENV=production PORT=3001
+ENV NODE_ENV=production PORT=3001 TZ=America/Mexico_City
 ENTRYPOINT ["/usr/sbin/nginx"]
 CMD ["-g", "daemon off;"]

@@ -1,3 +1,4 @@
+import { businessSqlDate } from '../../common/time/fecha-negocio';
 import {
   ConflictException,
   Injectable,
@@ -33,7 +34,7 @@ export class PvCtrFolFormService {
     const entity = this.repo.create({
       IDF: dto.IDF,
       IDFOL: dto.IDFOL ?? null,
-      FCN: dto.FCN ? new Date(dto.FCN) : null,
+      FCN: dto.FCN ? businessSqlDate(dto.FCN) : null,
       FORM: dto.FORM ?? null,
       IMPA: dto.IMPA ?? null,
       IMPP: dto.IMPP ?? null,
@@ -52,7 +53,8 @@ export class PvCtrFolFormService {
 
     const partial: Partial<PvCtrFolFormEntity> = {};
     if (dto.IDFOL !== undefined) partial.IDFOL = dto.IDFOL ?? null;
-    if (dto.FCN !== undefined) partial.FCN = dto.FCN ? new Date(dto.FCN) : null;
+    if (dto.FCN !== undefined)
+      partial.FCN = dto.FCN ? businessSqlDate(dto.FCN) : null;
     if (dto.FORM !== undefined) partial.FORM = dto.FORM ?? null;
     if (dto.IMPA !== undefined) partial.IMPA = dto.IMPA ?? null;
     if (dto.IMPP !== undefined) partial.IMPP = dto.IMPP ?? null;

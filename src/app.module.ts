@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { BusinessClockService } from './common/time/business-clock.service';
+import { BusinessClockGuard } from './common/time/business-clock.guard';
+import { BusinessTimeInterceptor } from './common/time/business-time.interceptor';
 import { RolesGuard } from './common/guards/roles.guard';
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './config/database.module';
@@ -80,6 +83,7 @@ import { TransferenciasModule } from './modules/transferencias/transferencias.mo
 import { SugeridosModule } from './modules/sugeridos/sugeridos.module';
 import { RecepcionesModule } from './modules/recepciones/recepciones.module';
 import { DevolucionesProveedorModule } from './modules/devoluciones-proveedor/devoluciones-proveedor.module';
+import { OdooAccountingModule } from './modules/odoo-accounting/odoo-accounting.module';
 
 @Module({
   imports: [
@@ -162,8 +166,12 @@ import { DevolucionesProveedorModule } from './modules/devoluciones-proveedor/de
     SugeridosModule,
     RecepcionesModule,
     DevolucionesProveedorModule,
+    OdooAccountingModule,
   ],
   providers: [
+    BusinessClockService,
+    { provide: APP_GUARD, useClass: BusinessClockGuard },
+    { provide: APP_INTERCEPTOR, useClass: BusinessTimeInterceptor },
     {
       provide: APP_GUARD,
       useClass: RolesGuard,

@@ -2,6 +2,8 @@ import * as Joi from 'joi';
 
 export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(3000),
+  TZ: Joi.string().valid('America/Mexico_City').default('America/Mexico_City'),
+  IOE_REQUIRE_CDMX_SQL_CLOCK: Joi.boolean().default(false),
 
   DB_HOST: Joi.string().required(),
   DB_PORT: Joi.number().default(1433),
@@ -13,6 +15,13 @@ export const envValidationSchema = Joi.object({
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
   REFRESH_EXPIRES_DAYS: Joi.number().default(30),
+
+  // API externa de recompensas; credenciales privadas sólo en entorno backend.
+  RECOMPENSAS_API_URL: Joi.string().uri().allow('').optional(),
+  RECOMPENSAS_API_USERNAME: Joi.string().allow('').optional(),
+  RECOMPENSAS_API_PASSWORD: Joi.string().allow('').optional(),
+  USER_API_FEDERADA: Joi.string().allow('').optional(),
+  PASSWORD_API_FEDERADA: Joi.string().allow('').optional(),
 
   QUADRUM_ENDPOINT: Joi.string()
     .valid(
@@ -43,7 +52,9 @@ export const envValidationSchema = Joi.object({
     .valid('TESTING', 'PRODUCTION')
     .default('TESTING'),
   CFDI_EMAIL_TOKEN_ENCRYPTION_KEY: Joi.string().min(32).optional(),
-  CFDI_EMAIL_WORKER_ENABLED: Joi.string().valid('true', 'false').default('false'),
+  CFDI_EMAIL_WORKER_ENABLED: Joi.string()
+    .valid('true', 'false')
+    .default('false'),
 
   // Alias de variables usadas por .env de despliegues IOE existentes.
   GOOGLE_CLIENT_ID: Joi.string().optional(),

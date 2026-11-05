@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { SQL_DRIVER_USE_UTC } from '../common/time/fecha-negocio';
 
 @Module({
   imports: [
@@ -29,12 +30,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
           retryDelay: Number(config.get('DB_RETRY_DELAY_MS') ?? 5000),
 
           options: {
+            useUTC: SQL_DRIVER_USE_UTC,
             encrypt: false,
             trustServerCertificate: true,
           },
 
           extra: {
             options: {
+              useUTC: SQL_DRIVER_USE_UTC,
               server: host, // tedious/mssql
               trustServerCertificate: true,
               encrypt: false,

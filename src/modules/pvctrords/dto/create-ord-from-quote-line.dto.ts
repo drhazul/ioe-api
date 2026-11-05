@@ -79,7 +79,7 @@ export class CreateOrdFromQuoteLineDto {
   @Length(1, 255)
   opv: string;
 
-  @ApiPropertyOptional({ example: '2026-02-13T00:00:00.000Z' })
+  @ApiPropertyOptional({ example: '2026-02-13T00:00:00.000' })
   @IsOptional()
   @IsDateString()
   fechaEntrega?: string;

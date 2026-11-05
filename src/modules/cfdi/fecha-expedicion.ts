@@ -1,3 +1,5 @@
+import { fechaHoraEnZona, ZONA_NEGOCIO_DEFAULT } from '../../common/time/fecha-zona';
+
 /**
  * Fecha del comprobante en la hora local del lugar de expedicion.
  *
@@ -10,26 +12,11 @@
  * del codigo postal de `LugarExpedicion`. Sin horario de verano desde 2022,
  * `America/Mexico_City` cubre a las sucursales del centro y sur.
  */
-export const ZONA_EXPEDICION_DEFAULT = 'America/Mexico_City';
+export const ZONA_EXPEDICION_DEFAULT = ZONA_NEGOCIO_DEFAULT;
 
 export function fechaCfdi(
   ahora: Date = new Date(),
   zona: string = ZONA_EXPEDICION_DEFAULT,
 ): string {
-  const partes = new Intl.DateTimeFormat('en-CA', {
-    timeZone: zona,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    // `h23` evita que la medianoche salga como "24:00:00".
-    hourCycle: 'h23',
-  }).formatToParts(ahora);
-
-  const p = (tipo: Intl.DateTimeFormatPartTypes) =>
-    partes.find((x) => x.type === tipo)?.value ?? '';
-
-  return `${p('year')}-${p('month')}-${p('day')}T${p('hour')}:${p('minute')}:${p('second')}`;
+  return fechaHoraEnZona(ahora, zona);
 }

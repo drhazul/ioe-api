@@ -53,8 +53,8 @@ BEGIN
         WHEN name = 'DOCP' THEN 'LEFT(ISNULL(@P_DOCP, ''''), 255)'
         WHEN name = 'USER' THEN 'LEFT(ISNULL(@P_USR, SYSTEM_USER), 255)'
         WHEN name = 'CLSM' THEN 'LEFT(ISNULL(@P_CLSM, ''ORD''), 50)'
-        WHEN name = 'FCND' THEN 'CONVERT(date, GETDATE())'
-        WHEN name = 'FCNC' THEN 'GETDATE()'
+        WHEN name = 'FCND' THEN 'CONVERT(date, CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE ''Central Standard Time (Mexico)'')))'
+        WHEN name = 'FCNC' THEN 'CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE ''Central Standard Time (Mexico)''))'
         ELSE 'NULL'
       END,
       ','
@@ -104,7 +104,7 @@ BEGIN
   DECLARE @doc NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@DOCDIF, '')));
 
   IF @doc = ''
-    SET @doc = CONCAT('ODIF-', FORMAT(GETDATE(), 'yyyyMMddHHmmss'), '-', RIGHT(CONVERT(VARCHAR(36), NEWID()), 4));
+    SET @doc = CONCAT('ODIF-', FORMAT(CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')), 'yyyyMMddHHmmss'), '-', RIGHT(CONVERT(VARCHAR(36), NEWID()), 4));
 
   DECLARE @cols NVARCHAR(MAX);
   DECLARE @vals NVARCHAR(MAX);
@@ -128,8 +128,8 @@ BEGIN
         WHEN name = 'IDFOL' THEN '@P_IDFOL'
         WHEN name = 'CTA' THEN '@P_CTA'
         WHEN name = 'IMPT' THEN '@P_IMPT'
-        WHEN name = 'FCND' THEN 'GETDATE()'
-        WHEN name = 'FCNR' THEN 'GETDATE()'
+        WHEN name = 'FCND' THEN 'CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE ''Central Standard Time (Mexico)''))'
+        WHEN name = 'FCNR' THEN 'SYSUTCDATETIME()'
         WHEN name = 'RTXT' THEN 'LEFT(ISNULL(@P_DESC_MOV, ''''), 255)'
         WHEN name = 'NDOC' THEN 'LEFT(@P_DOC, 255)'
         WHEN name = 'CLSD' THEN '@P_MOV'
@@ -200,7 +200,7 @@ BEGIN
         WHEN name = 'CTD' THEN 'COALESCE(@P_NEW_CTD, TRY_CONVERT(FLOAT, o.[CTD]))'
         WHEN name = 'ESTSEGU' THEN '@P_ESTSEGU'
         WHEN name = 'ESTATUS' THEN '@P_ESTATUS'
-        WHEN name = 'FCNMOD' THEN 'GETDATE()'
+        WHEN name = 'FCNMOD' THEN 'CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE ''Central Standard Time (Mexico)''))'
         WHEN name = 'REEORD' THEN 'COALESCE(NULLIF(@P_REEORD, ''''), @P_IORD_ORIG)'
         WHEN name = 'REOORD' THEN 'COALESCE(NULLIF(@P_REEORD, ''''), @P_IORD_ORIG)'
         WHEN name = 'TIPOM' THEN 'COALESCE(@P_TIPOM, TRY_CONVERT(INT, o.[TIPOM]))'
@@ -630,9 +630,9 @@ BEGIN
     ESTATUS = COALESCE(@ESTATUS, ESTATUS),
     ASIGN = COALESCE(NULLIF(@ASIGN, ''), ASIGN),
     LABOR = COALESCE(@LABOR, LABOR),
-    FCNMOD = GETDATE(),
-    FCNEN = CASE WHEN @ESTSEGU = 11 THEN GETDATE() ELSE FCNEN END,
-    HR_ENT = CASE WHEN @ESTSEGU = 11 THEN GETDATE() ELSE HR_ENT END,
+    FCNMOD = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')),
+    FCNEN = CASE WHEN @ESTSEGU = 11 THEN CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')) ELSE FCNEN END,
+    HR_ENT = CASE WHEN @ESTSEGU = 11 THEN CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')) ELSE HR_ENT END,
     FIRMA_CLIENTE = CASE
       WHEN @ESTSEGU = 11 THEN COALESCE(NULLIF(@FIRMA_CLIENTE, ''), FIRMA_CLIENTE)
       ELSE FIRMA_CLIENTE
@@ -835,7 +835,7 @@ BEGIN
     THROW 58021, 'motivo es requerido para cambio de material', 1;
 
   IF @doc = ''
-    SET @doc = CONCAT('ODIF-', FORMAT(GETDATE(), 'yyyyMMddHHmmss'), '-', RIGHT(CONVERT(VARCHAR(36), NEWID()), 4));
+    SET @doc = CONCAT('ODIF-', FORMAT(CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')), 'yyyyMMddHHmmss'), '-', RIGHT(CONVERT(VARCHAR(36), NEWID()), 4));
 
   SELECT TOP 1
     @idfol = o.IDFOL,
@@ -862,7 +862,7 @@ BEGIN
   IF @idfol IS NULL
     THROW 58022, 'No existe la ORD origen o no tiene acceso por sucursal', 1;
 
-  SET @newIord = LEFT(CONCAT(ISNULL(@idfol, 'ORD'), '-CM-', FORMAT(GETDATE(), 'yyyyMMddHHmmss'), '-', RIGHT(CONVERT(VARCHAR(36), NEWID()), 4)), 255);
+  SET @newIord = LEFT(CONCAT(ISNULL(@idfol, 'ORD'), '-CM-', FORMAT(CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')), 'yyyyMMddHHmmss'), '-', RIGHT(CONVERT(VARCHAR(36), NEWID()), 4)), 255);
   SET @ctdAbs = ABS(ISNULL(@ctd, 0));
   SET @ctdSalida = -ABS(ISNULL(@ctd, 0));
   SET @docpOrig = ISNULL(@idfol, @IORD);
@@ -904,7 +904,7 @@ BEGIN
     SET
       ESTSEGU = 4,
       ESTATUS = 2,
-      FCNMOD = GETDATE(),
+      FCNMOD = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')),
       COMAD = LEFT(
         CONCAT(
           ISNULL(CAST(COMAD AS NVARCHAR(MAX)), ''),
@@ -1055,7 +1055,7 @@ BEGIN
   SET @remanente = @ctdOrig - @CANTIDAD_MERMA;
 
   IF @CREAR_NUEVA_ORD = 1
-    SET @newIord = LEFT(CONCAT(ISNULL(@idfol, 'ORD'), '-MR-', FORMAT(GETDATE(), 'yyyyMMddHHmmss'), '-', RIGHT(CONVERT(VARCHAR(36), NEWID()), 4)), 255);
+    SET @newIord = LEFT(CONCAT(ISNULL(@idfol, 'ORD'), '-MR-', FORMAT(CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')), 'yyyyMMddHHmmss'), '-', RIGHT(CONVERT(VARCHAR(36), NEWID()), 4)), 255);
 
   SET @ctdMermaAbs = ABS(@CANTIDAD_MERMA);
   SET @ctdMermaSalida = -ABS(@CANTIDAD_MERMA);
@@ -1100,7 +1100,7 @@ BEGIN
       CTD = CASE WHEN @remanente > 0 THEN @remanente ELSE CTD END,
       ESTSEGU = CASE WHEN @remanente > 0 THEN ESTSEGU ELSE 4 END,
       ESTATUS = 2,
-      FCNMOD = GETDATE(),
+      FCNMOD = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')),
       COMAD = LEFT(
         CONCAT(
           ISNULL(CAST(COMAD AS NVARCHAR(MAX)), ''),

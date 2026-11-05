@@ -10,7 +10,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { assertOperacionQuadrum } from './quadrum-config';
+import { assertCancelacionQuadrum, validarRfcEmisor } from './quadrum-config';
 import { aUtf8SinBom } from './cfdi-node';
 import { CsdService } from './csd.service';
 import { CuentaPac } from './quadrum.client';
@@ -135,7 +135,7 @@ export class CancelacionService {
     // no es de aqui se cae al CSD del .env, que es el caso de las pruebas.
     const folio = await this.repo.folioPorUuid(input.uuid);
     const rfcEmisor = this.emisorDelFolio(folio);
-    assertOperacionQuadrum(this.config, rfcEmisor, 'CANCELACION');
+    assertCancelacionQuadrum(this.config, rfcEmisor);
     const cuentaPac = await this.cuentaDe(rfcEmisor);
 
     const estatusPrevio = await this.ejecutar(() =>
@@ -306,8 +306,8 @@ export class CancelacionService {
   /**
    * Cuenta del PAC de ese RFC, si la tiene dada de alta.
    *
-   * Sin ella el cliente cae a la del .env, que es como trabajaba antes de
-   * que cada razon social tuviera la suya.
+   * Producción conserva cuenta individual obligatoria. Sólo desarrollo
+   * permite compatibilidad con la cuenta global del entorno.
    */
   private async cuentaDe(rfcEmisor: string): Promise<CuentaPac | undefined> {
     try {
@@ -329,7 +329,7 @@ export class CancelacionService {
           'UUID sin documento Quadrum y RFC emisor verificables en IOE.',
         );
       }
-      return columna(folio, 'RfcEmisor').toUpperCase();
+      return validarRfcEmisor(columna(folio, 'RfcEmisor'));
     }
     return folio
       ? columna(folio, 'RfcEmisor').toUpperCase() || this.rfcEmisor()

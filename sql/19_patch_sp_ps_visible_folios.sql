@@ -4,6 +4,7 @@ GO
 
 -- Patch PS visible folios: CP al crear, CA/VF al finalizar segun ORIGEN_AUT
 -- Incluye compatibilidad con IDFOLINICIAL en lookup del SP de finalizacion
+-- Fechas de negocio PS se derivan de SYSUTCDATETIME() en zona Mexico; auditoria FCNR conserva UTC.
 
 CREATE OR ALTER PROCEDURE dbo.sp_ps_folio_create
   @SUC VARCHAR(4),
@@ -21,8 +22,9 @@ BEGIN
   DECLARE @opvNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@OPV, '')));
   DECLARE @idfol NVARCHAR(255);
   DECLARE @nextTra INT;
-  DECLARE @fechaProceso DATETIME = GETDATE();
-  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, GETDATE());
+  DECLARE @instanteUtc DATETIME2(7) = SYSUTCDATETIME();
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((@instanteUtc AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
+  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, @fechaProceso);
 
   IF @sucNorm = ''
     THROW 57001, 'SUC es requerido', 1;
@@ -96,6 +98,59 @@ BEGIN
       @opvNorm AS OPV,
       'PENDIENTE' AS ESTA,
       'CA' AS ORIGEN_AUT;
+  END TRY
+  BEGIN CATCH
+    IF @startedTran = 1 AND @@TRANCOUNT > 0
+      ROLLBACK TRANSACTION;
+    THROW;
+  END CATCH
+END;
+GO
+
+-- Mantiene hora comercial Mexico al cerrar folio PS.
+CREATE OR ALTER PROCEDURE dbo.sp_ps_terminar
+  @IDFOL NVARCHAR(255),
+  @USER NVARCHAR(255) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+  SET XACT_ABORT ON;
+
+  DECLARE @startedTran BIT = 0;
+  DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
+
+  IF @idfolNorm = ''
+    THROW 57110, 'IDFOL es requerido', 1;
+
+  BEGIN TRY
+    IF @@TRANCOUNT = 0
+    BEGIN
+      SET @startedTran = 1;
+      BEGIN TRANSACTION;
+    END;
+
+    UPDATE dbo.PV_CTR_FOL_ASVR
+    SET ESTA = 'CERRADO_PS',
+        FCNM = @fechaProceso
+    WHERE IDFOL = @idfolNorm;
+
+    IF @@ROWCOUNT = 0
+      THROW 57111, 'El folio no existe', 1;
+
+    IF OBJECT_ID('dbo.PV_CTR_FOL_FORMTMP', 'U') IS NOT NULL
+    BEGIN
+      DELETE FROM dbo.PV_CTR_FOL_FORMTMP
+      WHERE IDFOL = @idfolNorm;
+    END
+
+    IF @startedTran = 1 AND @@TRANCOUNT > 0
+      COMMIT TRANSACTION;
+
+    SELECT
+      @idfolNorm AS IDFOL,
+      'CERRADO_PS' AS ESTA,
+      CAST(1 AS BIT) AS OK;
   END TRY
   BEGIN CATCH
     IF @startedTran = 1 AND @@TRANCOUNT > 0
@@ -195,6 +250,7 @@ BEGIN
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
   DECLARE @clienNorm FLOAT = TRY_CONVERT(FLOAT, @CLIEN);
   DECLARE @userNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@USER, ''))), '');
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
 
   IF @idfolNorm = ''
     THROW 57012, 'IDFOL es requerido', 1;
@@ -233,7 +289,7 @@ BEGIN
     UPDATE dbo.PV_CTR_FOL_ASVR
     SET
       CLIEN = @clienNorm,
-      FCNM = GETDATE(),
+      FCNM = @fechaProceso,
       OPVM = COALESCE(@userNorm, OPVM)
     WHERE IDFOL = @idfolNorm;
 
@@ -267,6 +323,7 @@ BEGIN
   SET XACT_ABORT ON;
 
   DECLARE @startedTran BIT = 0;
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
   DECLARE @idsNorm CHAR(2) = UPPER(LTRIM(RTRIM(ISNULL(@IDS, ''))));
   DECLARE @descSvr VARCHAR(120);
@@ -348,7 +405,7 @@ BEGIN
 
       UPDATE dbo.PV_CTR_FOL_ASVR
       SET AUT = @autRelacion,
-          FCNM = GETDATE()
+          FCNM = @fechaProceso
       WHERE IDFOL = @idfolNorm;
     END
 
@@ -391,19 +448,20 @@ BEGIN
       + CASE WHEN @hasId = 1 AND @idIsIdentity = 0 THEN N'@pID, ' ELSE N'' END
       + N'@pIDFOL, @pUPC, @pART, @pDES, 1, NULL, NULL'
       + CASE WHEN @hasPvtat = 1 THEN N', NULL' ELSE N'' END
-      + CASE WHEN @hasUpdatedAt = 1 THEN N', GETDATE()' ELSE N'' END
+      + CASE WHEN @hasUpdatedAt = 1 THEN N', @pNOW' ELSE N'' END
       + N');';
 
     SET @newTicketId = CONVERT(NVARCHAR(36), NEWID());
 
     EXEC sys.sp_executesql
       @sql,
-      N'@pID NVARCHAR(36), @pIDFOL NVARCHAR(255), @pUPC CHAR(2), @pART NVARCHAR(255), @pDES VARCHAR(120)',
+      N'@pID NVARCHAR(36), @pIDFOL NVARCHAR(255), @pUPC CHAR(2), @pART NVARCHAR(255), @pDES VARCHAR(120), @pNOW DATETIME',
       @pID = @newTicketId,
       @pIDFOL = @idfolNorm,
       @pUPC = @idsNorm,
       @pART = @art,
-      @pDES = @descSvr;
+      @pDES = @descSvr,
+      @pNOW = @fechaProceso;
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0
       COMMIT TRANSACTION;
@@ -799,6 +857,7 @@ BEGIN
   SET XACT_ABORT ON;
 
   DECLARE @startedTran BIT = 0;
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
   DECLARE @artNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@ART, '')));
   DECLARE @lineOrd NVARCHAR(255);
@@ -965,16 +1024,17 @@ BEGIN
 
     SET @sql = N'UPDATE dbo.PV_TICKET_LOG SET PVTA = @pPVTA'
       + CASE WHEN @hasPvtat = 1 THEN N', PVTAT = ROUND(@pPVTA * @pCTD, 4)' ELSE N'' END
-      + CASE WHEN @hasUpdatedAt = 1 THEN N', UPDATED_AT = GETDATE()' ELSE N'' END
+      + CASE WHEN @hasUpdatedAt = 1 THEN N', UPDATED_AT = @pNOW' ELSE N'' END
       + N' WHERE IDFOL = @pIDFOL AND ART = @pART;';
 
     EXEC sys.sp_executesql
       @sql,
-      N'@pPVTA DECIMAL(18,4), @pCTD DECIMAL(18,4), @pIDFOL NVARCHAR(255), @pART NVARCHAR(255)',
+      N'@pPVTA DECIMAL(18,4), @pCTD DECIMAL(18,4), @pIDFOL NVARCHAR(255), @pART NVARCHAR(255), @pNOW DATETIME',
       @pPVTA = @PVTA,
       @pCTD = @lineCtd,
       @pIDFOL = @idfolNorm,
-      @pART = @artNorm;
+      @pART = @artNorm,
+      @pNOW = @fechaProceso;
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0
       COMMIT TRANSACTION;
@@ -1054,6 +1114,7 @@ BEGIN
   SET XACT_ABORT ON;
 
   DECLARE @startedTran BIT = 0;
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
   DECLARE @serviceType CHAR(2);
   DECLARE @total DECIMAL(18, 4);
@@ -1108,7 +1169,7 @@ BEGIN
     UPDATE dbo.PV_CTR_FOL_ASVR
     SET
       IMPT = CASE WHEN @isCashOut = 1 THEN (@total * -1) ELSE @total END,
-      FCNM = GETDATE()
+      FCNM = @fechaProceso
     WHERE IDFOL = @idfolNorm;
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0
@@ -1252,6 +1313,7 @@ BEGIN
   SET XACT_ABORT ON;
 
   DECLARE @startedTran BIT = 0;
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
   DECLARE @formNorm NVARCHAR(40) = UPPER(LTRIM(RTRIM(ISNULL(@FORM, ''))));
   DECLARE @autNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@AUT, ''))), '');
@@ -1353,19 +1415,20 @@ BEGIN
       + CASE WHEN @hasIdf = 1 AND @idfIsIdentity = 0 THEN N'@pIDF, ' ELSE N'' END
       + N'@pIDFOL, @pFORM, @pIMPP'
       + CASE WHEN @hasAut = 1 THEN N', @pAUT' ELSE N'' END
-      + CASE WHEN @hasFcn = 1 THEN N', GETDATE()' ELSE N'' END
+      + CASE WHEN @hasFcn = 1 THEN N', @pNOW' ELSE N'' END
       + N');';
 
     SET @newFormaId = CONVERT(NVARCHAR(36), NEWID());
 
     EXEC sys.sp_executesql
       @sql,
-      N'@pIDF NVARCHAR(36), @pIDFOL NVARCHAR(255), @pFORM NVARCHAR(40), @pIMPP DECIMAL(18,4), @pAUT NVARCHAR(255)',
+      N'@pIDF NVARCHAR(36), @pIDFOL NVARCHAR(255), @pFORM NVARCHAR(40), @pIMPP DECIMAL(18,4), @pAUT NVARCHAR(255), @pNOW DATETIME',
       @pIDF = @newFormaId,
       @pIDFOL = @idfolNorm,
       @pFORM = @formNorm,
       @pIMPP = @IMPP,
-      @pAUT = @autNorm;
+      @pAUT = @autNorm,
+      @pNOW = @fechaProceso;
 
     SET @sql = N'
       SELECT @pPagado = ROUND(SUM(ISNULL(TRY_CONVERT(DECIMAL(18,4), IMPP), 0)), 4)
@@ -1383,7 +1446,7 @@ BEGIN
     SET
       ESTA = CASE WHEN @pagado + @epsilon >= @total AND @total > 0 THEN 'PAGADO' ELSE ESTA END,
       IMPP = @pagado,
-      FCNM = GETDATE()
+      FCNM = @fechaProceso
     WHERE IDFOL = @idfolNorm;
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0
@@ -1409,6 +1472,7 @@ BEGIN
   SET XACT_ABORT ON;
 
   DECLARE @startedTran BIT = 0;
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
   DECLARE @idfNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDF, '')));
   DECLARE @total DECIMAL(18, 4);
@@ -1470,7 +1534,7 @@ BEGIN
     SET
       ESTA = CASE WHEN @total <= 0 OR @pagado + @epsilon < @total THEN 'PENDIENTE' ELSE ESTA END,
       IMPP = @pagado,
-      FCNM = GETDATE()
+      FCNM = @fechaProceso
     WHERE IDFOL = @idfolNorm;
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0
@@ -1508,8 +1572,9 @@ BEGIN
   DECLARE @folioActualUpper NVARCHAR(255);
   DECLARE @formasJsonNorm NVARCHAR(MAX) = LTRIM(RTRIM(ISNULL(@FORMAS_JSON, '')));
   DECLARE @userNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@USER, ''))), '');
-  DECLARE @fechaProceso DATETIME = GETDATE();
-  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, GETDATE());
+  DECLARE @instanteUtc DATETIME2(7) = SYSUTCDATETIME();
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((@instanteUtc AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
+  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, @fechaProceso);
   DECLARE @sucDb NVARCHAR(20);
   DECLARE @opvDb NVARCHAR(255);
   DECLARE @clien FLOAT;
@@ -2023,13 +2088,13 @@ BEGIN
                 CASE WHEN @ctrlHasRTXT = 1 THEN N', @pRTXT' ELSE N'' END +
                 CASE WHEN @ctrlHasFCND = 1 THEN N', @pNOW' ELSE N'' END +
                 CASE WHEN @ctrlHasFCN = 1 THEN N', @pNOW' ELSE N'' END +
-                CASE WHEN @ctrlHasFCNR = 1 THEN N', @pNOW' ELSE N'' END +
+                CASE WHEN @ctrlHasFCNR = 1 THEN N', @pUTC' ELSE N'' END +
                 CASE WHEN @ctrlHasFECHA = 1 THEN N', @pNOW' ELSE N'' END + N'
               );';
 
             EXEC sys.sp_executesql
               @sql,
-              N'@pCTA NVARCHAR(255), @pCLIENT FLOAT, @pCLSD INT, @pIMPT DECIMAL(18,4), @pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pSUC NVARCHAR(20), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(10), @pRTXT NVARCHAR(255), @pNOW DATETIME',
+              N'@pCTA NVARCHAR(255), @pCLIENT FLOAT, @pCLSD INT, @pIMPT DECIMAL(18,4), @pNDOC NVARCHAR(255), @pIDFOL NVARCHAR(255), @pSUC NVARCHAR(20), @pOPV NVARCHAR(255), @pTIPO NVARCHAR(10), @pRTXT NVARCHAR(255), @pNOW DATETIME, @pUTC DATETIME2(7)',
               @pCTA = @cta,
               @pCLIENT = @clien,
               @pCLSD = @movClass,
@@ -2040,7 +2105,8 @@ BEGIN
               @pOPV = @opvAudit,
               @pTIPO = @lineTipps,
               @pRTXT = @rtxt,
-              @pNOW = @fechaProceso;
+              @pNOW = @fechaProceso,
+              @pUTC = @instanteUtc;
           END;
 
           FETCH NEXT FROM line_cursor INTO @lineTipps, @lineOrd, @lineTotal;

@@ -70,6 +70,14 @@ export class PagosServiciosController {
     );
   }
 
+  @Get('folios/:idFol/creditos/contexto')
+  getCreditosContexto(
+    @Param('idFol') idFol: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.getCreditosContexto(idFol, user);
+  }
+
   @Post('folios/:idFol/ticket/service')
   addTicketService(
     @Param('idFol') idFol: string,

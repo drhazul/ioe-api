@@ -78,3 +78,7 @@
 - La salida a transito registra `DAT_MB51` con movimiento `121`; la contabilizacion registra destino `123` y diferencias con `122/124`.
 - Desde el ajuste `2026-07-23`, la salida `121` y el sobrante/descuento `124` registran `CTDA/CTOT` negativos en origen; el reintegro `122` y la entrada `123` continúan positivos.
 - `sql/2026-07-23_mb51_movimientos_historicos_signo_fix.sql` corrige los movimientos históricos oficiales de salida que quedaron positivos, sin modificar nuevamente `DAT_ART.STOCK`.
+
+## Contrato horario CDMX (2026-11-04)
+
+Fechas comerciales usan adaptación compartida SQL/API/Flutter, sin falsa Z ni conversión por zona del dispositivo; auditoría conserva UTC. MB51 adapta FCND/FCNC y filtros de calendario; PS/conteos comparten contrato central de respuesta. Mantener separado alcance de reparación FCNC de 15 filas NC300007708 y despliegue preventivo pendiente. [Contrato y validación](../../CONTRATO_FECHAS_CDMX.md).

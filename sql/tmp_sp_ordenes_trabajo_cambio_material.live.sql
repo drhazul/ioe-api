@@ -18,6 +18,7 @@ AS
 BEGIN
   SET NOCOUNT ON;
   SET XACT_ABORT ON;
+  DECLARE @fechaProcesoMexico DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
 
   DECLARE @allowed TABLE (SUC NVARCHAR(10) PRIMARY KEY);
   INSERT INTO @allowed (SUC)
@@ -58,7 +59,7 @@ BEGIN
   IF @doc = ''
     SET @doc = CONCAT(
       'ODIF-',
-      FORMAT(GETDATE(), 'yyyyMMddHHmmss'),
+      FORMAT(@fechaProcesoMexico, 'yyyyMMddHHmmss'),
       '-',
       RIGHT(CONVERT(VARCHAR(36), NEWID()), 4)
     );
@@ -138,7 +139,7 @@ BEGIN
 
   IF @newIord IS NULL
   BEGIN
-    DECLARE @fcnGenCM DATETIME = GETDATE();
+    DECLARE @fcnGenCM DATETIME = @fechaProcesoMexico;
     EXEC dbo.sp_pv_ctr_ords_generate_iord
       @SUC = @sucOrd,
       @FCN = @fcnGenCM,
@@ -206,7 +207,7 @@ BEGIN
       selCtrlOrd = NULL,
       ESTSEGU = 4,
       ESTATUS = 2,
-      FCNMOD = GETDATE(),
+      FCNMOD = @fechaProcesoMexico,
       COMAD = LEFT(
         CONCAT(
           ISNULL(CAST(COMAD AS NVARCHAR(MAX)), ''),
@@ -239,7 +240,7 @@ BEGIN
         DESCART
       ),
       selCtrlOrd = NULL,
-      FCNMOD = GETDATE()
+      FCNMOD = @fechaProcesoMexico
     WHERE IORD = @newIord;
 
     EXEC dbo.sp_ordenes_trabajo_registrar_mb51

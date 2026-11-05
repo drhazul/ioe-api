@@ -1,5 +1,7 @@
 # Instrucciones de agente para ioe-api
 
+- C01 lealtad (2026-10-23): conservar error estructurado seguro, consulta por folio/sucursal y aliases privados `USER_API_FEDERADA`/`PASSWORD_API_FEDERADA`; nunca sustituir cuenta HTTP por SQL ni convertir un fallo en no participante. UAT local con `scripts/start-c01-dev.cjs` fijado a IOEDESARROLLO. Contrato: `docs/modules/punto_venta/LEALTAD_C01_DIAGNOSTICO_20261023.md`.
+
 - Punto de venta / fechas de proceso (2026-10-15): folios CP/CA/VF, cierre, staging/transmisión MB51 y sellos de facturación/CFDI usan hora local de México derivada de UTC; fechas recibidas como dato de negocio siguen intactas. Aplicar los scripts SQL actualizados junto con API.
 - Caja General/Retiros (2026-10-16): `DAT_RET_CTR_SVR.FCNR` conserva UTC y se filtra con límites semiabiertos UTC derivados de `Central Standard Time (Mexico)`; `DAT_CTR_DOC.FCND` y `DAT_CTRL_CTAS.FCND` generados al cerrar/revertir entrega usan hora México. La migración `sql/2026-10-16_retiros_caja_fecha_mexico.sql` es independiente; no ejecutarla sin autorización específica del destino y ventana.
 
@@ -27,6 +29,7 @@
 - Órdenes de compra / Validado sincronizado (2026-08-21): `sp_rec_recepcion_solicitar` cambia tanto la recepción como `REC_CAB_PED` a `VALIDADO`; el catálogo incorpora el estado y DAT_REC administrativo incluye cabeceras `VALIDADO`, mientras sucursal conserva solo `PROCESADO`.
 - Órdenes de compra / Cancelar validada (2026-08-21): solo el Jefe puede cancelar una O.C. `VALIDADO`; antes debe comprobarse ausencia de `CTDREC`, recepción contabilizada y `DAT_MB51`, y la transacción cambia la recepción a `CANCELADO` y la cabecera a `ANULADO`.
 - Facturación / Timbrado CFDI con Quadrum (2026-09-14 a 2026-10-07): `CfdiModule` monta `/cfdi/*` y timbra, cancela y emite notas de crédito y complementos de pago con Quadrum, sellando del lado de la API con el CSD de cada razón social (`FACT_CSD`). No sustituye a Facturify ni modifica `src/modules/facturacion/`; `FAC_SVR_SHAP.CFDI_PAC` indica quién timbró cada folio. Reglas de trabajo en la sección «Facturación CFDI con Quadrum».
+- Contabilidad Odoo (2026-10-23): `OdooAccountingModule` exporta resolvedor interno de `INT_ODOO_CTA_MAP`; exige entidad fiscal, vínculo sucursal vigente y equivalencia `VALIDADA`. Mantener estados fiscales pendientes hasta validación formal. El módulo no crea documentos ni llama JSON-2; no extender a escritura sin outbox, idempotencia y pruebas contables.
 - Backend NestJS (TypeScript) modular por feature (`controller -> service -> dto/entity`).
 - Persistencia con TypeORM sobre MSSQL (schema `dbo`), entidades/columnas en mayúsculas.
 - Seguridad: JWT, `RolesGuard` global, `AuditInterceptor` global, `ValidationPipe` (`whitelist + transform + forbid`).
@@ -71,6 +74,7 @@
 - Datos Maestros / Acceso por sucursal (2026-05-06): el filtro `depto` en `GET /usr-mod-suc` aplica coincidencia por `DEPARTAMENTO de USUARIO OR DEPTO de MOD_FRONT` (ya no intersección estricta).
 - Datos Maestros / Colaboradores compartidos por sucursal (2026-06-18): se agrega CRUD `GET/POST/PATCH/DELETE /suc-colab-acceso` sobre `DAT_SUC_COLAB_ACCESO` para parametrizar sucursal destino/origen y habilitar, sin hardcode, el catálogo de colaboradores compartidos usado por ORDs.
 - Datos Maestros / Usuarios y Empresas (2026-06-25): se agrega CRUD `GET/POST/PATCH/DELETE /empresas` sobre `dbo.EMPRESA`; `USUARIO.MAIL` se compone como `USERNAME + EMPRESA.correo`; `GET /users/sugerencias/caja-username` sugiere el siguiente usuario de cajas con base en `PV_OPV.IDOPV` rango `5000-5999`, y el alta/update de usuarios CAJAS sincroniza el registro de control en `PV_OPV`.
+- Datos Maestros / Entidades fiscales (2026-10-21): `dbo.ENTIDAD_FISCAL` conserva RFC/tipo de persona/datos SAT separados de `dbo.EMPRESA`; `dbo.ENTIDAD_FISCAL_SUCURSAL` conserva vínculos con vigencias; endpoints `/entidades-fiscales` exclusivos de ADMIN ROL 1. Candidatos de `DAT_SUC.RFC` inician `PENDIENTE`; no inferir emisor Quadrum de sucursal ni reemplazar Facturify. Scripts/objetos y estado de promoción: `docs/CONTROL_CAMBIOS_DESARROLLO_PRODUCCION.md`.
 - Ordenes de trabajo / Panel ORDs (2026-05-06): `listarColaboradoresAsignar` permite a `ANALISTA_INV` e `INVJEF` consultar catálogo de asignados; se agrega script `sql/2026-05-06_ord_flujo_vis_analista_inv_invjef_expand.sql` para ampliar visibilidad operativa configurada en `DAT_JAO_ORD_FLUJO_VIS`.
 - Ordenes de trabajo / Panel ORDs (2026-05-06): se corrige `dbo.sp_ordenes_trabajo_panel` con script `sql/2026-05-06_ordenes_trabajo_panel_analista_inv_selctrl14_fix.sql` para reponer visibilidad de `ANALISTA_INV/INVJEF` y aplicar criterio `selCtrlOrd=14` en la cola de revisión de cambio/merma.
 - Ordenes de trabajo / Panel ORDs acceso multi-sucursal analista (2026-05-22): `sp_ordenes_trabajo_panel` omite el recorte por `@HOME_SUC` cuando la consulta trae `@SUC` explícita y permitida en `USR_MOD_SUC`; evita ocultar ORDs recientes de sucursales como `DF14` para usuarios `ANALISTA_ORD` con acceso multi-sucursal (script `sql/2026-05-22_ordenes_trabajo_panel_home_suc_scope_fix_df14.sql`).
@@ -245,3 +249,12 @@ El titular autoriza excepción específica de FACTURA_QUADRUM: sucursal no limit
 ## Despliegue conjunto con todos los cambios (2026-10-14)
 
 Instrucción del titular: cada pase productivo debe incluir backend y frontend juntos, con commits de todos los cambios de fuente/documentación pendientes en ambos repositorios. Integrar historias locales/remotas/servidor sin descartar modificaciones; preservar secretos/entornos y respaldos fuera de Git. Validar y registrar ambas versiones en imagen/postflight. No hacer un pase sólo de API como sustituto del despliegue conjunto.
+
+
+## Cancelación Quadrum sin listas de emisión (2026-10-29)
+
+Corrección local autorizada: CancelacionService usa assertCancelacionQuadrum, que valida endpoint oficial y RFC sin depender de QUADRUM_PRODUCCION_HABILITADA, QUADRUM_RFC_HABILITADOS o QUADRUM_FLUJOS_HABILITADOS. La función compartida delega CANCELACION y conserva reglas para FACTURA/NC/REP. Siguen documento Quadrum verificable, cuenta/CSD individuales, JWT, motivo/confirmación y control fiscal/concurrencia. No añadir listas alternativas para emisores futuros. Documentación oficial/WSDL revisados; pruebas de contrato y cuentas simulan red/SQL. Notas de soporte retiradas por titular. Fuente local corregida no acredita despliegue ni cancelación real; seguir QCAN-02/QCAN-04 del expediente QUADRUM_CANCELACION_SEGUIMIENTO_20261029.md.
+
+## Arquitectura de fechas compartida (2026-11-04)
+
+Usar src/common/time y [CONTRATO_FECHAS_CDMX.md](docs/CONTRATO_FECHAS_CDMX.md). Hora comercial SQL sin zona se serializa sin Z; instantes/auditoría conservan UTC. No cambiar globalmente useUTC=false ni crear offsets/parsers locales. Registrar contratos de nuevas rutas en BusinessTimeInterceptor. IOELOCAL exige guardia de reloj CDMX durante OnModuleInit y escrituras HTTP; desplegar con DDL/TZ y App en mantenimiento coordinado. Código local no acredita activación productiva.

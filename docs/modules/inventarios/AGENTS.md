@@ -85,3 +85,7 @@
 - La contabilizacion y las transiciones criticas se mantienen en SPs idempotentes versionados en `sql/`.
 - No inventar codigos de movimiento; consultar `DAT_CMOV`.
 - Validar alcance por sucursal con `USR_MOD_SUC` para `DAT_JAA_TRAN`, con fallback a `SUC` del token cuando no existan asignaciones.
+
+## Contrato horario CDMX (2026-11-04)
+
+Fechas comerciales usan adaptación compartida SQL/API/Flutter, sin falsa Z ni conversión por zona del dispositivo; auditoría conserva UTC. MB51 adapta FCND/FCNC y filtros de calendario; PS/conteos comparten contrato central de respuesta. Mantener separado alcance de reparación FCNC de 15 filas NC300007708 y despliegue preventivo pendiente. [Contrato y validación](../../CONTRATO_FECHAS_CDMX.md).

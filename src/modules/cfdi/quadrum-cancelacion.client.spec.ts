@@ -124,3 +124,122 @@ describe('QuadrumCancelacionClient — contrato de consulta SAT por ambiente', (
     await expect(cliente('ws').estatusSat(entrada)).rejects.toThrow(PacError);
   });
 });
+
+describe('QuadrumCancelacionClient — contrato de cancelar revisado 2026-10-29', () => {
+  const certPem = Buffer.from(
+    '-----BEGIN CERTIFICATE-----\nCERTIFICADO-FICTICIO\n-----END CERTIFICATE-----',
+  );
+  const keyPem = Buffer.from('LLAVE-FICTICIA-DE-PRUEBA');
+  const sustituye = 'BBBBBBBB-1111-2222-3333-444455556666';
+  const response = (codigo: string) =>
+    `<cancelarResult><Folios><Folio><UUID>${entrada.uuid}</UUID><EstatusUUID>${codigo}</EstatusUUID></Folio></Folios></cancelarResult>`;
+
+  it.each(['ws', 'devws'])(
+    'SOAP cancelar de %s usa datos del emisor y PEM en base64, sin reintento',
+    async (host) => {
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(response('201'), { status: 200 }));
+      await cliente(host).cancelar({
+        ...entrada,
+        motivo: '01',
+        folioSustitucion: sustituye,
+        cer: certPem,
+        key: keyPem,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(`https://${host}.cfdiquadrum.com.mx/cancelar`);
+      expect(init?.headers).toEqual({
+        'Content-Type': 'text/xml; charset=utf-8',
+        SOAPAction: '"cancelar"',
+      });
+      const body = String(init?.body);
+      expect(body).toContain(
+        'xmlns:can="http://ws.cfdiquadrum.com.mx/cancelar"',
+      );
+      expect(body).toContain('xmlns:vw="apps.services.soap.core.views"');
+      const campos = [...body.matchAll(/<can:(\w+)>/g)].map(
+        (match) => match[1],
+      );
+      expect(campos).toEqual([
+        'UUIDS',
+        'usuario',
+        'contrasena',
+        'rfc',
+        'cer',
+        'key',
+        'reintentar',
+      ]);
+      expect(body).toContain(`UUID="${entrada.uuid}"`);
+      expect(body).toContain('Motivo="01"');
+      expect(body).toContain(`FolioSustitucion="${sustituye}"`);
+      expect(body).toContain('<can:usuario>cuenta&amp;prueba</can:usuario>');
+      expect(body).toContain(
+        '<can:contrasena>clave&lt;prueba&gt;</can:contrasena>',
+      );
+      expect(body).toContain(`<can:rfc>${entrada.rfcEmisor}</can:rfc>`);
+      expect(body).toContain(
+        `<can:cer>${certPem.toString('base64')}</can:cer>`,
+      );
+      expect(body).toContain(`<can:key>${keyPem.toString('base64')}</can:key>`);
+      expect(body).toContain('<can:reintentar>false</can:reintentar>');
+      expect(body).not.toContain('global-no-seleccionada');
+    },
+  );
+
+  it.each(['02', '03', '04'])(
+    'motivo %s no agrega atributo de sustitución al request',
+    async (motivo) => {
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(response('201'), { status: 200 }));
+      await cliente('ws').cancelar({
+        ...entrada,
+        motivo,
+        cer: certPem,
+        key: keyPem,
+      });
+      expect(String(fetchMock.mock.calls[0][1]?.body)).not.toContain(
+        'FolioSustitucion=',
+      );
+    },
+  );
+
+  it.each(['201', '202'])(
+    'clasifica código documentado %s sin declarar estado Cancelado',
+    async (codigo) => {
+      jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(response(codigo), { status: 200 }));
+      const result = await cliente('ws').cancelar({
+        ...entrada,
+        motivo: '03',
+        cer: certPem,
+        key: keyPem,
+      });
+      expect(result.exitoso).toBe(true);
+      expect(result.folios).toEqual([
+        { uuid: entrada.uuid, estatusUUID: codigo },
+      ]);
+      expect(result).not.toHaveProperty('estado');
+    },
+  );
+
+  it.each(['203', '204', '205', '207', '208', '209', '210', '211', '212'])(
+    'no considera éxito código de rechazo %s aunque HTTP sea 200',
+    async (codigo) => {
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response(response(codigo), { status: 200 }));
+      const result = await cliente('ws').cancelar({
+        ...entrada,
+        motivo: '03',
+        cer: certPem,
+        key: keyPem,
+      });
+      expect(result.exitoso).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+});

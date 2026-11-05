@@ -48,7 +48,7 @@ BEGIN
     FROM dbo.PV_CTR_FOL_ASVR AS A WITH (NOLOCK)
     LEFT JOIN dbo.PV_CTR_FOL_FORM_SVR AS F WITH (NOLOCK)
       ON F.IDFOL = A.IDFOL
-    WHERE CONVERT(date, A.FCN) = CONVERT(date, GETDATE())
+    WHERE CONVERT(date, A.FCN) = CONVERT(date, ((SYSUTCDATETIME() AT TIME ZONE ''UTC'') AT TIME ZONE ''Central Standard Time (Mexico)''))
       AND A.AUT IN (N''AD'', N''AP'', N''CR'', N''VF'')
       AND UPPER(LTRIM(RTRIM(ISNULL(A.OPVM, N'''')))) = @opvNorm
   ';

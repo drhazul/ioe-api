@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import {
   assertOperacionQuadrum,
+  assertCancelacionQuadrum,
   endpointQuadrum,
   validarRfcEmisor,
 } from './quadrum-config';
@@ -58,7 +59,7 @@ describe('Quadrum producción: destino e identidad', () => {
       ForbiddenException,
     );
   });
-  it('habilita sólo RFC y flujo explícitos', () => {
+  it('mantiene listas para emisión y permite cancelación por identidad del RFC', () => {
     const c = config({
       QUADRUM_PRODUCCION_HABILITADA: true,
       QUADRUM_RFC_HABILITADOS: RFC,
@@ -68,7 +69,50 @@ describe('Quadrum producción: destino e identidad', () => {
     expect(() =>
       assertOperacionQuadrum(c, 'JIFJ4704238T5', 'FACTURA'),
     ).toThrow();
-    expect(() => assertOperacionQuadrum(c, RFC, 'CANCELACION')).toThrow();
+    expect(() => assertOperacionQuadrum(c, RFC, 'CANCELACION')).not.toThrow();
+  });
+  it.each(['JICJ800630854', 'JIFT6203071N7', 'JIFJ4704238T5', 'AAA010101AAA'])(
+    'permite cancelar %s sin listas y con emisión apagada',
+    (rfc) => {
+      const c = config({
+        QUADRUM_PRODUCCION_HABILITADA: false,
+        QUADRUM_RFC_HABILITADOS: '',
+        QUADRUM_FLUJOS_HABILITADOS: 'FACTURA',
+      });
+      expect(() => assertCancelacionQuadrum(c, rfc)).not.toThrow();
+      expect(() => assertOperacionQuadrum(c, rfc, 'CANCELACION')).not.toThrow();
+      for (const flujo of [
+        'FACTURA',
+        'NOTA_CREDITO',
+        'COMPLEMENTO_PAGO',
+      ] as const) {
+        expect(() => assertOperacionQuadrum(c, rfc, flujo)).toThrow(
+          ForbiddenException,
+        );
+      }
+    },
+  );
+  it('cancelación funciona sin variables de habilitación de emisión', () => {
+    expect(() =>
+      assertCancelacionQuadrum(config(), 'AAA010101AAA'),
+    ).not.toThrow();
+  });
+  it.each(['SELECCIONAR', '', 'RFC-INVENTADO'])(
+    'cancelación rechaza RFC inválido %s',
+    (rfc) => {
+      expect(() => assertCancelacionQuadrum(config(), rfc)).toThrow(
+        ServiceUnavailableException,
+      );
+    },
+  );
+  it.each([
+    { QUADRUM_CANCELAR_ENDPOINT: 'https://evil.example/cancelar' },
+    { QUADRUM_CANCELAR_ENDPOINT: 'https://devws.cfdiquadrum.com.mx/cancelar' },
+    { QUADRUM_CANCELAR_ENDPOINT: undefined },
+  ])('cancelación conserva validación de destino %j', (extra) => {
+    expect(() => assertCancelacionQuadrum(config(extra), RFC)).toThrow(
+      ServiceUnavailableException,
+    );
   });
   it.each(['SELECCIONAR', '', 'RFC-INVENTADO'])('rechaza RFC %s', (rfc) => {
     expect(() => validarRfcEmisor(rfc)).toThrow();
@@ -92,13 +136,11 @@ describe('Quadrum producción: destino e identidad', () => {
   it.each(['Usuario o Contrasena Invalida', 'Could not get invoice'])(
     'consulta timbrado HTTP 200 interpreta error %s',
     async (error) => {
-      globalThis.fetch = jest
-        .fn()
-        .mockResolvedValue({
-          status: 200,
-          text: async () =>
-            `<consultaResult><error>${error}</error></consultaResult>`,
-        });
+      globalThis.fetch = jest.fn().mockResolvedValue({
+        status: 200,
+        text: async () =>
+          `<consultaResult><error>${error}</error></consultaResult>`,
+      });
       await expect(
         new QuadrumClient(config()).consultar(
           '00000000-0000-0000-0000-000000000000',
@@ -108,13 +150,11 @@ describe('Quadrum producción: destino e identidad', () => {
     },
   );
   it('consulta cancelación distingue autenticación rechazada aunque HTTP sea 200', async () => {
-    globalThis.fetch = jest
-      .fn()
-      .mockResolvedValue({
-        status: 200,
-        text: async () =>
-          '<consultaResult><error>Usuario o Contrasena Invalida</error></consultaResult>',
-      });
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () =>
+        '<consultaResult><error>Usuario o Contrasena Invalida</error></consultaResult>',
+    });
     await expect(
       new QuadrumCancelacionClient(config()).consultar(
         '00000000-0000-0000-0000-000000000000',

@@ -1,3 +1,4 @@
+import { businessSqlDate } from '../../common/time/fecha-negocio';
 import {
   BadRequestException,
   ConflictException,
@@ -62,7 +63,7 @@ export class PvTicketLogService {
       CTDD: dto.CTDD ?? null,
       CTDDF: dto.CTDDF ?? null,
       TICKET_REL: dto.TICKET_REL ?? null,
-      UPDATED_AT: dto.UPDATED_AT ? new Date(dto.UPDATED_AT) : null,
+      UPDATED_AT: dto.UPDATED_AT ? businessSqlDate(dto.UPDATED_AT) : null,
     });
 
     const saved = await this.repo.save(entity);
@@ -126,7 +127,9 @@ export class PvTicketLogService {
     if (dto.TICKET_REL !== undefined)
       partial.TICKET_REL = dto.TICKET_REL ?? null;
     if (dto.UPDATED_AT !== undefined) {
-      partial.UPDATED_AT = dto.UPDATED_AT ? new Date(dto.UPDATED_AT) : null;
+      partial.UPDATED_AT = dto.UPDATED_AT
+        ? businessSqlDate(dto.UPDATED_AT)
+        : null;
     }
 
     const updated = this.repo.merge(row, partial);
@@ -347,11 +350,7 @@ export class PvTicketLogService {
   }
 
   private isRelatedCounterMovementRow(
-    row:
-      | PvTicketLogEntity
-      | Record<string, unknown>
-      | null
-      | undefined,
+    row: PvTicketLogEntity | Record<string, unknown> | null | undefined,
   ) {
     const raw = (row ?? null) as Record<string, unknown> | null;
     const ctd = Number(raw?.CTD ?? raw?.ctd ?? null);

@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
+import { fechaEnZona } from '../../common/time/fecha-zona';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { UsrModSucEntity } from '../usr-mod-suc/usr-mod-suc.entity';
@@ -702,11 +703,7 @@ export class CajaGeneralService {
   }
 
   private isOperableDate(fcn: string) {
-    const now = new Date();
-    const y = now.getFullYear().toString().padStart(4, '0');
-    const m = (now.getMonth() + 1).toString().padStart(2, '0');
-    const d = now.getDate().toString().padStart(2, '0');
-    return fcn === `${y}-${m}-${d}`;
+    return fcn === fechaEnZona(new Date());
   }
 
   private async findSupervisorAuthorizerByPassword(

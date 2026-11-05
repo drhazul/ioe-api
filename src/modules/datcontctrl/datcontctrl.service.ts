@@ -9,6 +9,7 @@ import { DatContCtrlEntity } from './datcontctrl.entity';
 import { DatDetSvrEntity } from '../datdetsvr/datdetsvr.entity';
 import { CreateDatContCtrlDto } from './dto/create-datcontctrl.dto';
 import { UpdateDatContCtrlDto } from './dto/update-datcontctrl.dto';
+import { businessSqlDate } from '../../common/time/fecha-negocio';
 
 @Injectable()
 export class DatContCtrlService {
@@ -38,10 +39,10 @@ export class DatContCtrlService {
     const entity = this.repo.create({
       TOKENREG: dto.TOKENREG,
       CONT: dto.CONT ?? null,
-      FCNC: dto.FCNC ? new Date(dto.FCNC) : null,
+      FCNC: dto.FCNC ? businessSqlDate(dto.FCNC) : null,
       ESTA: dto.ESTA ?? null,
       SUC: dto.SUC ?? null,
-      FCNAJ: dto.FCNAJ ? new Date(dto.FCNAJ) : null,
+      FCNAJ: dto.FCNAJ ? businessSqlDate(dto.FCNAJ) : null,
       ARTAJ: dto.ARTAJ ?? null,
       ARTCONT: dto.ARTCONT ?? null,
       TIPOCONT: dto.TIPOCONT ?? null,
@@ -63,7 +64,7 @@ export class DatContCtrlService {
     }
 
     if (dto.FCNC !== undefined) {
-      partial.FCNC = dto.FCNC ? new Date(dto.FCNC) : null;
+      partial.FCNC = dto.FCNC ? businessSqlDate(dto.FCNC) : null;
     }
 
     if (dto.ESTA !== undefined) {
@@ -75,7 +76,7 @@ export class DatContCtrlService {
     }
 
     if (dto.FCNAJ !== undefined) {
-      partial.FCNAJ = dto.FCNAJ ? new Date(dto.FCNAJ) : null;
+      partial.FCNAJ = dto.FCNAJ ? businessSqlDate(dto.FCNAJ) : null;
     }
 
     if (dto.ARTAJ !== undefined) {

@@ -73,6 +73,7 @@ BEGIN
 
   DECLARE @startedTran BIT = 0;
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
+  DECLARE @fechaProcesoMexico DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
 
   IF @idfolNorm = ''
     THROW 57110, 'IDFOL es requerido', 1;
@@ -86,7 +87,7 @@ BEGIN
 
     UPDATE dbo.PV_CTR_FOL_ASVR
     SET ESTA = 'CERRADO_PS',
-        FCNM = GETDATE()
+        FCNM = @fechaProcesoMexico
     WHERE IDFOL = @idfolNorm;
 
     IF @@ROWCOUNT = 0
@@ -115,10 +116,12 @@ END;
 
 GO
 
+DECLARE @fechaProcesoMexico DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
+
 UPDATE h
 SET
   h.ESTA = 'CERRADO_PS',
-  h.FCNM = COALESCE(h.FCNM, GETDATE())
+  h.FCNM = COALESCE(h.FCNM, @fechaProcesoMexico)
 FROM dbo.PV_CTR_FOL_ASVR h
 WHERE UPPER(LTRIM(RTRIM(ISNULL(h.ESTA, '')))) = 'TRANSMITIR'
   AND (

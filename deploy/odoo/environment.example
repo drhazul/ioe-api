@@ -1,0 +1,11 @@
+# Ejemplo sin secretos. Cargar valores reales en Coolify o .env privado fuera de Git.
+ODOO_IMAGE=odoo:19.0
+POSTGRES_IMAGE=postgres:17
+PGADMIN_IMAGE=dpage/pgadmin4:9
+ODOO_CONFIG_PATH=/root/ioe_odoo_pilot/secrets/odoo.conf
+ODOO_DB_PASSWORD_FILE=/root/ioe_odoo_pilot/secrets/postgresql_password
+PGADMIN_DEFAULT_EMAIL=drhazul2013@gmail.com
+PGADMIN_PASSWORD_FILE=/root/ioe_odoo_pilot/secrets/pgadmin_password
+ODOO_BIND_IP=172.16.100.40
+ODOO_BIND_PORT=18069
+PGADMIN_BIND_PORT=15050

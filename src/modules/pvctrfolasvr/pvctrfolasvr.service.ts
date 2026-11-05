@@ -1,3 +1,4 @@
+import { businessSqlDate } from '../../common/time/fecha-negocio';
 import {
   BadRequestException,
   ConflictException,
@@ -317,7 +318,7 @@ export class PvCtrFolAsvrService {
       IDFOL: dto.IDFOL,
       CLIEN: dto.CLIEN ?? null,
       DOC: dto.DOC ?? null,
-      FCN: dto.FCN ? new Date(dto.FCN) : null,
+      FCN: dto.FCN ? businessSqlDate(dto.FCN) : null,
       SUC: dto.SUC ?? null,
       TER: dto.TER ?? null,
       TRA: dto.TRA ?? null,
@@ -328,7 +329,7 @@ export class PvCtrFolAsvrService {
       IMPP: dto.IMPP ?? null,
       AUT: aut,
       REQF: this.normalizeReqf(dto.REQF),
-      FCNM: dto.FCNM ? new Date(dto.FCNM) : null,
+      FCNM: dto.FCNM ? businessSqlDate(dto.FCNM) : null,
       OPVM: opvm,
       MOD: dto.MOD ?? null,
       IDFOLORIG: dto.IDFOLORIG ?? null,
@@ -435,7 +436,8 @@ export class PvCtrFolAsvrService {
     const partial: Partial<PvCtrFolAsvrEntity> = {};
     if (dto.CLIEN !== undefined) partial.CLIEN = dto.CLIEN ?? null;
     if (dto.DOC !== undefined) partial.DOC = dto.DOC ?? null;
-    if (dto.FCN !== undefined) partial.FCN = dto.FCN ? new Date(dto.FCN) : null;
+    if (dto.FCN !== undefined)
+      partial.FCN = dto.FCN ? businessSqlDate(dto.FCN) : null;
     if (dto.SUC !== undefined) partial.SUC = dto.SUC ?? null;
     if (dto.TER !== undefined) partial.TER = dto.TER ?? null;
     if (dto.TRA !== undefined) partial.TRA = dto.TRA ?? null;
@@ -449,7 +451,7 @@ export class PvCtrFolAsvrService {
     if (dto.AUT !== undefined) partial.AUT = normalizeAut(dto.AUT);
     if (dto.REQF !== undefined) partial.REQF = this.normalizeReqf(dto.REQF);
     if (dto.FCNM !== undefined)
-      partial.FCNM = dto.FCNM ? new Date(dto.FCNM) : null;
+      partial.FCNM = dto.FCNM ? businessSqlDate(dto.FCNM) : null;
     if (dto.OPVM !== undefined)
       partial.OPVM = await this.normalizeOpvToUsername(dto.OPVM ?? null);
     if (dto.MOD !== undefined) partial.MOD = dto.MOD ?? null;

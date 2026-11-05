@@ -17,6 +17,8 @@ BEGIN
   IF OBJECT_ID('dbo.DAT_MB51', 'U') IS NULL
     RETURN;
 
+  DECLARE @fechaProcesoMexico DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
+
   DECLARE @ctop FLOAT = 0;
   IF OBJECT_ID('dbo.DAT_ART', 'U') IS NOT NULL
   BEGIN
@@ -54,8 +56,8 @@ BEGIN
         WHEN name = 'DOCP' THEN 'LEFT(ISNULL(@P_DOCP, ''''), 255)'
         WHEN name = 'USER' THEN 'LEFT(ISNULL(@P_USR, SYSTEM_USER), 255)'
         WHEN name = 'CLSM' THEN 'TRY_CONVERT(FLOAT, @P_CLSM)'
-        WHEN name = 'FCND' THEN 'CONVERT(date, GETDATE())'
-        WHEN name = 'FCNC' THEN 'GETDATE()'
+        WHEN name = 'FCND' THEN 'CONVERT(date, @P_NOW)'
+        WHEN name = 'FCNC' THEN '@P_NOW'
         WHEN name = 'ALMACEN' THEN '''001'''
         ELSE 'NULL'
       END,
@@ -72,7 +74,7 @@ BEGIN
 
   EXEC sp_executesql
     @sql,
-    N'@P_SUC NVARCHAR(10), @P_ART NVARCHAR(255), @P_CTDA FLOAT, @P_CTOP FLOAT, @P_TXT NVARCHAR(255), @P_DOCP NVARCHAR(255), @P_USR NVARCHAR(255), @P_CLSM NVARCHAR(50)',
+    N'@P_SUC NVARCHAR(10), @P_ART NVARCHAR(255), @P_CTDA FLOAT, @P_CTOP FLOAT, @P_TXT NVARCHAR(255), @P_DOCP NVARCHAR(255), @P_USR NVARCHAR(255), @P_CLSM NVARCHAR(50), @P_NOW DATETIME',
     @P_SUC = @SUC,
     @P_ART = @ART,
     @P_CTDA = @CTDA,
@@ -80,7 +82,8 @@ BEGIN
     @P_TXT = @TXT,
     @P_DOCP = @DOCP,
     @P_USR = @USR,
-    @P_CLSM = @CLSM;
+    @P_CLSM = @CLSM,
+    @P_NOW = @fechaProcesoMexico;
 END;
 GO
 
@@ -101,6 +104,8 @@ BEGIN
 
   IF ABS(ISNULL(@DIFF, 0)) < 0.0001
     RETURN;
+
+  DECLARE @fechaProcesoMexico DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
 
   DECLARE @mov INT = CASE WHEN @DIFF > 0 THEN 802 ELSE 801 END;
   DECLARE @impt FLOAT = CASE WHEN @DIFF > 0 THEN -ABS(@DIFF) ELSE ABS(@DIFF) END;
@@ -196,7 +201,7 @@ BEGIN
      AND COL_LENGTH('dbo.DAT_CTR_DOC', 'CLSMOV') IS NOT NULL
   BEGIN
     INSERT INTO dbo.DAT_CTR_DOC (DOC, CLSMOV, FCND, [USER], STAT)
-    VALUES (@ndoc, CONVERT(VARCHAR(20), @mov), GETDATE(), LEFT(ISNULL(@USR, SYSTEM_USER), 255), 'V');
+    VALUES (@ndoc, CONVERT(VARCHAR(20), @mov), @fechaProcesoMexico, LEFT(ISNULL(@USR, SYSTEM_USER), 255), 'V');
   END;
 
   DECLARE @cols NVARCHAR(MAX);
@@ -220,10 +225,10 @@ BEGIN
         WHEN name = 'IDFOL' THEN '@P_IDFOL'
         WHEN name = 'CTA' THEN '@P_CTA'
         WHEN name = 'IMPT' THEN '@P_IMPT'
-        WHEN name = 'FCND' THEN 'GETDATE()'
-        WHEN name = 'FCNR' THEN 'GETDATE()'
-        WHEN name = 'FCN' THEN 'GETDATE()'
-        WHEN name = 'FECHA' THEN 'GETDATE()'
+        WHEN name = 'FCND' THEN '@P_NOW'
+        WHEN name = 'FCNR' THEN 'SYSUTCDATETIME()'
+        WHEN name = 'FCN' THEN '@P_NOW'
+        WHEN name = 'FECHA' THEN '@P_NOW'
         WHEN name = 'RTXT' THEN 'LEFT(ISNULL(@P_DESC_MOV, ''''), 255)'
         WHEN name = 'NDOC' THEN 'LEFT(@P_DOC, 255)'
         WHEN name = 'CLSD' THEN '@P_MOV'
@@ -243,7 +248,7 @@ BEGIN
 
   EXEC sp_executesql
     @sql,
-    N'@P_SUC NVARCHAR(10), @P_CLIENT FLOAT, @P_IDFOL NVARCHAR(255), @P_CTA NVARCHAR(20), @P_IMPT FLOAT, @P_DESC_MOV NVARCHAR(255), @P_DOC NVARCHAR(255), @P_MOV INT',
+    N'@P_SUC NVARCHAR(10), @P_CLIENT FLOAT, @P_IDFOL NVARCHAR(255), @P_CTA NVARCHAR(20), @P_IMPT FLOAT, @P_DESC_MOV NVARCHAR(255), @P_DOC NVARCHAR(255), @P_MOV INT, @P_NOW DATETIME',
     @P_SUC = @SUC,
     @P_CLIENT = @CLIENT,
     @P_IDFOL = @IDFOL,
@@ -251,6 +256,7 @@ BEGIN
     @P_IMPT = @impt,
     @P_DESC_MOV = @DESC_MOV,
     @P_DOC = @ndoc,
-    @P_MOV = @mov;
+    @P_MOV = @mov,
+    @P_NOW = @fechaProcesoMexico;
 END;
 GO

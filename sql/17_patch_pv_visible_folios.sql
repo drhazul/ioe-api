@@ -21,7 +21,11 @@ BEGIN
   DECLARE @startedTran BIT = 0;
   DECLARE @sucNorm NVARCHAR(20) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
   DECLARE @tipoNorm VARCHAR(2) = UPPER(LTRIM(RTRIM(ISNULL(@TIPO_FOLIO, ''))));
-  DECLARE @fechaNorm DATE = ISNULL(@FECHA, CONVERT(DATE, GETDATE()));
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
+  DECLARE @fechaNorm DATE = ISNULL(@FECHA, CONVERT(DATE, @processNow));
   DECLARE @lockResource NVARCHAR(120);
   DECLARE @lockResult INT;
 
@@ -72,7 +76,7 @@ BEGIN
       UPDATE dbo.DAT_FOLIOS_CONSEC
       SET
         ULTIMO_CONSEC = ULTIMO_CONSEC + 1,
-        FCNM = GETDATE()
+        FCNM = @processNow
       OUTPUT inserted.ULTIMO_CONSEC INTO @nextConsec (CONSEC)
       WHERE SUC = @sucNorm
         AND FECHA = @fechaNorm
@@ -92,7 +96,7 @@ BEGIN
         @fechaNorm,
         @tipoNorm,
         1,
-        GETDATE()
+        @processNow
       );
 
       INSERT INTO @nextConsec (CONSEC)
@@ -158,7 +162,11 @@ BEGIN
   DECLARE @folioTipo VARCHAR(2);
   DECLARE @folioVisible NVARCHAR(255);
   DECLARE @folioConsec INT;
-  DECLARE @today DATE = CONVERT(DATE, GETDATE());
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
+  DECLARE @today DATE = CONVERT(DATE, @processNow);
 
   IF (@sucTrim IS NULL OR @sucTrim = N'')
   BEGIN
@@ -211,9 +219,9 @@ BEGIN
       IDFOLINICIAL, ORIGEN_AUT
     )
     VALUES (
-      @IDFOL_OUT, @CLIEN, NULL, GETDATE(), @sucTrim, @TER,
+      @IDFOL_OUT, @CLIEN, NULL, @processNow, @sucTrim, @TER,
       CAST(@TRA_OUT AS NVARCHAR(255)), @opvTrim, @estaNorm,
-      NULL, NULL, NULL, @autNorm, @REQF, GETDATE(), @opvTrim,
+      NULL, NULL, NULL, @autNorm, @REQF, @processNow, @opvTrim,
       NULL, NULL, @IDFOL_OUT, @origenAut
     );
 
@@ -249,8 +257,11 @@ BEGIN
   DECLARE @tipotranNorm NVARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@TIPOTRAN, ''))));
   DECLARE @opvNorm NVARCHAR(255) = NULLIF(LTRIM(RTRIM(ISNULL(@IDOPV, ''))), '');
   DECLARE @epsilon DECIMAL(18, 6) = 0.0001;
-  DECLARE @fechaProceso DATETIME = GETDATE();
-  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, GETDATE());
+  DECLARE @fechaProceso DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
+  DECLARE @fechaProcesoDate DATE = CONVERT(DATE, @fechaProceso);
 
   DECLARE @idfolActual NVARCHAR(255);
   DECLARE @idfolInicial NVARCHAR(255);

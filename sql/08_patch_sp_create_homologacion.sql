@@ -26,7 +26,11 @@ BEGIN
   DECLARE @folioTipo VARCHAR(2);
   DECLARE @folioVisible NVARCHAR(255);
   DECLARE @folioConsec INT;
-  DECLARE @today DATE = CONVERT(DATE, GETDATE());
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
+  DECLARE @today DATE = CONVERT(DATE, @processNow);
 
   IF (@sucTrim IS NULL OR @sucTrim = N'')
   BEGIN
@@ -79,9 +83,9 @@ BEGIN
       IDFOLINICIAL, ORIGEN_AUT
     )
     VALUES (
-      @IDFOL_OUT, @CLIEN, NULL, GETDATE(), @sucTrim, @TER,
+      @IDFOL_OUT, @CLIEN, NULL, @processNow, @sucTrim, @TER,
       CAST(@TRA_OUT AS NVARCHAR(255)), @opvTrim, @estaNorm,
-      NULL, NULL, NULL, @autNorm, @REQF, GETDATE(), @opvTrim,
+      NULL, NULL, NULL, @autNorm, @REQF, @processNow, @opvTrim,
       NULL, NULL, @IDFOL_OUT, @origenAut
     );
 
@@ -113,6 +117,11 @@ BEGIN
   DECLARE @opvNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@OPV, '')));
   DECLARE @idfol NVARCHAR(255);
   DECLARE @nextTra INT;
+  DECLARE @processNow DATETIME = CAST(
+    SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+    AS DATETIME
+  );
+  DECLARE @processDate DATE = CONVERT(DATE, @processNow);
   DECLARE @lockResult INT;
   DECLARE @lockResource NVARCHAR(100);
 
@@ -142,12 +151,12 @@ BEGIN
 
     IF @nextTra IS NULL OR @nextTra < 1 SET @nextTra = 1;
 
-    SET @idfol = CONCAT('PS',@sucNorm,'-',CONVERT(VARCHAR(8), GETDATE(), 112),'-',RIGHT('000000' + CAST(@nextTra AS VARCHAR(10)), 6));
+    SET @idfol = CONCAT('PS',@sucNorm,'-',CONVERT(VARCHAR(8), @processDate, 112),'-',RIGHT('000000' + CAST(@nextTra AS VARCHAR(10)), 6));
 
     WHILE EXISTS (SELECT 1 FROM dbo.PV_CTR_FOL_ASVR WHERE IDFOL = @idfol)
     BEGIN
       SET @nextTra = @nextTra + 1;
-      SET @idfol = CONCAT('PS',@sucNorm,'-',CONVERT(VARCHAR(8), GETDATE(), 112),'-',RIGHT('000000' + CAST(@nextTra AS VARCHAR(10)), 6));
+      SET @idfol = CONCAT('PS',@sucNorm,'-',CONVERT(VARCHAR(8), @processDate, 112),'-',RIGHT('000000' + CAST(@nextTra AS VARCHAR(10)), 6));
     END;
 
     INSERT INTO dbo.PV_CTR_FOL_ASVR (
@@ -155,8 +164,8 @@ BEGIN
       IDFOLINICIAL, ORIGEN_AUT
     )
     VALUES (
-      @idfol, 1, GETDATE(), @sucNorm, @terNorm, CAST(@nextTra AS NVARCHAR(20)), @opvNorm,
-      'PENDIENTE', 0, NULL, 0, 'PS', 0, GETDATE(), @opvNorm,
+      @idfol, 1, @processNow, @sucNorm, @terNorm, CAST(@nextTra AS NVARCHAR(20)), @opvNorm,
+      'PENDIENTE', 0, NULL, 0, 'PS', 0, @processNow, @opvNorm,
       @idfol, 'CA'
     );
 

@@ -1,5 +1,19 @@
 # IOE API
 
+## C01 lealtad: diagnóstico y reconsulta (2026-10-23)
+
+Consulta de participación conserva errores seguros por etapa y admite aliases privados `USER_API_FEDERADA`/`PASSWORD_API_FEDERADA`. Configuración, pruebas y causa de fecha visual: [C01](docs/modules/punto_venta/LEALTAD_C01_DIAGNOSTICO_20261023.md). Lanzador `scripts/start-c01-dev.cjs` fija IOEDESARROLLO; no arrancar `.env` productivo para UAT.
+
+## Créditos PS en desarrollo — 2026-10-20
+
+Estructura, configuración, cierre SQL y 3,610 fechas integrados exclusivamente en `172.16.100.40,1434/IOEDESARROLLO`. Once sucursales→IOE BUSINESS; regla inicial permite parciales. [Bundle SQL](sql/2026-10-20_creditos_dev/README.md) y [consumidor API/Flutter](docs/modules/punto_venta/CREDITOS_CONFIG_DESARROLLO.md) integrados. Regla titular aplicada: fecha se fija sólo si NULL al liquidar y permanece tras devoluciones parciales/totales o nueva liquidación. Corrección verificada con 21 SQL y 11 de integración; baseline consumidor build/312 unitarias. UAT real pendiente. IOELOCAL y .env intactos; sin despliegue.
+
+## Equivalencias contables Odoo — desarrollo
+
+En `IOEDESARROLLO`, esquema aplicado; 33 equivalencias contables `VALIDADA` con 66 eventos de auditoría. Autorización del titular cubre esas propuestas para 11 combinaciones evento/signo en tres compañías; tres movimientos sin clase `CLSD` y la cuenta fuente `110001020` siguen excluidos. Servicio interno `OdooAccountMapService` resuelve solo mapas aprobados y bloquea hasta validar identidad fiscal y vínculo de sucursal. Las seis cuentas destino ya existen en Odoo; no se escribieron cuentas ni asientos. `DAT_CAT_CTAS.CTA` conserva su clave. [Bundle, validación y reversa](sql/2026-10-23_odoo_map_candidates_dev/README.md), [esquema](sql/2026-10-23_odoo_cuenta_map_dev/README.md), [análisis contable](deploy/odoo/INTEGRACION-IOE.md) y [control universal de cambios](docs/CONTROL_CAMBIOS_DESARROLLO_PRODUCCION.md). Producción y CT105 sin cambios. En el piloto se actualizaron contactos de siete sucursales Odoo y datos de tres sucursales en `DAT_SUC`; quedan pendientes validaciones formales de entidades/vínculos y la UAT transaccional de octubre.
+
+Para el piloto, `VIGENTE_DESDE` registra la transacción más antigua en ocho sucursales; DF02/DF03 no tienen folios históricos. No usar esas fechas como inicio de migración contable: prueba 2026-10-01 a 2026-10-31, corte esperado 2026-11-01. Los 33 mapas son equivalencias cuenta-evento-signo, no asientos completos. Estado, cobertura de procesos y evidencia: [INTEGRACION-IOE.md](deploy/odoo/INTEGRACION-IOE.md).
+
 ## Fecha de proceso en punto de venta y facturación — 2026-10-15
 
 Los folios CP/CA/VF y sellos de cierre, devolución/MB51 y control CFDI convierten reloj UTC a hora local de México. Fechas editables o explícitas de negocio se conservan. En `.40:1434/IOELOCAL`, la prevención SQL se aplicó el 2026-10-16 en 11 procedimientos y 4 defaults; otros entornos requieren preflight. El código API está en `074ee21`; la imagen conjunta API/App y UAT siguen sin verificarse. Esta corrección no repara filas históricas.
@@ -68,6 +82,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Datos Maestros / Acceso por sucursal (2026-05-04): `GET /usr-mod-suc` soporta filtros opcionales `sucUsuario` y `depto` para filtrar por sucursal del usuario y por departamento en usuarios/módulos front.
 - Datos Maestros / Acceso por sucursal (2026-05-06): el filtro `depto` de `GET /usr-mod-suc` aplica coincidencia por `departamento de usuario OR departamento de módulo front`.
 - Datos Maestros / Usuarios y Empresas (2026-06-25): nuevo CRUD `/empresas` administra `dbo.EMPRESA` y sus prefijos de correo; `/users` compone `MAIL` con `USERNAME + EMPRESA.correo`, sincroniza `PV_OPV` para usuarios CAJAS, filtra roles por departamento desde frontend y expone `/users/sugerencias/caja-username` para sugerir consecutivo de cajas según `PV_OPV.IDOPV` en rango `5000-5999`.
+- Datos Maestros / Entidades fiscales (2026-10-21): API `/entidades-fiscales` administra contribuyentes y vínculos históricos con `DAT_SUC.SUC`, protegidos por ADMIN ROL 1; estado `VALIDADA` exige nombre legal, régimen, CP y referencia de evidencia. Los RFC tomados de desarrollo se conservan como candidatos `PENDIENTE`; ningún flujo contable los consume automáticamente. Ver [contrato y control de promoción](docs/CONTROL_CAMBIOS_DESARROLLO_PRODUCCION.md).
 - Ordenes de trabajo / Panel ORDs (2026-05-06): `ANALISTA_INV` e `INVJEF` pueden cargar catálogo de asignados del panel sin error de rol; el script `sql/2026-05-06_ord_flujo_vis_analista_inv_invjef_expand.sql` amplía visibilidad operativa en `DAT_JAO_ORD_FLUJO_VIS`.
 - Ordenes de trabajo / Panel ORDs (2026-05-06): se corrige `dbo.sp_ordenes_trabajo_panel` con script `sql/2026-05-06_ordenes_trabajo_panel_analista_inv_selctrl14_fix.sql` para restaurar visibilidad de `ANALISTA_INV/INVJEF` y filtrar su cola por `selCtrlOrd=14`.
 - Ordenes de trabajo / Panel ORDs acceso multi-sucursal analista (2026-05-22): `sp_ordenes_trabajo_panel` ya no restringe por `@HOME_SUC` cuando el usuario consulta una `@SUC` explícita permitida; se corrige caso `ANALISTA_ORD` con acceso `DF04/DF14` que solo veía históricos (script `sql/2026-05-22_ordenes_trabajo_panel_home_suc_scope_fix_df14.sql`).
@@ -108,6 +123,7 @@ Backend NestJS + MSSQL que abastece a `ioe_app` para autenticación, catálogos,
 - Punto de venta / Cotizaciones precio manual vs promoción (2026-05-23): al editar `PVTA` por `PATCH /pvticketlog/:id/precio`, backend conserva precio manual sin reaplicar promoción sobre esa línea y limpia trazabilidad de promo por renglón; para optimizar consulta/evaluación de promociones por línea se agrega script `sql/2026-05-23_pv_promociones_linea_indexes.sql`.
 - Punto de venta / Cotizaciones ORD vs precio manual (2026-05-23): al guardar cambios de renglón por `PATCH /pvticketlog/:id` para asignar o liberar `ORD`, backend ya no recalcula promoción de la línea ni revierte `PVTA` manual; la reaplicación promo queda acotada a cambios de `IDFOL/ART/UPC/CTD`.
 - Facturación / Timbrado CFDI con Quadrum (2026-09-14 a 2026-10-07): nuevo módulo `CfdiModule` en `/cfdi/*` que timbra, cancela y emite notas de crédito y complementos de pago con Quadrum, con CSD y cuenta del PAC por razón social en `FACT_CSD`. Convive con Facturify sin modificarlo: `FAC_SVR_SHAP.CFDI_PAC` distingue quién timbró cada folio. Detalle en la sección «Facturación CFDI con Quadrum».
+- Contabilidad Odoo (2026-10-23): `OdooAccountingModule` exporta resolvedor interno de cuentas; bloquea si entidad fiscal o vínculo sucursal no están validados y solo resuelve equivalencias `VALIDADA`. No publica documentos ni escribe a Odoo.
 - Notas de documentación viva: este README se modifica solo por cambios de arquitectura, módulos o rutas principales; los ajustes funcionales se registran en los README/AGENTS del módulo correspondiente.
 
 ## Facturación CFDI con Quadrum
@@ -246,3 +262,12 @@ El titular autoriza excepción específica de FACTURA_QUADRUM: sucursal no limit
 ## Despliegue conjunto en Coolify — 2026-10-15
 
 La reconstrucción de API + Flutter Web usa `deploy/coolify/production.compose.yaml`, `Dockerfile.production` y `build-production-image.sh`. API apunta explícitamente a IOELOCAL por la red privada Docker (`ioe-sql-standby:1433`, `DB_NAME=IOELOCAL`); FEDERADA permanece en instancia separada. Compose no administra SQL, publicaciones `1433/1434`, el respaldo/log shipping `.40`→`.234` ni SMB de CFDI `.234`. La fuente se prepara localmente y aún requiere commits coordinados, activación en ventana y UAT; ver `deploy/coolify/README.md`.
+
+
+## Cancelación Quadrum sin listas de emisión (2026-10-29)
+
+Corrección local autorizada: CancelacionService usa assertCancelacionQuadrum, que valida endpoint oficial y RFC sin depender de QUADRUM_PRODUCCION_HABILITADA, QUADRUM_RFC_HABILITADOS o QUADRUM_FLUJOS_HABILITADOS. La función compartida delega CANCELACION y conserva reglas para FACTURA/NC/REP. Siguen documento Quadrum verificable, cuenta/CSD individuales, JWT, motivo/confirmación y control fiscal/concurrencia. No añadir listas alternativas para emisores futuros. Documentación oficial/WSDL revisados; pruebas de contrato y cuentas simulan red/SQL. Notas de soporte retiradas por titular. Fuente local corregida no acredita despliegue ni cancelación real; seguir QCAN-02/QCAN-04 del expediente QUADRUM_CANCELACION_SEGUIMIENTO_20261029.md.
+
+## Contrato horario compartido (2026-11-04)
+
+Integración local SQL/API/Flutter: calendario comercial CDMX sin Z, auditoría UTC, guardia global de escrituras y migración por manifiesto. Reparación FCNC de NC300007708 aplicada en IOELOCAL; activación de código/TZ pendiente de mantenimiento conjunto. [Contrato, validación y secuencia](docs/CONTRATO_FECHAS_CDMX.md).

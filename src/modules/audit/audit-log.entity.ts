@@ -29,6 +29,6 @@ export class AuditLogEntity {
   @Column({ type: 'nvarchar', length: 64, nullable: true })
   IP: string | null;
 
-  @Column({ type: 'datetime2', precision: 0, default: () => 'SYSDATETIME()' })
+  @Column({ type: 'datetime2', precision: 0, default: () => 'SYSUTCDATETIME()' })
   FCNR: Date;
 }

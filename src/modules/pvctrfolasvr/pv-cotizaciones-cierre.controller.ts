@@ -6,13 +6,25 @@ import type { JwtPayload } from '../auth/jwt.strategy';
 import { PvCotizacionCierreDto } from './dto/pv-cotizacion-cierre.dto';
 import { PvCotizacionCierrePreviewDto } from './dto/pv-cotizacion-cierre-preview.dto';
 import { PvCotizacionesCierreService } from './pv-cotizaciones-cierre.service';
+import { PvLealtadService } from './pv-lealtad.service';
 
 @ApiTags('pv-cotizaciones')
 @ApiBearerAuth('jwt-auth')
 @UseGuards(JwtAuthGuard)
 @Controller('pv/cotizaciones')
 export class PvCotizacionesCierreController {
-  constructor(private readonly service: PvCotizacionesCierreService) {}
+  constructor(
+    private readonly service: PvCotizacionesCierreService,
+    private readonly lealtadService: PvLealtadService,
+  ) {}
+
+  @Get(':idfol/lealtad/participacion')
+  consultarParticipacion(
+    @Param('idfol') idfol: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.lealtadService.consultarParticipacion(idfol, user);
+  }
 
   @Get(':idfol/cierre/context')
   getContext(@Param('idfol') idfol: string, @CurrentUser() user: JwtPayload) {

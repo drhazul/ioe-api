@@ -1,3 +1,4 @@
+import './common/time/runtime-clock';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import type { Server } from 'node:http';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -6,9 +7,6 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-
-// Configura la hora de México para que las fechas en la base de datos sean correctas
-process.env.TZ = process.env.TZ || 'America/Mexico_City';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');

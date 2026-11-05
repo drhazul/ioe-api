@@ -1,6 +1,14 @@
 # CFDI Quadrum
 
+## Recorte de nombre receptor diagnosticado (2026-10-29)
+
+Defecto `ESPINOSA → ESPINO` confirmado en mapper productivo y XML históricos de dos folios DF05 con `CFDI40144`. Corrección local integrada: `normalizarNombreSat(valor, rfcReceptor)` conserva nombres de personas físicas y palabras completas; sólo retira forma societaria separada para RFC con estructura de persona moral. Sin RFC reconocible conserva texto. Mapper 57/57, suite CFDI 23 suites/300 pruebas, build y verificaciones de estilo PASS; preview XML local de ambos folios conserva apellido. [Plan](../../../docs/modules/cfdi/QUADRUM_NOMBRE_RECEPTOR_PLAN_20261029.md) y [seguimiento](../../../docs/modules/cfdi/QUADRUM_NOMBRE_RECEPTOR_SEGUIMIENTO_20261029.md). Titular realizará despliegue; simulación firmada y UAT fiscal pendientes. Sin SQL de reparación, cambios de credenciales ni timbrado en esta integración.
+
 `CfdiModule` implementa timbrado Quadrum separado de Facturify. El submódulo `correo/` agrega la primera versión de envío post-timbrado con Gmail API.
+
+## Diagnóstico de bloqueo de cancelación (2026-10-29)
+
+La captura «Operación Quadrum CANCELACION no habilitada en producción para ese RFC.» corresponde a guard interno de IOE, anterior a PAC. Corrección integrada localmente: `assertCancelacionQuadrum` verifica endpoint oficial y RFC, sin listas de habilitación ni bandera de emisión; el servicio conserva identidad del documento y CSD/cuenta propios. `assertOperacionQuadrum` delega cancelación y conserva restricciones para FACTURA/NC/REP. Despliegue aún pendiente. [Plan](../../../docs/modules/cfdi/QUADRUM_CANCELACION_PLAN_20261029.md) y [seguimiento](../../../docs/modules/cfdi/QUADRUM_CANCELACION_SEGUIMIENTO_20261029.md). Notas de soporte retiradas por instrucción del titular.
 
 ## Integración productiva de Quadrum
 
@@ -29,7 +37,7 @@ Release acotado API/App: `deploy/quadrum/Dockerfile.cuenta` recibe API exportada
 
 Plan, criterios y seguimiento: [`docs/modules/cfdi/FACTURA_QUADRUM_CORREO_PLAN.md`](../../../docs/modules/cfdi/FACTURA_QUADRUM_CORREO_PLAN.md) y [`FACTURA_QUADRUM_CORREO_SEGUIMIENTO.md`](../../../docs/modules/cfdi/FACTURA_QUADRUM_CORREO_SEGUIMIENTO.md).
 
-Producción exige `QUADRUM_PRODUCCION_HABILITADA=true`, RFC explícitos en `QUADRUM_RFC_HABILITADOS` y flujos explícitos en `QUADRUM_FLUJOS_HABILITADOS`. Sin esas condiciones se permite diagnóstico, no operación fiscal. Datos de documento sujetos a acceso por sucursal; ninguna cuenta global reemplaza al RFC. Reservas inciertas y cancelaciones pendientes bloquean reemisión.
+Emisión productiva (FACTURA/NC/REP) exige `QUADRUM_PRODUCCION_HABILITADA=true`, RFC explícitos en `QUADRUM_RFC_HABILITADOS` y flujos explícitos en `QUADRUM_FLUJOS_HABILITADOS`. Cancelación usa validación independiente de esas variables desde corrección local del 2026-10-29, pendiente de despliegue. No existe límite por sucursal para documentos Quadrum por instrucción previa del titular; ninguna cuenta global reemplaza al RFC en producción. Reservas inciertas y cancelaciones pendientes bloquean reemisión.
 
 
 ## Consulta SAT y contratos por ambiente (2026-10-13)
@@ -54,3 +62,7 @@ Preparación XML/PDF identifica la etapa sin copiar excepciones sensibles.
 ## Identidad fiscal sin restricción por sucursal — 2026-10-14
 
 El titular autoriza excepción específica de FACTURA_QUADRUM: sucursal no limita operación ni determina la identidad del emisor. Guard de documentos conserva autenticación, existencia y RFC emisor válido, pero deja de consultar USR_MOD_SUC o comparar SUC del usuario. Simulación/emisión exigen RfcEmisor en cabecera, sin inferirlo de DAT_SUC ni comparar con RFC actual de sucursal. CSD y cuenta propios, habilitación RFC/flujo, restricciones de pruebas y protección contra duplicidad/incertidumbre continúan. Permisos administrativos de CSD/correo y reglas de otros módulos sin cambios. Los criterios anteriores de bloqueo fiscal por sucursal quedan supersedidos sólo para este módulo. Acta de diagnóstico/intento: docs/modules/cfdi/QUADRUM_DF06_VF0007_20261014.md.
+
+## Calendario compartido NC/REP (2026-11-04)
+
+Reserva de consecutivo NC/PG usa fechaEnZona sobre instante real, en lugar de recortar ISO UTC. No modifica sello fiscal ni PAC. Cuatro pruebas verifican cruce UTC y medianoche CDMX sin SQL ni timbrado real. Activación coordinada pendiente; [contrato horario](../../../docs/CONTRATO_FECHAS_CDMX.md).

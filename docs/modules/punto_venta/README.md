@@ -1,5 +1,11 @@
 # Punto de venta (API)
 
+- C01 corrección y UAT (2026-10-23): [contrato de conexión, aliases y errores seguros](LEALTAD_C01_DIAGNOSTICO_20261023.md). Reconsulta es GET sobre folio existente; cero movimientos. `RECOMPENSAS_API_URL` usa base HTTPS; admite sufijo `/api` sin duplicarlo.
+
+## Créditos PS: integración SQL de desarrollo (2026-10-20)
+
+`IOEDESARROLLO` contiene FCNPGOCRED, configuración empresa/sucursal y cierre con saldo exacto, regla de parcialidades y relación NDOC. **Fecha se fija sólo si NULL y queda permanente**, incluidas devoluciones parciales/totales y nueva liquidación. Histórico: 3,610 fechas, movimientos intactos. [SQL](../../../sql/2026-10-20_creditos_dev/README.md) y [consumidor API/Flutter](CREDITOS_CONFIG_DESARROLLO.md) integrados. Última corrección validada con 21 SQL y 11 de integración; baseline consumidor: build y 60 suites/312 unitarias. Retirada reconciliación para borrar/reemplazar fecha; UAT real pendiente, sin aplicar en IOELOCAL.
+
 ## Fecha de proceso de folios, MB51 y CFDI (2026-10-15)
 
 La API genera fecha de folio CP/CA/VF y timestamps de cierre, staging/transmisión MB51 y control CFDI convirtiendo UTC a hora local de México. Las escrituras de relación ORD-ticket también convierten `PV_CTR_ORDS.FCNMOD` y `PV_TICKET_LOG.updated_at`. Conserva fechas explícitas/editables de negocio. Los scripts SQL deben aplicarse junto con la API; las filas históricas requieren whitelist y guardas propias.
@@ -196,6 +202,17 @@ Enlaces relacionados:
 - Compatibilidad facturación (2026-03): `FAC_SVR_SHAP.CLIEN` se ajusta a `FLOAT` para alinearlo con `PV_CTR_FOL_ASVR.CLIEN` y permitir IDs grandes (ej. `10460540001`) sin truncamiento/overflow.
 - Ajuste de contrato backward-compatible: `POST /pvctrfolasvr/auto` mantiene el payload anterior y agrega `SUC/OPV` opcionales.
 
+## Recompensas C01: participación de cliente en cotizaciones
+
+- Después de crear el folio y asignar `CLIEN`, IOE consulta `GET /pv/cotizaciones/:idfol/lealtad/participacion`.
+- La API resuelve `CLIEN` y `SUC` desde `PV_CTR_FOL_ASVR`, valida permiso de sucursal y que el cliente pertenezca a `FACT_CLIENT_SHP` de esa sucursal; no confía en un IDC enviado directamente por Flutter.
+- IOE llama desde backend `GET /api/mercader/fidelidad/cliente/:idc` del sistema de recompensas. FEDERADA se consulta sólo dentro de ese sistema.
+- El login externo actual entrega JWT de 8 horas en JSON si recibe `X-Client-Platform: android`; el adaptador lo solicita con `/api/auth/login`, lo conserva en memoria con margen de renovación y reintenta una vez si recibe 401. No comparte JWT ni secretos de IOE.
+- Variables privadas del backend: `RECOMPENSAS_API_URL` (base del servicio, sin sufijo `/api`), `RECOMPENSAS_API_USERNAME` y `RECOMPENSAS_API_PASSWORD`. Requieren cuenta técnica autorizada del sistema de recompensas; no se agregan al frontend ni a `.env` de fuente.
+- C01 devuelve únicamente participa/no participa. No expone saldo, autoriza gasto ni genera movimientos. C02 ampliará la misma respuesta API para mostrar saldo.
+- Si URL, cuenta o API no están disponibles, Flutter informa estado sin confirmar y conserva la cotización creada; fallo nunca se interpreta como no participante.
+- El código fuente del contrato existe, pero HTTP/autenticación real requieren credenciales y UAT del ambiente de recompensas. No se modificó `Pagina-Web` ni FEDERADA.
+
 ## Edicion de precio PV en detalle de cotizacion
 
 - Endpoint:
@@ -387,3 +404,7 @@ Enlaces relacionados:
 - Catalogos nuevos: PROMO_CAT_T_PROM, PROMO_CAT_TIPO_DESC, PROMO_CAT_T_BENEFICIO.
 - Endpoints nuevos: /promociones/catalogos/*, /promociones/:idProm/configuracion (GET/PUT), /promociones/:idProm/reordenar-prioridad (POST).
 - Regla de prioridad: al mover prioridad, se recorre automaticamente el orden existente (menor numero = mayor prioridad).
+
+## Contrato horario CDMX (2026-11-04)
+
+Fechas comerciales usan adaptación compartida SQL/API/Flutter, sin falsa Z ni conversión por zona del dispositivo; auditoría conserva UTC. MB51 adapta FCND/FCNC y filtros de calendario; PS/conteos comparten contrato central de respuesta. Mantener separado alcance de reparación FCNC de 15 filas NC300007708 y despliegue preventivo pendiente. [Contrato y validación](../../CONTRATO_FECHAS_CDMX.md).

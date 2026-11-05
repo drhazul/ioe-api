@@ -1,0 +1,8 @@
+[options]
+; Copy to private path outside Git. Replace this placeholder with unique master password.
+admin_passwd = REPLACE_WITH_NEW_UNIQUE_MASTER_PASSWORD
+proxy_mode = True
+data_dir = /var/lib/odoo
+db_name = ioe_odoo_pilot
+dbfilter = ^ioe_odoo_pilot$
+list_db = False

@@ -1,5 +1,7 @@
 # Punto de venta (AGENTS API)
 
+- Lealtad C01: errores `LEALTAD_*` no contienen cuerpo remoto ni secretos. Mantener JWT/sucursal, IDC persistido y respuesta autoritativa booleana; no usar SQL directo como integración. Cuenta HTTP admite los aliases privados indicados por titular. Referencia: `LEALTAD_C01_DIAGNOSTICO_20261023.md`.
+
 ## Fecha de proceso de folios, MB51 y CFDI (2026-10-15)
 - Los timestamps generados por sistema para `PV_CTR_FOL_ASVR`, `PV_CTR_FOL_FORM(_SVR)`, `DAT_FOLIOS_CONSEC`, staging de devoluciones, `DAT_MB51`, facturación y control CFDI se calculan con reloj UTC convertido a hora local de México.
 - Las escrituras de relación ORD-ticket en `pvctrords.service.ts` guardan `PV_CTR_ORDS.FCNMOD` y `PV_TICKET_LOG.updated_at` con hora UTC convertida a `Central Standard Time (Mexico)`; no usar `GETDATE()` directo en esos campos.
@@ -132,6 +134,7 @@ Enlaces relacionados:
 - soporte SQL sugerido: `sql/2026-05-14_pv_devoluciones_formas_mixtas_prorrata_indexes.sql` (índices para `IDFOLORIG` y tabla de formas).
 
 ## Pago de Servicios PS (implementado 2026-03)
+- Créditos PS (2026-10-20), **sólo IOEDESARROLLO**: bundle `sql/2026-10-20_creditos_dev/`, relación NDOC, 11 DAT_SUC→empresa 1 y 3,610 fechas REGISTRO sin modificar movimientos. **Regla titular: FCNPGOCRED se fija sólo si NULL al liquidar y permanece tras devoluciones parciales/totales o nueva liquidación; nunca borrar/recalcular por reapertura.** Fecha previa no bloquea abono de deuda válida; saldo vigente se consulta en DAT_CTRL_CTAS. Delta 08 actualiza sólo preparar/confirmar, sin DML comercial. Consumidor: ROL 1, versiones hex (timestamp→binary→varchar), actor JWT y null hereda; precheck QueryRunner conserva error ante EABORT/ENOTBEGUN. Contrato `CREDITOS_CONFIG_DESARROLLO.md`. SQL sigue autoridad del cierre. UAT real pendiente; producción anterior, no ejecutar bundle en IOELOCAL.
 - Modulo backend:
 - `src/modules/pagos-servicios/pagos-servicios.module.ts`
 - `src/modules/pagos-servicios/pagos-servicios.controller.ts`
@@ -210,3 +213,6 @@ Enlaces relacionados:
   - `POST /cajon-estado/autorizar` registra `ACTION='POST'`, `MODULO='cajon_estado'`, `ENTIDAD='autorizar'`.
   - `GET /cajon-estado/resumen` registra `ACTION='GET'`, `MODULO='cajon_estado'`, `ENTIDAD='resumen'`.
 
+## Contrato horario CDMX (2026-11-04)
+
+Fechas comerciales usan adaptación compartida SQL/API/Flutter, sin falsa Z ni conversión por zona del dispositivo; auditoría conserva UTC. MB51 adapta FCND/FCNC y filtros de calendario; PS/conteos comparten contrato central de respuesta. Mantener separado alcance de reparación FCNC de 15 filas NC300007708 y despliegue preventivo pendiente. [Contrato y validación](../../CONTRATO_FECHAS_CDMX.md).

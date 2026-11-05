@@ -1,3 +1,4 @@
+import { businessSqlDate } from '../../common/time/fecha-negocio';
 import {
   BadRequestException,
   ConflictException,
@@ -50,7 +51,7 @@ export class RefDetalleService {
       IDREF: dto.IDREF,
       SUC: dto.SUC ?? null,
       FCNR: dto.FCNR ? new Date(dto.FCNR) : null,
-      FCND: dto.FCND ? new Date(dto.FCND) : null,
+      FCND: dto.FCND ? businessSqlDate(dto.FCND) : null,
       OPV: dto.OPV ?? null,
       IDFOL: dto.IDFOL ?? null,
       IDC: dto.IDC ?? null,
@@ -71,7 +72,7 @@ export class RefDetalleService {
     if (dto.FCNR !== undefined)
       partial.FCNR = dto.FCNR ? new Date(dto.FCNR) : null;
     if (dto.FCND !== undefined)
-      partial.FCND = dto.FCND ? new Date(dto.FCND) : null;
+      partial.FCND = dto.FCND ? businessSqlDate(dto.FCND) : null;
     if (dto.OPV !== undefined) partial.OPV = dto.OPV ?? null;
     if (dto.IDFOL !== undefined) partial.IDFOL = dto.IDFOL ?? null;
     if (dto.IDC !== undefined) partial.IDC = dto.IDC ?? null;
@@ -129,7 +130,7 @@ export class RefDetalleService {
       this.normalizeText(dto.opv) ||
       this.normalizeText(user?.username) ||
       String(user?.sub ?? '').trim();
-    const fcnd = dto.fcnd ? new Date(dto.fcnd) : new Date();
+    const fcnd = dto.fcnd ? businessSqlDate(dto.fcnd) : new Date();
     const customIdref = this.normalizeText(dto.idref);
 
     if (!suc) throw new BadRequestException('suc es requerido');

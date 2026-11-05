@@ -1,3 +1,4 @@
+import { fechaEnZona } from '../../common/time/fecha-zona';
 import { conBloqueoCfdi } from './cfdi-lock';
 import { ConflictException, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
@@ -74,7 +75,7 @@ export class NotaCreditoRepositorio {
       [
         input.idFolOrigen,
         input.rfcEmisor,
-        input.fecha.toISOString().slice(0, 10),
+        fechaEnZona(input.fecha),
         input.usuario ?? null,
         input.tipo ?? 'NC',
       ],

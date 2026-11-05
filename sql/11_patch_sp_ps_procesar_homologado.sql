@@ -13,6 +13,7 @@ BEGIN
 
   DECLARE @startedTran BIT = 0;
   DECLARE @idfolNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@IDFOL, '')));
+  DECLARE @fechaProceso DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
   DECLARE @serviceType CHAR(2);
   DECLARE @total DECIMAL(18, 4);
   DECLARE @isCashOut BIT = 0;
@@ -81,7 +82,7 @@ BEGIN
       IMPT = CASE WHEN @isCashOut = 1 THEN (@total * -1) ELSE @total END,
       ORIGEN_AUT = @origenFinal,
       IDFOLINICIAL = ISNULL(NULLIF(LTRIM(RTRIM(IDFOLINICIAL)), ''), IDFOL),
-      FCNM = GETDATE()
+      FCNM = @fechaProceso
     WHERE IDFOL = @idfolNorm;
 
     IF @startedTran = 1 AND @@TRANCOUNT > 0 COMMIT TRANSACTION;

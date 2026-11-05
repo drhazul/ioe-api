@@ -18,6 +18,8 @@ BEGIN
   SET NOCOUNT ON;
   SET XACT_ABORT ON;
 
+  DECLARE @fechaProcesoMexico DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
+
   DECLARE @ords TABLE (IORD NVARCHAR(255) NOT NULL PRIMARY KEY);
   INSERT INTO @ords (IORD)
   SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(value, ''))))
@@ -115,8 +117,8 @@ BEGIN
         ELSE 10
       END,
       o.ESTATUS = 2,
-      o.FCNRT = GETDATE(),
-      o.FCNMOD = GETDATE()
+      o.FCNRT = @fechaProcesoMexico,
+      o.FCNMOD = @fechaProcesoMexico
     FROM dbo.PV_CTR_ORDS o
     INNER JOIN @target t
       ON UPPER(LTRIM(RTRIM(ISNULL(o.IORD, '')))) = t.IORD;

@@ -18,6 +18,8 @@ BEGIN
   SET NOCOUNT ON;
   SET XACT_ABORT ON;
 
+  DECLARE @fechaProcesoMexico DATETIME = CONVERT(DATETIME, ((SYSUTCDATETIME() AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)'));
+
   DECLARE @motivoNorm NVARCHAR(500) = LTRIM(RTRIM(ISNULL(@MOTIVO, N'')));
   IF LEN(@motivoNorm) < 3
     THROW 58340, 'El motivo del rechazo es obligatorio y debe tener al menos 3 caracteres.', 1;
@@ -129,7 +131,7 @@ BEGIN
     SET
       o.ESTSEGU = 5,
       o.ESTATUS = 2,
-      o.FCNMOD = GETDATE()
+      o.FCNMOD = @fechaProcesoMexico
     FROM dbo.PV_CTR_ORDS o
     INNER JOIN @target t
       ON UPPER(LTRIM(RTRIM(ISNULL(o.IORD, N'')))) = t.IORD;

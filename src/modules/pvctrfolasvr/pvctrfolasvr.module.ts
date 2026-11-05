@@ -9,6 +9,7 @@ import { DatSucEntity } from '../dat-suc/dat-suc.entity';
 import { FactClientShpEntity } from '../factclientshp/factclientshp.entity';
 import { PvCotizacionesCierreController } from './pv-cotizaciones-cierre.controller';
 import { PvCotizacionesCierreService } from './pv-cotizaciones-cierre.service';
+import { PvLealtadService } from './pv-lealtad.service';
 
 @Module({
   imports: [
@@ -21,6 +22,6 @@ import { PvCotizacionesCierreService } from './pv-cotizaciones-cierre.service';
     ]),
   ],
   controllers: [PvCtrFolAsvrController, PvCotizacionesCierreController],
-  providers: [PvCtrFolAsvrService, PvCotizacionesCierreService],
+  providers: [PvCtrFolAsvrService, PvCotizacionesCierreService, PvLealtadService],
 })
 export class PvCtrFolAsvrModule {}

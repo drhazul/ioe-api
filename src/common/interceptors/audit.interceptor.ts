@@ -50,6 +50,19 @@ export class AuditInterceptor implements NestInterceptor {
     ]) {
       if (k in body) body[k] = '[REDACTED]';
     }
+    if (this.moduleFromUrl(req.originalUrl || req.url || '') === 'entidades-fiscales') {
+      for (const k of [
+        'rfc',
+        'nombreLegal',
+        'nombreComercial',
+        'regimenFiscal',
+        'cpFiscal',
+        'domicilioFiscal',
+        'referenciaValidacion',
+      ]) {
+        if (k in body) body[k] = '[DATO FISCAL PROTEGIDO]';
+      }
+    }
 
     return next.handle().pipe(
       tap((resBody) => {
@@ -62,6 +75,10 @@ export class AuditInterceptor implements NestInterceptor {
           resBody?.SUC ??
           resBody?.IDTOKEN ??
           resBody?.IDLOG ??
+          resBody?.ID_ENTIDAD_FISCAL ??
+          resBody?.idEntidadFiscal ??
+          resBody?.ID_RELACION ??
+          resBody?.idRelacion ??
           null;
 
         this.audit.log({

@@ -13,6 +13,8 @@ services:
       - ./api.production.env
     environment:
       NODE_ENV: production
+      TZ: America/Mexico_City
+      IOE_REQUIRE_CDMX_SQL_CLOCK: "true"
       PORT: "3001"
       ADMS_PORT: "8081"
       DB_HOST: ioe-sql-standby
@@ -51,6 +53,8 @@ services:
   standby-front:
     image: ${IOE_IMAGE:?Set IOE_IMAGE to a built candidate image}
     pull_policy: never
+    environment:
+      TZ: America/Mexico_City
     container_name: standby-front-tysuzjl0xcdbhfje49pbcqyg
     entrypoint: ["/usr/sbin/nginx"]
     command: ["-g", "daemon off;"]

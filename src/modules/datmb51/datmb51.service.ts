@@ -9,6 +9,11 @@ import { Datmb51Entity } from './datmb51.entity';
 import { CreateDatmb51Dto } from './dto/create-datmb51.dto';
 import { UpdateDatmb51Dto } from './dto/update-datmb51.dto';
 import { SearchDatMb51Dto } from './dto/search-datmb51.dto';
+import {
+  businessDayBound,
+  businessFields,
+  businessSqlDate,
+} from '../../common/time/fecha-negocio';
 
 @Injectable()
 export class Datmb51Service {
@@ -78,7 +83,7 @@ export class Datmb51Service {
     });
   }
 
-  findAll(q?: {
+  async findAll(q?: {
     idpd?: string;
     user?: string;
     art?: string;
@@ -92,13 +97,18 @@ export class Datmb51Service {
     if (q?.almacen) where.ALMACEN = Like(`%${q.almacen}%`);
     if (q?.suc) where.SUC = Like(`%${q.suc}%`);
 
-    return this.repo.find({
+    const rows = await this.repo.find({
       where: Object.keys(where).length ? where : undefined,
       order: { IDPD: 'ASC' },
     });
+    return rows.map((row) => businessFields(row, ['FCND', 'FCNC']));
   }
 
   async findOne(idpd: string) {
+    return businessFields(await this.findEntity(idpd), ['FCND', 'FCNC']);
+  }
+
+  private async findEntity(idpd: string) {
     const row = await this.repo.findOne({ where: { IDPD: idpd } });
     if (!row) throw new NotFoundException(`DAT_MB51 ${idpd} no existe`);
     return row;
@@ -116,19 +126,19 @@ export class Datmb51Service {
       ART: dto.ART ?? null,
       CTDA: dto.CTDA ?? null,
       CTOT: dto.CTOT ?? null,
-      FCND: dto.FCND ? new Date(dto.FCND) : null,
-      FCNC: dto.FCNC ? new Date(dto.FCNC) : null,
+      FCND: dto.FCND ? businessSqlDate(dto.FCND) : null,
+      FCNC: dto.FCNC ? businessSqlDate(dto.FCNC) : null,
       TXT: dto.TXT ?? null,
       ALMACEN: dto.ALMACEN ?? null,
       VTAESP: dto.VTAESP ?? null,
       SUC: dto.SUC ?? null,
     });
 
-    return this.repo.save(entity);
+    return businessFields(await this.repo.save(entity), ['FCND', 'FCNC']);
   }
 
   async update(idpd: string, dto: UpdateDatmb51Dto) {
-    const row = await this.findOne(idpd);
+    const row = await this.findEntity(idpd);
 
     const { IDPD, ...rest } = dto as any;
     const partial: Partial<Datmb51Entity> = {
@@ -136,39 +146,28 @@ export class Datmb51Service {
     };
 
     if (dto.FCND !== undefined) {
-      partial.FCND = dto.FCND ? new Date(dto.FCND) : null;
+      partial.FCND = dto.FCND ? businessSqlDate(dto.FCND) : null;
     }
 
     if (dto.FCNC !== undefined) {
-      partial.FCNC = dto.FCNC ? new Date(dto.FCNC) : null;
+      partial.FCNC = dto.FCNC ? businessSqlDate(dto.FCNC) : null;
     }
 
     const updated = this.repo.merge(row, partial);
-    return this.repo.save(updated);
+    return businessFields(await this.repo.save(updated), ['FCND', 'FCNC']);
   }
 
   async remove(idpd: string) {
-    const row = await this.findOne(idpd);
+    const row = await this.findEntity(idpd);
     await this.repo.remove(row);
     return { deleted: true, IDPD: idpd };
   }
 
   async search(dto: SearchDatMb51Dto) {
-    const fechaDocDesde = dto.fechaDocDesde
-      ? new Date(dto.fechaDocDesde)
-      : null;
-    const fechaDocHasta = dto.fechaDocHasta
-      ? new Date(dto.fechaDocHasta)
-      : null;
-    const fechaContDesde = dto.fechaContDesde
-      ? new Date(dto.fechaContDesde)
-      : null;
-    const fechaContHasta = dto.fechaContHasta
-      ? new Date(dto.fechaContHasta)
-      : null;
-
-    if (fechaDocHasta) fechaDocHasta.setHours(23, 59, 59, 999);
-    if (fechaContHasta) fechaContHasta.setHours(23, 59, 59, 999);
+    const fechaDocDesde = businessDayBound(dto.fechaDocDesde);
+    const fechaDocHasta = businessDayBound(dto.fechaDocHasta, true);
+    const fechaContDesde = businessDayBound(dto.fechaContDesde);
+    const fechaContHasta = businessDayBound(dto.fechaContHasta, true);
 
     const wantsAll = dto.page == null && dto.limit == null;
     const rawPage = Number(dto.page ?? 1);
@@ -318,8 +317,8 @@ export class Datmb51Service {
           A.DES AS DES,
           M.CTDA,
           M.CTOT,
-          M.FCND,
-          M.FCNC,
+          CONVERT(varchar(33), M.FCND, 126) AS FCND,
+          CONVERT(varchar(33), M.FCNC, 126) AS FCNC,
           M.TXT,
           M.ALMACEN,
           M.VTAESP,
@@ -432,6 +431,11 @@ export class Datmb51Service {
 
     const effectiveLimit = safeLimit ?? items.length;
     const effectivePage = wantsAll ? 1 : page;
-    return { items, total, page: effectivePage, limit: effectiveLimit };
+    return {
+      items: items.map((row) => businessFields(row, ['FCND', 'FCNC'])),
+      total,
+      page: effectivePage,
+      limit: effectiveLimit,
+    };
   }
 }
