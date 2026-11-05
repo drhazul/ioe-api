@@ -1,5 +1,7 @@
 # Punto de venta (API)
 
+> C01 retirado de master productivo el 2026-11-05; desarrollo preservado en feature/lealtad-c01-preservado-20261105. Fechas comerciales se presentan sin convertir zona del dispositivo.
+
 - C01 corrección y UAT (2026-10-23): [contrato de conexión, aliases y errores seguros](LEALTAD_C01_DIAGNOSTICO_20261023.md). Reconsulta es GET sobre folio existente; cero movimientos. `RECOMPENSAS_API_URL` usa base HTTPS; admite sufijo `/api` sin duplicarlo.
 
 ## Créditos PS: integración SQL de desarrollo (2026-10-20)

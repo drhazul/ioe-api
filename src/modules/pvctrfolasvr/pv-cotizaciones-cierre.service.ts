@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { DataSource, QueryFailedError } from 'typeorm';
+import { businessDateTime } from '../../common/time/fecha-negocio';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { PvCotizacionCierreDto } from './dto/pv-cotizacion-cierre.dto';
 import { PvCotizacionCierreFormaDto } from './dto/pv-cotizacion-cierre-forma.dto';
@@ -290,7 +291,7 @@ export class PvCotizacionesCierreService {
       opv,
       opvNombre,
       idfol: context.idfol,
-      fcnm: this.toIsoDateTime(folio.FCNM),
+      fcnm: businessDateTime(folio.FCNM),
       clienteId,
       clienteNombre,
     };
@@ -458,19 +459,6 @@ export class PvCotizacionesCierreService {
     return type === 'CA' ? 'CA' : 'VF';
   }
 
-  private toIsoDateTime(value: unknown): string | null {
-    if (value == null) return null;
-    if (value instanceof Date) {
-      if (Number.isNaN(value.getTime())) return null;
-      return value.toISOString();
-    }
-    const text = this.normalizeText(value);
-    if (!text) return null;
-    const parsed = new Date(text);
-    if (Number.isNaN(parsed.getTime())) return text;
-    return parsed.toISOString();
-  }
-
   private async loadPrintHeader(
     executor: SqlExecutor,
     suc: string,
@@ -609,7 +597,7 @@ export class PvCotizacionesCierreService {
           impp: this.round2(imppRaw),
           impd: this.round2(impdRaw),
           aut: this.normalizeText(this.getRowValue(row, 'AUT') ?? '') || null,
-          fcn: this.toIsoDateTime(this.getRowValue(row, 'FCN')),
+          fcn: businessDateTime(this.getRowValue(row, 'FCN')),
         } satisfies PrintFormaItem;
       })
       .filter((row) => row.form && row.impp > 0);
@@ -648,8 +636,8 @@ export class PvCotizacionesCierreService {
         iord: this.normalizeText(row.IORD),
         tipo: this.normalizeText(row.TIPO) || null,
         opv: this.normalizeText(row.OPV) || null,
-        fcns: this.toIsoDateTime(row.FCNS),
-        fcnm: this.toIsoDateTime(row.FCNM),
+        fcns: businessDateTime(row.FCNS),
+        fcnm: businessDateTime(row.FCNM),
         estatus: this.toInt(row.ESTATUS),
         ncliente: this.normalizeText(row.NCLIENTE) || null,
         art: this.normalizeText(row.ART) || null,

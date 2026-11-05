@@ -1,3 +1,4 @@
+import { businessDateTime } from '../../common/time/fecha-negocio';
 import {
   BadRequestException,
   ForbiddenException,
@@ -926,8 +927,8 @@ export class SugeridosService {
       tipo: this.normalizeText(row.TIPO),
       nprov: this.toInt(row.NPROV) ?? 0,
       usr: this.normalizeText(row.USR),
-      fcnp: this.toIsoDate(row.FCNP),
-      fcnc: this.toIsoDate(row.FCNC),
+      fcnp: businessDateTime(row.FCNP),
+      fcnc: businessDateTime(row.FCNC),
       impp: this.toMoney(row.IMPP) ?? 0,
       nart: this.toInt(row.NART) ?? 0,
       fcnr: this.toIsoDate(row.FCNR),

@@ -1,5 +1,7 @@
 # Instrucciones de agente para ioe-api
 
+> C01 retirado de master productivo el 2026-11-05; desarrollo preservado en feature/lealtad-c01-preservado-20261105. Fechas comerciales se presentan sin convertir zona del dispositivo.
+
 - C01 lealtad (2026-10-23): conservar error estructurado seguro, consulta por folio/sucursal y aliases privados `USER_API_FEDERADA`/`PASSWORD_API_FEDERADA`; nunca sustituir cuenta HTTP por SQL ni convertir un fallo en no participante. UAT local con `scripts/start-c01-dev.cjs` fijado a IOEDESARROLLO. Contrato: `docs/modules/punto_venta/LEALTAD_C01_DIAGNOSTICO_20261023.md`.
 
 - Punto de venta / fechas de proceso (2026-10-15): folios CP/CA/VF, cierre, staging/transmisión MB51 y sellos de facturación/CFDI usan hora local de México derivada de UTC; fechas recibidas como dato de negocio siguen intactas. Aplicar los scripts SQL actualizados junto con API.

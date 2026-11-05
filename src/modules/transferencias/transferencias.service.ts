@@ -1,3 +1,4 @@
+import { businessDateTime } from '../../common/time/fecha-negocio';
 import {
   BadRequestException,
   ForbiddenException,
@@ -1354,8 +1355,8 @@ export class TransferenciasService {
   private mapHeader(row: Record<string, unknown>) {
     return {
       doc: this.normalizeText(row.DOC),
-      fcnd: this.toIsoDate(row.FCND),
-      fcnc: this.toIsoDate(row.FCNC),
+      fcnd: businessDateTime(row.FCND),
+      fcnc: businessDateTime(row.FCNC),
       ctd: this.toNumber(row.CTD) ?? 0,
       imp: this.toMoney(row.IMP) ?? 0,
       estatus: this.normalizeText(row.ESTATUS).toUpperCase(),

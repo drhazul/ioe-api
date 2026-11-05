@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 import { DataSource, QueryFailedError, QueryRunner } from 'typeorm';
+import { businessDateTime } from '../../common/time/fecha-negocio';
 import { AuditService } from '../audit/audit.service';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { inferOrigenAut } from '../pvctrfolasvr/pv-folio-homologation.util';
@@ -3118,7 +3119,7 @@ export class PvDevolucionesService {
           form: this.normalizeText(this.getRowValue(row, 'FORM') ?? ''),
           impp: this.round2(imppRaw),
           aut: this.nullableText(this.getRowValue(row, 'AUT') ?? ''),
-          fcn: this.nullableText(this.getRowValue(row, 'FCN') ?? ''),
+          fcn: businessDateTime(this.getRowValue(row, 'FCN')),
         };
       })
       .filter((item) => item.form.length > 0);

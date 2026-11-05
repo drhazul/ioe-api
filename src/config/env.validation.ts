@@ -16,13 +16,6 @@ export const envValidationSchema = Joi.object({
   JWT_EXPIRES_IN: Joi.string().default('15m'),
   REFRESH_EXPIRES_DAYS: Joi.number().default(30),
 
-  // API externa de recompensas; credenciales privadas sólo en entorno backend.
-  RECOMPENSAS_API_URL: Joi.string().uri().allow('').optional(),
-  RECOMPENSAS_API_USERNAME: Joi.string().allow('').optional(),
-  RECOMPENSAS_API_PASSWORD: Joi.string().allow('').optional(),
-  USER_API_FEDERADA: Joi.string().allow('').optional(),
-  PASSWORD_API_FEDERADA: Joi.string().allow('').optional(),
-
   QUADRUM_ENDPOINT: Joi.string()
     .valid(
       'https://devws.cfdiquadrum.com.mx/timbrar',

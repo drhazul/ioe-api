@@ -1,3 +1,4 @@
+import { businessDateTime } from '../../common/time/fecha-negocio';
 ﻿import {
   BadRequestException,
   ForbiddenException,
@@ -152,8 +153,8 @@ export class MermasService {
         docmer: this.normalizeText(row.DOCMER),
         suc: this.normalizeText(row.SUC),
         user: this.normalizeText(row.USER),
-        fcnd: this.toIsoDate(row.FCND),
-        fcnc: this.toIsoDate(row.FCNC),
+        fcnd: businessDateTime(row.FCND),
+        fcnc: businessDateTime(row.FCNC),
         idEstatus: this.toInt(row.ID_ESTATUS) ?? 0,
         estatus: this.normalizeText(row.ESTATUS),
         narts: this.toNumber(row.NARTS) ?? 0,
@@ -223,7 +224,7 @@ export class MermasService {
 
     return (rows ?? []).map((row: Record<string, unknown>) => ({
       docmer: this.normalizeText(row.DOCMER),
-      fcnd: this.toIsoDate(row.FCND),
+      fcnd: businessDateTime(row.FCND),
       estats: this.normalizeText(row.ESTATUS).toUpperCase(),
       suc: this.normalizeText(row.SUC),
     }));
@@ -1093,8 +1094,8 @@ export class MermasService {
       docmer: this.normalizeText(row.DOCMER),
       suc: this.normalizeText(row.SUC),
       user: this.normalizeText(row.USER),
-      fcnd: this.toIsoDate(row.FCND),
-      fcnc: this.toIsoDate(row.FCNC),
+      fcnd: businessDateTime(row.FCND),
+      fcnc: businessDateTime(row.FCNC),
       idEstatus: this.toInt(row.ID_ESTATUS) ?? 0,
       estatus: this.normalizeText(row.ESTATUS),
       narts: this.toNumber(row.NARTS) ?? 0,
@@ -1106,7 +1107,7 @@ export class MermasService {
       userAud: this.normalizeText(row.USER_AUD),
       docMb51: this.normalizeText(row.DOC_MB51),
       obsAudit: this.normalizeText(row.OBS_AUDIT),
-      fcnAud: this.toIsoDate(row.FCNAUD),
+      fcnAud: businessDateTime(row.FCNAUD),
     };
   }
 
@@ -1234,12 +1235,6 @@ export class MermasService {
   private toMoney(value?: unknown) {
     const n = this.toNumber(value);
     return n == null ? null : Math.round((n + Number.EPSILON) * 100) / 100;
-  }
-
-  private toIsoDate(value?: unknown) {
-    if (!value) return null;
-    const d = value instanceof Date ? value : new Date(String(value));
-    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }
 
   private toBool(value?: unknown) {

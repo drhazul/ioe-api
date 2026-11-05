@@ -1,5 +1,7 @@
 # Punto de venta (AGENTS API)
 
+> C01 retirado de master productivo el 2026-11-05; desarrollo preservado en feature/lealtad-c01-preservado-20261105. Fechas comerciales se presentan sin convertir zona del dispositivo.
+
 - Lealtad C01: errores `LEALTAD_*` no contienen cuerpo remoto ni secretos. Mantener JWT/sucursal, IDC persistido y respuesta autoritativa booleana; no usar SQL directo como integración. Cuenta HTTP admite los aliases privados indicados por titular. Referencia: `LEALTAD_C01_DIAGNOSTICO_20261023.md`.
 
 ## Fecha de proceso de folios, MB51 y CFDI (2026-10-15)

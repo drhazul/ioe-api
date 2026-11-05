@@ -1,4 +1,4 @@
-import { businessSqlDate } from '../../common/time/fecha-negocio';
+import { businessDateTime, businessSqlDate } from '../../common/time/fecha-negocio';
 import {
   BadRequestException,
   ConflictException,
@@ -238,7 +238,7 @@ export class RefDetalleService {
       return {
         ok: true,
         idref,
-        fcnd: fcnd.toISOString(),
+        fcnd: businessDateTime(fcnd),
       };
     } catch (error) {
       await queryRunner.rollbackTransaction();

@@ -20,7 +20,7 @@ export const BUSINESS_RESPONSE_CONTRACTS: Record<string, readonly string[]> = {
   pvctrfolform: ['FCN', 'FCNM'],
   pvticketlog: ['UPDATED_AT'],
   refdetalle: ['FCND'],
-  'pv/cotizaciones': documentFields,
+  'pv/cotizaciones': [...documentFields, 'FCNS'],
   'pv/devoluciones': documentFields,
   pvctrords: [
     ...documentFields,

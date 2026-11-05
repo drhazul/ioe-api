@@ -1,5 +1,7 @@
 # IOE API
 
+> C01 retirado de master productivo el 2026-11-05; desarrollo preservado en feature/lealtad-c01-preservado-20261105. Fechas comerciales se presentan sin convertir zona del dispositivo.
+
 ## C01 lealtad: diagnóstico y reconsulta (2026-10-23)
 
 Consulta de participación conserva errores seguros por etapa y admite aliases privados `USER_API_FEDERADA`/`PASSWORD_API_FEDERADA`. Configuración, pruebas y causa de fecha visual: [C01](docs/modules/punto_venta/LEALTAD_C01_DIAGNOSTICO_20261023.md). Lanzador `scripts/start-c01-dev.cjs` fija IOEDESARROLLO; no arrancar `.env` productivo para UAT.

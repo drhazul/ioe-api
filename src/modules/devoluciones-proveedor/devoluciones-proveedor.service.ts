@@ -1,3 +1,4 @@
+import { businessDateTime } from '../../common/time/fecha-negocio';
 import {
   BadRequestException,
   ForbiddenException,
@@ -816,7 +817,7 @@ export class DevolucionesProveedorService {
       proveedor: this.text(row.PROVEEDOR),
       docOc: this.text(row.DOC_OC),
       docRec: this.text(row.DOC_REC),
-      fecha: this.iso(row.FCND),
+      fecha: businessDateTime(row.FCND),
       tipoDev: this.int(row.TIPO_DEV),
       tipoClave: this.text(row.TIPO_CLAVE),
       tipoDescripcion: this.text(row.TIPO_DESC),
@@ -824,9 +825,9 @@ export class DevolucionesProveedorService {
       obs: this.text(row.OBS),
       usuarioCrea: this.text(row.USR_CREA),
       usuarioSolicita: this.text(row.USR_SOLICITA),
-      fechaSolicita: this.iso(row.FCN_SOLICITA),
+      fechaSolicita: businessDateTime(row.FCN_SOLICITA),
       usuarioAutoriza: this.text(row.USR_AUTORIZA),
-      fechaAutoriza: this.iso(row.FCN_AUTORIZA),
+      fechaAutoriza: businessDateTime(row.FCN_AUTORIZA),
       motivoRechazo: this.text(row.MOTIVO_RECHAZO),
       renglones: this.int(row.RENGLONES),
       cantidad: this.number(row.CANTIDAD),
@@ -845,7 +846,7 @@ export class DevolucionesProveedorService {
       costo: this.number(row.CTOP),
       importe: this.number(row.IMPT),
       lote: this.text(row.LOTE),
-      caducidad: this.iso(row.CADUCIDAD),
+      caducidad: businessDateTime(row.CADUCIDAD),
       fechaCaptura: this.iso(row.FCNR),
       motivo: this.int(row.MOV_DEV),
       motivoCodigo: this.text(row.MOTIVO_CODIGO),
@@ -880,7 +881,7 @@ export class DevolucionesProveedorService {
       rma: this.text(row.RMA),
       obs: this.text(row.OBS),
       fecha: this.iso(row.FCNR),
-      fechaSalida: this.iso(row.FCN_SALIDA),
+      fechaSalida: businessDateTime(row.FCN_SALIDA),
       usuarioSalida: this.text(row.USR_SALIDA),
       documentos: this.int(row.DOCUMENTOS),
     };
