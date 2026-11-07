@@ -24,5 +24,6 @@ import { UsuarioEntity } from '../users/usuario.entity';
   ],
   controllers: [MeController],
   providers: [MeService],
+  exports: [MeService],
 })
 export class MeModule {}

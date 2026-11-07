@@ -17,8 +17,10 @@ import { FactClientShpEntity } from './factclientshp.entity';
 import { CreateFactClientShpDto } from './dto/create-factclientshp.dto';
 import { UpdateFactClientShpDto } from './dto/update-factclientshp.dto';
 import { UsrModSucEntity } from '../usr-mod-suc/usr-mod-suc.entity';
+import { MeService } from '../me/me.service';
 
 type FactClientUser = {
+  sub?: number | string;
   roleId?: number | string;
   nivel?: number | string;
   username?: string | null;
@@ -43,6 +45,7 @@ export class FactClientShpService {
     private readonly usrModSucRepo: Repository<UsrModSucEntity>,
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
+    private readonly meService: MeService,
   ) {}
 
   private normalizeUsoCfdi(value: string) {
@@ -411,6 +414,17 @@ export class FactClientShpService {
     dto: UpdateFactClientShpDto,
     user?: FactClientUser | null,
   ): Promise<FactClientShpEntity> {
+    if (dto.L_CRED !== undefined && !this.isAdmin(user)) {
+      const userId = Number(user?.sub);
+      const roleId = Number(user?.roleId);
+      if (!Number.isFinite(userId) || userId <= 0 || !Number.isFinite(roleId)) {
+        throw new ForbiddenException('Acceso a gestión de crédito requerido');
+      }
+      const access = await this.meService.getRoleDatmodulos(userId, roleId);
+      if (!access.modulos.some((module) => module.codigo.trim().toUpperCase() === 'GES_CRED')) {
+        throw new ForbiddenException('Acceso a gestión de crédito requerido');
+      }
+    }
     const isAdmin = this.isAdmin(user);
     const suc = (user?.suc ?? '').trim();
     if (!isAdmin && !suc) {
@@ -424,6 +438,9 @@ export class FactClientShpService {
     id: number,
     dto: UpdateFactClientShpDto,
   ): Promise<FactClientShpEntity> {
+    if (dto.L_CRED !== undefined) {
+      throw new ForbiddenException('Acceso a gestión de crédito requerido');
+    }
     const rows = (await this.repo.query(
       `SELECT TOP 1 * FROM ${this.repo.metadata.tablePath} WHERE IDC = @0`,
       [id],
@@ -482,6 +499,12 @@ export class FactClientShpService {
     return this.dataSource.transaction(async (manager) => {
       const trxRepo = manager.getRepository(FactClientShpEntity);
       const saved = await trxRepo.save(updated);
+      if (dto.L_CRED !== undefined) {
+        await manager.query(
+          `UPDATE ${this.repo.metadata.tablePath} SET L_CRED = @0 WHERE IDC = @1`,
+          [dto.L_CRED, saved.IDC],
+        );
+      }
       await this.syncPendingFacSvrShapByCliente(manager, saved);
       const rows = (await manager.query(
         `SELECT TOP 1 * FROM ${this.repo.metadata.tablePath} WHERE IDC = @0`,
