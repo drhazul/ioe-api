@@ -201,6 +201,7 @@ export class PvCtrOrdsService {
         ? fechaEntregaDate.toISOString()
         : null;
     const comad = (dto.comad ?? '').trim();
+    const hrEnt = String(dto.hrEnt ?? '').trim() || null;
     const clien = Number(dto.clien);
     const clienKey = this.normalizeClientKey(dto.clien);
     const ticketRel = this.normalizeOrdValue(dto.ticketRel);
@@ -290,6 +291,7 @@ export class PvCtrOrdsService {
           tipo,
           opv,
           fechaEntrega: fechaEntrega,
+          hrEnt,
           comad,
           descArt,
         });
@@ -329,9 +331,10 @@ export class PvCtrOrdsService {
             @ESTADO = @5,
             @TIPO = @6,
             @FCNM = @7,
-            @COMAD = @8,
-            @SUC = @9,
-            @OPV = @10,
+            @HRENT = @8,
+            @COMAD = @9,
+            @SUC = @10,
+            @OPV = @11,
             @IORD_OUT = @IORD_OUT OUTPUT;
           SELECT @IORD_OUT AS IORD;
           `,
@@ -344,6 +347,7 @@ export class PvCtrOrdsService {
           estado,
           tipo,
           fechaEntrega,
+          hrEnt,
           comad,
           suc,
           opv,
@@ -861,6 +865,7 @@ export class PvCtrOrdsService {
       tipo: string;
       opv: string;
       fechaEntrega: string;
+      hrEnt: string | null;
       comad: string;
       descArt: string;
     },
@@ -888,6 +893,10 @@ export class PvCtrOrdsService {
         TIPO = @1,
         OPV = @2,
         FCNM = @3,
+        HR_ENT = CASE
+          WHEN @6 IS NULL THEN HR_ENT
+          ELSE TRY_CONVERT(DATETIME, CONVERT(VARCHAR(10), @3, 23) + ' ' + @6 + ':00', 120)
+        END,
         COMAD = @4,
         DESCART = CASE WHEN NULLIF(@5, '') IS NULL THEN DESCART ELSE @5 END,
         ESTATUS = 1,
@@ -901,6 +910,7 @@ export class PvCtrOrdsService {
         input.fechaEntrega,
         input.comad,
         input.descArt,
+        input.hrEnt,
       ],
     );
   }

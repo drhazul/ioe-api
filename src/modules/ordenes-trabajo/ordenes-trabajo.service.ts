@@ -57,6 +57,12 @@ type CambioMermaEconomicBase = {
   warning: string | null;
 };
 
+type CambioMermaNewPrice = {
+  unitPrice: number;
+  source: string;
+  discountApplied: boolean;
+};
+
 type CambioMermaOriginalContext = {
   row: Record<string, unknown>;
   scope: SucScope;
@@ -72,6 +78,13 @@ type MermasAutorizadasFilterOptions = {
   tipos: Array<{ value: string; label: string }>;
   laboratorios: unknown[];
   asignados: Array<{ value: string; label: string }>;
+};
+
+type OrdenesTrabajoPanelCatalogs = {
+  flowStatusOptions: unknown[];
+  laboratorios: unknown[];
+  incidenciaOptions: unknown[];
+  otrosOptions: unknown[];
 };
 
 @Injectable()
@@ -95,6 +108,23 @@ export class OrdenesTrabajoService {
   ] as const;
   private static readonly MODULE_CODES_INV_SCOPE = ['DAT_JAA_ALM'] as const;
   private flowVisibilityTableExists: boolean | null = null;
+  private laboratoriosSchemaCache: {
+    expiresAt: number;
+    hasDatLab: boolean;
+    hasDatLabAcceso: boolean;
+  } | null = null;
+  private laboratoriosSchemaInFlight: Promise<{
+    hasDatLab: boolean;
+    hasDatLabAcceso: boolean;
+  }> | null = null;
+  private readonly panelCatalogsCache = new Map<
+    string,
+    { expiresAt: number; value: OrdenesTrabajoPanelCatalogs }
+  >();
+  private readonly panelCatalogsInFlight = new Map<
+    string,
+    Promise<OrdenesTrabajoPanelCatalogs>
+  >();
   private readonly flowVisibilityPanelConfigCache = new Map<string, boolean>();
   private readonly mermasFilterOptionsCache = new Map<
     string,
@@ -104,6 +134,11 @@ export class OrdenesTrabajoService {
     string,
     Promise<MermasAutorizadasFilterOptions>
   >();
+  private readonly tableExistsCache = new Map<
+    string,
+    { expiresAt: number; exists: boolean }
+  >();
+  private readonly tableExistsInFlight = new Map<string, Promise<boolean>>();
 
   constructor(
     private readonly dataSource: DataSource,
@@ -172,7 +207,6 @@ export class OrdenesTrabajoService {
   }
 
   async list(query: ListOrdenesTrabajoQueryDto, user: JwtPayload) {
-    const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
     const page = this.normalizePage(query.page);
     const panelMode = this.normalizePanelMode(query.panelMode);
     const isOrdenesVencerMode =
@@ -181,19 +215,29 @@ export class OrdenesTrabajoService {
       panelMode === 'estado';
     // Órdenes a Vencer es una consulta transversal: no hereda los flujos
     // asignados a un rol específico en los paneles operativo o Estado.
-    const isControlCalidadOrdenesPanelUser =
-      (panelMode === 'estado' || panelMode === 'operativo') &&
-      (await this.isControlCalidadRole(user));
+    const [roleCodeRaw, isControlCalidadOrdenesPanelUser] = await Promise.all([
+      this.resolveRoleCode(user),
+      panelMode === 'estado' || panelMode === 'operativo'
+        ? this.isControlCalidadRole(user)
+        : Promise.resolve(false),
+    ]);
+    const roleCode = this.normalizeUpper(roleCodeRaw);
+    const isAuxJefeTallerRole = [
+      'AUX_JEF_TALLER',
+      'AUX_JEFE_TALLER',
+      'AUXILIAR_JEF_TALLER',
+      'AUXILIAR_JEFE_TALLER',
+    ].includes(roleCode);
+    const isJefeTallerHistoryRole =
+      roleCode === 'JEF_TALLER' || isAuxJefeTallerRole;
     // Control de Calidad usa la visibilidad de flujos de ANALISTA_ORD en
     // Gestión de Orden, Consulta Estado y Reportes de Taller, en solo lectura.
     const panelRoleCode = isControlCalidadOrdenesPanelUser
       ? 'ANALISTA_ORD'
       : roleCode;
-    const panelResponseRoleCode = this.isAdmin(user)
-      ? 'ADMIN'
-      : isControlCalidadOrdenesPanelUser
-        ? 'CONTROL_CALIDAD'
-        : roleCode;
+    const panelResponseRoleCode = isControlCalidadOrdenesPanelUser
+      ? 'CONTROL_CALIDAD'
+      : roleCode || (this.isAdmin(user) ? 'ADMIN' : '');
     const dataPanelMode = query.reportMode ? 'estado' : panelMode;
     // El alcance por sucursal y los permisos de flujo son independientes una
     // vez resuelto el rol; consultarlos juntos reduce viajes secuenciales a SQL.
@@ -206,7 +250,7 @@ export class OrdenesTrabajoService {
     const showFlowHistoryDetails =
       query.reportMode !== true &&
       panelMode === 'estado' &&
-      roleCode === 'JEF_TALLER';
+      isJefeTallerHistoryRole;
     const sqlPanelMode = dataPanelMode;
     const exportAll = query.exportAll === true;
     // El filtro Otros de reportes requiere todas las coincidencias antes de paginar.
@@ -245,10 +289,30 @@ export class OrdenesTrabajoService {
     const includeNullFlow =
       isOrdenesVencerMode ||
       this.shouldIncludeNullFlow(user, panelRoleCode, dataPanelMode);
+    const sqlRoleCode =
+      panelMode === 'estado' && isAuxJefeTallerRole
+        ? 'JEF_TALLER'
+        : panelRoleCode;
     const needsIncidenciaOptions =
       query.reportMode !== true && panelMode !== 'estado';
-    const [flowStatusOptions, laboratorios, incidenciaOptions, otrosOptions] =
-      await Promise.all([
+    const panelCatalogKey = JSON.stringify([
+      panelMode,
+      panelRoleCode,
+      scope.isAdmin,
+      scope.allowedSucsCsv,
+      scope.requestedSuc,
+      flowCatalogStatusCodes,
+      includeNullFlow,
+      needsIncidenciaOptions,
+      canUseOtros,
+    ]);
+    const {
+      flowStatusOptions,
+      laboratorios,
+      incidenciaOptions,
+      otrosOptions,
+    } = await this.resolveCachedPanelCatalogs(panelCatalogKey, () =>
+      Promise.all([
         this.resolveFlowStatusOptions(flowCatalogStatusCodes, includeNullFlow),
         this.resolveLaboratorios(scope),
         needsIncidenciaOptions
@@ -262,7 +326,16 @@ export class OrdenesTrabajoService {
           WHERE TRY_CONVERT(INT, CMOV) = 455
         `)
           : Promise.resolve([]),
-      ]);
+      ]).then(
+        ([flowStatusOptions, laboratorios, incidenciaOptions, otrosOptions]) =>
+          ({
+            flowStatusOptions,
+            laboratorios,
+            incidenciaOptions,
+            otrosOptions,
+          }),
+      ),
+    );
     if (this.shouldDeferPanel(query, panelMode, scope.isAdmin)) {
       return {
         ok: true,
@@ -353,7 +426,7 @@ export class OrdenesTrabajoService {
       scope.allowedSucsCsv,
       scope.homeSuc,
       sqlPanelMode,
-      isOrdenesVencerMode ? null : panelRoleCode,
+      isOrdenesVencerMode ? null : sqlRoleCode,
       exportAll ? 1 : 0,
     ];
     const panelSql = `
@@ -380,7 +453,7 @@ export class OrdenesTrabajoService {
         @HOME_SUC=@19,
         @PANEL_MODE=@20,
         @ROLE_CODE=@21,
-        @EXPORT=@22
+        @EXPORT=@22 WITH RECOMPILE
     `;
     const rows = isOrdenesVencerMode
       ? await this.listOrdenesVencerRows(query, scope, page, pageSize)
@@ -491,12 +564,12 @@ export class OrdenesTrabajoService {
       panelRoleCode,
       selectedHistoricalFlow,
     );
-    const asignLabels = await this.resolveOpvLabels(
-      itemsAfterVisibility.map((item) => item.ASIGN),
-    );
-    const opvLabels = await this.resolveUsuarioLabels(
-      itemsAfterVisibility.map((item) => item.OPV_ID ?? item.OPV),
-    );
+    const [asignLabels, opvLabels] = await Promise.all([
+      this.resolveOpvLabels(itemsAfterVisibility.map((item) => item.ASIGN)),
+      this.resolveUsuarioLabels(
+        itemsAfterVisibility.map((item) => item.OPV_ID ?? item.OPV),
+      ),
+    ]);
     const labeledItems = itemsAfterVisibility.map((item) => {
       const asignId = this.normalizeText(item.ASIGN);
       const asignLabel = asignId == null ? null : asignLabels.get(asignId);
@@ -546,10 +619,14 @@ export class OrdenesTrabajoService {
         ESTSEGU_DESC: selectedFlowDescription,
       }));
     } else {
+      const historyFlowLimit =
+        showFlowHistoryDetails && selectedFlow != null
+          ? selectedFlow
+          : undefined;
       const enrichedItems =
         selectedFlow != null
           ? showFlowHistoryDetails
-            ? await this.attachFlowHistorySafely(labeledItems)
+            ? await this.attachFlowHistorySafely(labeledItems, historyFlowLimit)
             : await this.attachFlowHistory(labeledItems)
           : labeledItems;
       items =
@@ -565,24 +642,31 @@ export class OrdenesTrabajoService {
       const bIord = this.normalizeUpper(b.IORD ?? '');
       return bIord.localeCompare(aIord);
     });
-    if (showFlowHistoryDetails) {
-      try {
-        items = await this.attachFlowMovementActors(items);
-      } catch (error) {
-        this.logger.error(
-          'No se pudo cargar quién realizó cada movimiento de Consulta Estado.',
-          error instanceof Error ? error.stack : String(error),
-        );
-        items = items.map((item) => ({
-          ...item,
-          QUIEN_REALIZO: 'Sin registro',
-        }));
-      }
-      // La columna de duración se oculta con el filtro "Todos". No consultar
-      // el historial completo por ORD hasta que el usuario seleccione un flujo.
-      if (this.normalizeText(query.estsegu) != null) {
-        items = await this.attachFlowDurations(items);
-      }
+    if (showFlowHistoryDetails && selectedFlow != null) {
+      const actorsPromise = this.attachFlowMovementActors(items, selectedFlow)
+        .catch((error: unknown) => {
+          this.logger.error(
+            'No se pudo cargar quién realizó cada movimiento de Consulta Estado.',
+            error instanceof Error ? error.stack : String(error),
+          );
+          return items.map((item) => ({
+            ...item,
+            QUIEN_REALIZO: 'Sin registro',
+          }));
+        });
+      const durationsPromise = this.attachFlowDurations(items, selectedFlow);
+      const [itemsWithActors, itemsWithDurations] = await Promise.all([
+        actorsPromise,
+        durationsPromise,
+      ]);
+      items = items.map((item, index) => ({
+        ...item,
+        QUIEN_REALIZO: itemsWithActors[index]?.QUIEN_REALIZO ?? 'Sin registro',
+        TIEMPO_FLUJO:
+          itemsWithDurations[index]?.TIEMPO_FLUJO ?? 'Sin historial',
+        TIEMPO_POR_FLUJO:
+          itemsWithDurations[index]?.TIEMPO_POR_FLUJO ?? 'Sin historial',
+      }));
     }
     if (query.reportMode === true) {
       items = await this.attachChargedArticlePrices(items);
@@ -620,6 +704,7 @@ export class OrdenesTrabajoService {
   ) {
     const roleCode = this.normalizeUpper(await this.resolveRoleCode(user));
     const allowedRoles = new Set([
+      'TALLER',
       'JEF_TALLER',
       'INVJEF',
       'ANALISTA_INV',
@@ -630,7 +715,9 @@ export class OrdenesTrabajoService {
       'AUXILIAR_JEF_TALLER',
       'AUXILIAR_JEFE_TALLER',
       'ENC_MAQUILA',
+      'ENCARGADO_MAQUILA',
       'ENC_BISEL',
+      'ENCARGADO_BISELADO',
     ]);
     const isControlCalidad = await this.isControlCalidadRole(user);
     if (
@@ -647,25 +734,32 @@ export class OrdenesTrabajoService {
     const scope = await this.resolveSucScope(user, suc, roleCode);
     const page = Math.max(1, this.normalizePage(query.page));
     const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 25));
-    const [
-      hasAuditTable,
-      hasMotivoTable,
-      hasTipomColumn,
-      hasComadColumn,
-      hasCtdCambioColumn,
-      hasMotrColumn,
-      hasUsrAutColumn,
-      hasFcnAutColumn,
-    ] = await Promise.all([
-      this.hasTable('AUDIT_LOG'),
-      this.hasTable('DAT_ORD_MOTM'),
-      this.hasColumn('PV_CTR_ORDS', 'TIPOM'),
-      this.hasColumn('PV_CTR_ORDS', 'COMAD'),
-      this.hasColumn('PV_CTR_ORDS', 'CTD_C_M'),
-      this.hasColumn('PV_CTR_ORDS', 'MOTR'),
-      this.hasColumn('PV_CTR_ORDS', 'USR_AUT_CYM'),
-      this.hasColumn('PV_CTR_ORDS', 'FCN_AUT_CYM'),
-    ]);
+    const schemaRows = (await this.dataSource.query(
+      `
+      SELECT TABLE_NAME, COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = 'dbo'
+        AND TABLE_NAME IN ('AUDIT_LOG', 'DAT_ORD_MOTM', 'PV_CTR_ORDS')
+      `,
+    )) as Array<{ TABLE_NAME?: unknown; COLUMN_NAME?: unknown }>;
+    const schemaColumns = new Set(
+      schemaRows.map(
+        (row) =>
+          `${this.normalizeUpper(row.TABLE_NAME)}.${this.normalizeUpper(row.COLUMN_NAME)}`,
+      ),
+    );
+    const hasSchemaColumn = (table: string, column: string) =>
+      schemaColumns.has(`${table}.${column}`);
+    const hasSchemaTable = (table: string) =>
+      [...schemaColumns].some((key) => key.startsWith(`${table}.`));
+    const hasAuditTable = hasSchemaTable('AUDIT_LOG');
+    const hasMotivoTable = hasSchemaTable('DAT_ORD_MOTM');
+    const hasTipomColumn = hasSchemaColumn('PV_CTR_ORDS', 'TIPOM');
+    const hasComadColumn = hasSchemaColumn('PV_CTR_ORDS', 'COMAD');
+    const hasCtdCambioColumn = hasSchemaColumn('PV_CTR_ORDS', 'CTD_C_M');
+    const hasMotrColumn = hasSchemaColumn('PV_CTR_ORDS', 'MOTR');
+    const hasUsrAutColumn = hasSchemaColumn('PV_CTR_ORDS', 'USR_AUT_CYM');
+    const hasFcnAutColumn = hasSchemaColumn('PV_CTR_ORDS', 'FCN_AUT_CYM');
     const ctdCambioSql = hasCtdCambioColumn
       ? 'TRY_CONVERT(FLOAT, o.CTD_C_M)'
       : 'CAST(NULL AS FLOAT)';
@@ -766,14 +860,28 @@ export class OrdenesTrabajoService {
     const authorizationWhere = [...where];
     const authorizationParams = [...params];
     if (query.fecIni) {
+      const dateParam = `TRY_CONVERT(DATE, @${params.length})`;
       where.push(
-        `CONVERT(DATE, ${authorizationDateSql}) >= @${params.length}`,
+        `(
+          ${fcnAutSql} >= ${dateParam}
+          OR (
+            ${fcnAutSql} IS NULL
+            AND o.FCNMOD >= ${dateParam}
+          )
+        )`,
       );
       params.push(query.fecIni);
     }
     if (query.fecFin) {
+      const dateParam = `DATEADD(DAY, 1, TRY_CONVERT(DATE, @${params.length}))`;
       where.push(
-        `CONVERT(DATE, ${authorizationDateSql}) <= @${params.length}`,
+        `(
+          ${fcnAutSql} < ${dateParam}
+          OR (
+            ${fcnAutSql} IS NULL
+            AND o.FCNMOD < ${dateParam}
+          )
+        )`,
       );
       params.push(query.fecFin);
     }
@@ -877,6 +985,7 @@ export class OrdenesTrabajoService {
         OFFSET @${params.length} ROWS FETCH NEXT @${params.length + 1} ROWS ONLY
       )
       SELECT
+        o.TOTAL_COUNT AS TOTAL_COUNT,
         LTRIM(RTRIM(ISNULL(o.SUC, ''))) AS SUC,
         LTRIM(RTRIM(ISNULL(o.IDFOL, ''))) AS IDFOL,
         LTRIM(RTRIM(ISNULL(o.IORD, ''))) AS IORD,
@@ -1221,7 +1330,7 @@ export class OrdenesTrabajoService {
           LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
         ) AS OPV,
         o.FCNS,
-        o.FCNM,
+        fechaEntrega.FechaHoraEntrega AS FCNM,
         o.CLIEN,
         o.NCLIENTE,
         o.MAT,
@@ -1233,16 +1342,16 @@ export class OrdenesTrabajoService {
         o.ESTSEGU,
         CASE
           WHEN TRY_CONVERT(FLOAT, o.ESTSEGU) IN (4, 11) THEN NULL
-          WHEN TRY_CONVERT(DATETIME2, o.FCNM) IS NULL THEN NULL
-          WHEN TRY_CONVERT(DATETIME2, o.FCNM) < GETDATE() THEN 'retrasadas'
-          WHEN TRY_CONVERT(DATETIME2, o.FCNM) <= DATEADD(MINUTE, 30, GETDATE()) THEN 'por_vencer'
+          WHEN fechaEntrega.FechaHoraEntrega IS NULL THEN NULL
+          WHEN fechaEntrega.FechaHoraEntrega < GETDATE() THEN 'retrasadas'
+          WHEN fechaEntrega.FechaHoraEntrega <= DATEADD(MINUTE, 30, GETDATE()) THEN 'por_vencer'
           ELSE NULL
         END AS VENCIMIENTO_COLOR,
         CASE
           WHEN TRY_CONVERT(FLOAT, o.ESTSEGU) IN (4, 11) THEN NULL
-          WHEN TRY_CONVERT(DATETIME2, o.FCNM) IS NULL THEN NULL
-          WHEN TRY_CONVERT(DATETIME2, o.FCNM) < GETDATE()
-            THEN DATEDIFF(MINUTE, TRY_CONVERT(DATETIME2, o.FCNM), GETDATE())
+          WHEN fechaEntrega.FechaHoraEntrega IS NULL THEN NULL
+          WHEN fechaEntrega.FechaHoraEntrega < GETDATE()
+            THEN DATEDIFF(MINUTE, fechaEntrega.FechaHoraEntrega, GETDATE())
           ELSE NULL
         END AS VENCIDO_MINUTOS,
         o.ASIGN,
@@ -1262,6 +1371,23 @@ export class OrdenesTrabajoService {
       LEFT JOIN dbo.PV_OPV opv
         ON LTRIM(RTRIM(ISNULL(CAST(opv.IDOPV AS NVARCHAR(100)), ''))) =
            LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
+      CROSS APPLY (
+        SELECT COALESCE(
+          TRY_CONVERT(TIME(0), o.HR_ENT),
+          TRY_CONVERT(TIME(0), o.FCNM)
+        ) AS HoraEntrega
+      ) horaEntrega
+      CROSS APPLY (
+        SELECT CASE
+          WHEN TRY_CONVERT(DATE, o.FCNM) IS NULL THEN TRY_CONVERT(DATETIME2, o.FCNM)
+          WHEN horaEntrega.HoraEntrega IS NULL THEN TRY_CONVERT(DATETIME2, o.FCNM)
+          ELSE DATEADD(
+            SECOND,
+            DATEDIFF(SECOND, CAST('00:00:00' AS TIME), horaEntrega.HoraEntrega),
+            CAST(TRY_CONVERT(DATE, o.FCNM) AS DATETIME2)
+          )
+        END AS FechaHoraEntrega
+      ) fechaEntrega
       WHERE
         (@0 IS NULL OR LTRIM(RTRIM(ISNULL(o.IORD, ''))) LIKE '%' + @0 + '%')
         AND (@1 IS NULL OR LTRIM(RTRIM(ISNULL(o.IDFOL, ''))) LIKE '%' + @1 + '%')
@@ -1328,13 +1454,13 @@ export class OrdenesTrabajoService {
           OR (
             @19 = 'por_vencer'
             AND ISNULL(TRY_CONVERT(FLOAT, o.ESTSEGU), -1) NOT IN (4, 11)
-            AND TRY_CONVERT(DATETIME2, o.FCNM) > GETDATE()
-            AND TRY_CONVERT(DATETIME2, o.FCNM) <= DATEADD(MINUTE, 30, GETDATE())
+            AND fechaEntrega.FechaHoraEntrega > GETDATE()
+            AND fechaEntrega.FechaHoraEntrega <= DATEADD(MINUTE, 30, GETDATE())
           )
           OR (
             @19 = 'retrasadas'
             AND ISNULL(TRY_CONVERT(FLOAT, o.ESTSEGU), -1) NOT IN (4, 11)
-            AND TRY_CONVERT(DATETIME2, o.FCNM) < GETDATE()
+            AND fechaEntrega.FechaHoraEntrega < GETDATE()
           )
         )
         AND TRY_CONVERT(INT, o.ESTATUS) = 2
@@ -1473,6 +1599,27 @@ export class OrdenesTrabajoService {
         ) nextFlow` : ''}
         WHERE h.ESTSEGU = 9.3
       )`
+      : query.reportMode !== true
+        ? `FlowHistoryIntervals AS (
+        SELECT
+          h.IORD,
+          h.ID,
+          TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
+          h.FCNR,
+          nextFlow.FCNR AS NEXT_FCNR
+        FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
+        OUTER APPLY (
+          SELECT TOP (1) h2.FCNR
+          FROM dbo.PV_CTR_ORDS_FLUJO_HIST h2
+          WHERE h2.IORD = h.IORD
+            AND (
+              h2.FCNR > h.FCNR
+              OR (h2.FCNR = h.FCNR AND h2.ID > h.ID)
+            )
+          ORDER BY h2.FCNR, h2.ID
+        ) nextFlow
+        WHERE ${flowCode == null ? 'h.ESTSEGU IS NULL' : `h.ESTSEGU = ${flowCode}`}
+      )`
       : `FlowHistoryIntervals AS (
         SELECT
           h.IORD,
@@ -1555,7 +1702,11 @@ export class OrdenesTrabajoService {
           ) AS FLOW_ROW
         FROM dbo.PV_CTR_ORDS o
         INNER JOIN FlowHistoryIntervals h
-          ON UPPER(LTRIM(RTRIM(h.IORD))) = UPPER(LTRIM(RTRIM(o.IORD)))
+          ON ${
+            query.reportMode !== true
+              ? 'h.IORD = o.IORD'
+              : 'UPPER(LTRIM(RTRIM(h.IORD))) = UPPER(LTRIM(RTRIM(o.IORD)))'
+          }
          AND ${flowHistoryPredicate}
         LEFT JOIN dbo.DAT_EST_ORD e
           ON ${flowCatalogPredicate}
@@ -2704,10 +2855,10 @@ export class OrdenesTrabajoService {
       dto.motivo,
       this.toInt(dto.motr) ?? this.toInt(original.row.MOTR) ?? undefined,
     );
-    const pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+    const nuevoPrecio = await this.resolveCambioMermaNewPrice(
       this.normalizeText(original.row.SUC) ?? '',
       this.normalizeText(original.row.ART) ?? '',
-      null,
+      this.toFloat(original.row.CLIEN),
     );
     const nvaIord = await this.resolveCambioMermaReservedIord(
       this.normalizeText(original.row.SUC) ?? '',
@@ -2730,7 +2881,7 @@ export class OrdenesTrabajoService {
         docDif: this.normalizeText(original.row.DOCDIF),
         ctdCM,
         crearNuevaOrd: true,
-        pvtaNuevo,
+        pvtaNuevo: nuevoPrecio.unitPrice,
         diferenciaEconomica: null,
         nvaIord,
       },
@@ -2817,12 +2968,12 @@ export class OrdenesTrabajoService {
       );
     }
     const suc = this.normalizeText(original.row.SUC) ?? '';
-    let pvtaNuevo: number | null = null;
-    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+    const nuevoPrecio = await this.resolveCambioMermaNewPrice(
       suc,
       artNuevo,
-      pvtaNuevo,
+      this.toFloat(original.row.CLIEN),
     );
+    let pvtaNuevo: number | null = nuevoPrecio.unitPrice;
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -2983,13 +3134,13 @@ export class OrdenesTrabajoService {
     }
     const crearNuevaOrd = true;
     const suc = this.normalizeText(original.row.SUC) ?? '';
-    let pvtaNuevo =
-      this.toFloat(stagingBefore?.PVTA_NUEVO) ?? this.toFloat(dto.pvtaNuevo);
-    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
-      suc,
-      artNuevo,
-      pvtaNuevo,
-    );
+    let pvtaNuevo = (
+      await this.resolveCambioMermaNewPrice(
+        suc,
+        artNuevo,
+        this.toFloat(original.row.CLIEN),
+      )
+    ).unitPrice;
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -4652,9 +4803,8 @@ export class OrdenesTrabajoService {
   }
 
   private async assertActionPermission(action: string, user: JwtPayload) {
-    if (this.isAdmin(user)) return;
-
     const roleCode = await this.resolveRoleCode(user);
+    if (this.isAdmin(user) && (!roleCode || roleCode === 'ADMIN')) return;
     if (!roleCode) return;
 
     const allowedByAction: Record<string, string[]> = {
@@ -4669,7 +4819,12 @@ export class OrdenesTrabajoService {
       ENVIAR: ['JEF_TALLER', 'ANALISTA_ORD'],
       ASIGNAR: ['JEF_TALLER', 'ENC_MAQUILA', 'ENC_BISEL'],
       TRABAJO_TERMINADO: ['JEF_TALLER', 'ENC_MAQUILA', 'ENC_BISEL'],
-      REGRESAR_INCIDENCIA: ['JEF_TALLER', 'ENC_MAQUILA', 'ENC_BISEL'],
+      REGRESAR_INCIDENCIA: [
+        'JEF_TALLER',
+        'ANALISTA_ORD',
+        'ENC_MAQUILA',
+        'ENC_BISEL',
+      ],
       REGRESAR_TIENDA: ['JEF_TALLER', 'ANALISTA_ORD'],
       ASIGNAR_LABORATORIO: ['JEF_TALLER', 'ANALISTA_ORD'],
       RECIBIR: ['JEF_TALLER', 'ENC_MAQUILA', 'ENC_BISEL'],
@@ -4754,10 +4909,10 @@ export class OrdenesTrabajoService {
       return ['TALLER', 'BISELADO'];
     }
     const roleCode = this.normalizeUpper(roleCodeRaw);
-    if (roleCode === 'ENC_MAQUILA') {
+    if (roleCode === 'ENC_MAQUILA' || roleCode === 'ENCARGADO_MAQUILA') {
       return ['TALLER'];
     }
-    if (roleCode === 'ENC_BISEL') {
+    if (roleCode === 'ENC_BISEL' || roleCode === 'ENCARGADO_BISELADO') {
       return ['BISELADO'];
     }
     return ['TALLER', 'BISELADO'];
@@ -4787,6 +4942,7 @@ export class OrdenesTrabajoService {
     if (this.isAdmin(user)) return true;
     const roleCode = this.normalizeUpper(roleCodeRaw);
     return [
+      'TALLER',
       'JEF_TALLER',
       'AUX_JEF_TALLER',
       'AUX_JEFE_TALLER',
@@ -4797,7 +4953,9 @@ export class OrdenesTrabajoService {
       'ANALISTA_INV',
       'INVJEF',
       'ENC_MAQUILA',
+      'ENCARGADO_MAQUILA',
       'ENC_BISEL',
+      'ENCARGADO_BISELADO',
     ].includes(roleCode);
   }
 
@@ -5039,6 +5197,33 @@ export class OrdenesTrabajoService {
     return !hasManualCriteria;
   }
 
+  private async resolveCachedPanelCatalogs(
+    key: string,
+    load: () => Promise<OrdenesTrabajoPanelCatalogs>,
+  ) {
+    const now = Date.now();
+    const cached = this.panelCatalogsCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.value;
+    if (cached) this.panelCatalogsCache.delete(key);
+
+    const inFlight = this.panelCatalogsInFlight.get(key);
+    if (inFlight) return inFlight;
+
+    const promise = load()
+      .then((value) => {
+        this.panelCatalogsCache.set(key, {
+          expiresAt: Date.now() + 60_000,
+          value,
+        });
+        return value;
+      })
+      .finally(() => {
+        this.panelCatalogsInFlight.delete(key);
+      });
+    this.panelCatalogsInFlight.set(key, promise);
+    return promise;
+  }
+
   private async resolveAllowedStatusCodes(
     user: JwtPayload,
     roleCodeRaw: string,
@@ -5087,6 +5272,10 @@ export class OrdenesTrabajoService {
 
     if (panelMode === 'estado') {
       return roleCode === 'JEF_TALLER' ||
+        roleCode === 'AUX_JEF_TALLER' ||
+        roleCode === 'AUX_JEFE_TALLER' ||
+        roleCode === 'AUXILIAR_JEF_TALLER' ||
+        roleCode === 'AUXILIAR_JEFE_TALLER' ||
         roleCode === 'ANALISTA_ORD' ||
         roleCode === 'ANALISTA'
         ? this.resolveAllFlowStatusCodes()
@@ -5220,6 +5409,7 @@ export class OrdenesTrabajoService {
 
   private async attachFlowHistory(
     items: Record<string, unknown>[],
+    flowLimit?: string,
   ): Promise<Record<string, unknown>[]> {
     if (!items.length) return items;
 
@@ -5239,6 +5429,16 @@ export class OrdenesTrabajoService {
       const iords = this.normalizeDistinctIords(items.map((item) => item.IORD));
       if (iords.length) {
         const placeholders = iords.map((_, index) => `@${index}`).join(',');
+        const hasFlowLimit = flowLimit !== undefined;
+        const flowLimitIsNull = this.normalizeUpper(flowLimit) === 'NULL';
+        const flowLimitClause = !hasFlowLimit
+          ? ''
+          : flowLimitIsNull
+            ? 'AND h.ESTSEGU IS NULL'
+            : `AND h.ESTSEGU <= @${iords.length}`;
+        const queryParams = hasFlowLimit
+          ? [...iords, this.toFloat(flowLimit)]
+          : iords;
         const rows = await this.dataSource.query(
           `
           SELECT
@@ -5250,14 +5450,15 @@ export class OrdenesTrabajoService {
           FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
           LEFT JOIN dbo.DAT_EST_ORD e
             ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, h.ESTSEGU)
-          WHERE UPPER(LTRIM(RTRIM(ISNULL(h.IORD, '')))) IN (${placeholders})
+          WHERE h.IORD IN (${placeholders})
+            ${flowLimitClause}
           GROUP BY
             UPPER(LTRIM(RTRIM(ISNULL(h.IORD, '')))),
             TRY_CONVERT(FLOAT, h.ESTSEGU),
             LTRIM(RTRIM(ISNULL(e.TIPO, '')))
           ORDER BY IORD, PRIMERA_FCNR, ORDEN
           `,
-          iords,
+          queryParams,
         );
 
         const partsByIord = new Map<string, string[]>();
@@ -5307,9 +5508,10 @@ export class OrdenesTrabajoService {
 
   private async attachFlowHistorySafely(
     items: Record<string, unknown>[],
+    flowLimit?: string,
   ): Promise<Record<string, unknown>[]> {
     try {
-      return await this.attachFlowHistory(items);
+      return await this.attachFlowHistory(items, flowLimit);
     } catch (error) {
       this.logger.error(
         'No se pudo cargar el historial de flujos de Consulta Estado.',
@@ -5381,6 +5583,7 @@ export class OrdenesTrabajoService {
 
   private async attachFlowMovementActors(
     items: Record<string, unknown>[],
+    selectedFlow?: string,
   ): Promise<Record<string, unknown>[]> {
     if (
       !items.length ||
@@ -5393,9 +5596,27 @@ export class OrdenesTrabajoService {
     const iords = this.normalizeDistinctIords(items.map((item) => item.IORD));
     if (!iords.length) return items;
     const placeholders = iords.map((_, index) => `@${index}`).join(',');
-    const auditPredicates = iords.map(
+    const bulkAuditPredicates = iords.map(
       (_, index) => `a.METADATA_JSON LIKE '%' + @${index} + '%'`,
     );
+    const filterBySelectedFlow = selectedFlow !== undefined;
+    const selectedFlowIsNull = this.normalizeUpper(selectedFlow) === 'NULL';
+    const flowFilterClause = !filterBySelectedFlow
+      ? ''
+      : selectedFlowIsNull
+        ? 'AND h.ESTSEGU IS NULL'
+        : `AND h.ESTSEGU <= @${iords.length}`;
+    const auditFlowFilterClause = !filterBySelectedFlow
+      ? ''
+      : selectedFlowIsNull
+        ? 'AND j.ESTSEGU IS NULL'
+        : `AND j.ESTSEGU <= @${iords.length}`;
+    const selectedFlowValue = selectedFlowIsNull
+      ? null
+      : this.toFloat(selectedFlow);
+    const queryParams = filterBySelectedFlow
+      ? [...iords, selectedFlowValue]
+      : iords;
     const rows = await this.dataSource.query(
       `
       WITH FlowEvents AS (
@@ -5404,12 +5625,33 @@ export class OrdenesTrabajoService {
           UPPER(LTRIM(RTRIM(ISNULL(h.IORD, '')))) AS IORD,
           TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
           h.FCNR,
-          LEAD(h.FCNR) OVER (
-            PARTITION BY UPPER(LTRIM(RTRIM(ISNULL(h.IORD, ''))))
-            ORDER BY h.FCNR, h.ID
-          ) AS NEXT_FCNR
+          nextFlow.FCNR AS NEXT_FCNR
         FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
-        WHERE UPPER(LTRIM(RTRIM(ISNULL(h.IORD, '')))) IN (${placeholders})
+        OUTER APPLY (
+          SELECT TOP (1) h2.FCNR
+          FROM dbo.PV_CTR_ORDS_FLUJO_HIST h2
+          WHERE h2.IORD = h.IORD
+            AND (
+              h2.FCNR > h.FCNR
+              OR (h2.FCNR = h.FCNR AND h2.ID > h.ID)
+            )
+          ORDER BY h2.FCNR, h2.ID
+        ) nextFlow
+        WHERE h.IORD IN (${placeholders})
+          ${flowFilterClause}
+      ), AuditCandidates AS (
+        SELECT a.IDLOG, a.FCNR, a.IDUSUARIO, a.METADATA_JSON
+        FROM dbo.AUDIT_LOG a
+        WHERE a.MODULO = 'ordenes-trabajo'
+          AND a.ENTIDAD = 'PV_CTR_ORDS'
+          AND a.ENTIDAD_ID IN (${placeholders})
+        UNION ALL
+        SELECT a.IDLOG, a.FCNR, a.IDUSUARIO, a.METADATA_JSON
+        FROM dbo.AUDIT_LOG a
+        WHERE a.MODULO = 'ordenes-trabajo'
+          AND a.ENTIDAD = 'PV_CTR_ORDS'
+          AND (a.ENTIDAD_ID IS NULL OR a.ENTIDAD_ID = '')
+          AND (${bulkAuditPredicates.join(' OR ')})
       ), AuditEvents AS (
         SELECT
           a.IDLOG,
@@ -5424,7 +5666,7 @@ export class OrdenesTrabajoService {
             NULLIF(LTRIM(RTRIM(ISNULL(u.USERNAME, ''))), ''),
             CONVERT(NVARCHAR(100), a.IDUSUARIO)
           ) AS QUIEN_REALIZO
-        FROM dbo.AUDIT_LOG a
+        FROM AuditCandidates a
         LEFT JOIN dbo.USUARIO u
           ON TRY_CONVERT(INT, u.IDUSUARIO) = TRY_CONVERT(INT, a.IDUSUARIO)
         CROSS APPLY OPENJSON(JSON_QUERY(a.METADATA_JSON, '$.result'))
@@ -5432,13 +5674,9 @@ export class OrdenesTrabajoService {
             IORD NVARCHAR(255) '$.IORD',
             ESTSEGU FLOAT '$.ESTSEGU'
           ) j
-        WHERE UPPER(LTRIM(RTRIM(ISNULL(a.MODULO, '')))) = 'ORDENES-TRABAJO'
-          AND UPPER(LTRIM(RTRIM(ISNULL(a.ENTIDAD, '')))) = 'PV_CTR_ORDS'
-          AND (
-            LTRIM(RTRIM(ISNULL(a.ENTIDAD_ID, ''))) IN (${placeholders})
-            OR (${auditPredicates.join(' OR ')})
-          )
+        WHERE j.IORD IN (${placeholders})
           AND NULLIF(LTRIM(RTRIM(ISNULL(j.IORD, ''))), '') IS NOT NULL
+          ${auditFlowFilterClause}
       )
       SELECT
         h.IORD,
@@ -5460,7 +5698,7 @@ export class OrdenesTrabajoService {
       ) actor
       ORDER BY h.IORD, h.FCNR, h.ID
       `,
-      iords,
+      queryParams,
     );
 
     const actorsByIordFlow = new Map<string, Map<string, string[]>>();
@@ -5503,6 +5741,7 @@ export class OrdenesTrabajoService {
 
   private async attachFlowDurations(
     items: Record<string, unknown>[],
+    selectedFlow?: string,
   ): Promise<Record<string, unknown>[]> {
     const noHistory = () =>
       items.map((item) => ({
@@ -5528,6 +5767,19 @@ export class OrdenesTrabajoService {
     const iords = this.normalizeDistinctIords(items.map((item) => item.IORD));
     if (!iords.length) return noHistory();
     const placeholders = iords.map((_, index) => `@${index}`).join(',');
+    const filterBySelectedFlow = selectedFlow !== undefined;
+    const selectedFlowIsNull = this.normalizeUpper(selectedFlow) === 'NULL';
+    const selectedFlowValue = selectedFlowIsNull
+      ? null
+      : this.toFloat(selectedFlow);
+    const flowFilterClause = !filterBySelectedFlow
+      ? ''
+      : selectedFlowIsNull
+        ? 'AND h.ESTSEGU IS NULL'
+        : `AND h.ESTSEGU <= @${iords.length}`;
+    const queryParams = filterBySelectedFlow
+      ? [...iords, selectedFlowValue]
+      : iords;
     let rows: unknown;
     try {
       rows = await this.dataSource.query(
@@ -5538,14 +5790,22 @@ export class OrdenesTrabajoService {
           TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
           LTRIM(RTRIM(ISNULL(e.TIPO, ''))) AS ESTSEGU_DESC,
           h.FCNR,
-          LEAD(h.FCNR) OVER (
-            PARTITION BY UPPER(LTRIM(RTRIM(ISNULL(h.IORD, ''))))
-            ORDER BY h.FCNR, h.ID
-          ) AS NEXT_FCNR
+          nextFlow.FCNR AS NEXT_FCNR
         FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
+        OUTER APPLY (
+          SELECT TOP (1) h2.FCNR
+          FROM dbo.PV_CTR_ORDS_FLUJO_HIST h2
+          WHERE h2.IORD = h.IORD
+            AND (
+              h2.FCNR > h.FCNR
+              OR (h2.FCNR = h.FCNR AND h2.ID > h.ID)
+            )
+          ORDER BY h2.FCNR, h2.ID
+        ) nextFlow
         LEFT JOIN dbo.DAT_EST_ORD e
           ON TRY_CONVERT(FLOAT, e.ESTA) = TRY_CONVERT(FLOAT, h.ESTSEGU)
-        WHERE UPPER(LTRIM(RTRIM(ISNULL(h.IORD, '')))) IN (${placeholders})
+        WHERE h.IORD IN (${placeholders})
+          ${flowFilterClause}
       )
       SELECT
         flowEvent.IORD,
@@ -5564,10 +5824,10 @@ export class OrdenesTrabajoService {
         ) AS SEGUNDOS_EN_FLUJO
       FROM FlowEvents flowEvent
       LEFT JOIN dbo.PV_CTR_ORDS actual
-        ON UPPER(LTRIM(RTRIM(ISNULL(actual.IORD, '')))) = flowEvent.IORD
+        ON actual.IORD = flowEvent.IORD
       ORDER BY flowEvent.IORD, flowEvent.FCNR
       `,
-        iords,
+        queryParams,
       );
     } catch (error) {
       this.logger.error(
@@ -6126,11 +6386,12 @@ export class OrdenesTrabajoService {
         ctdOriginal,
         originalArtInfo?.pvta ?? 0,
       );
-    const precioNuevo = await this.resolveCambioMermaNewUnitPrice(
+    const nuevoPrecio = await this.resolveCambioMermaNewPrice(
       suc,
       artNuevo,
-      this.toFloat(stagingRow?.PVTA_NUEVO),
+      this.toFloat(originalRow.CLIEN),
     );
+    const precioNuevo = nuevoPrecio.unitPrice;
     const tipoTran = this.resolveCambioMermaTipoTran(
       originalRow.TIPOTRAN ??
         originalRow.TIPO_TRAN ??
@@ -6179,10 +6440,12 @@ export class OrdenesTrabajoService {
     const generaAfectacionContable = Math.abs(diferenciaEconomica) >= 0.009;
     const priceDifferenceMessage =
       sameArticulo && generaAfectacionContable
-        ? baseEconomicaOriginal.source === 'PV_TICKET_LOG' ||
-          baseEconomicaOriginal.source === 'FACT_TICKET_SHP'
-          ? 'Diferencia originada por precio modificado en PV respecto al precio actual de catálogo.'
-          : 'Diferencia originada por variación entre el precio histórico de la ORD y el precio actual de catálogo.'
+        ? nuevoPrecio.discountApplied
+          ? 'La diferencia considera el descuento vigente configurado para este cliente.'
+          : baseEconomicaOriginal.source === 'PV_TICKET_LOG' ||
+              baseEconomicaOriginal.source === 'FACT_TICKET_SHP'
+            ? 'Diferencia originada por precio modificado en PV respecto al precio actual de catálogo.'
+            : 'Diferencia originada por variación entre el precio histórico de la ORD y el precio actual de catálogo.'
         : '';
 
     const selCtrlOrd = this.toInt(originalRow.selCtrlOrd);
@@ -6229,7 +6492,7 @@ export class OrdenesTrabajoService {
       generaAfectacionContable,
       originalPriceSource: baseEconomicaOriginal.source,
       originalPriceWarning: baseEconomicaOriginal.warning,
-      newPriceSource: 'DAT_ART',
+      newPriceSource: nuevoPrecio.source,
       priceDifferenceMessage,
       original: {
         ...originalRow,
@@ -6380,12 +6643,12 @@ export class OrdenesTrabajoService {
       );
     }
 
-    let pvtaNuevo = this.toFloat(staging.PVTA_NUEVO);
-    pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+    const nuevoPrecio = await this.resolveCambioMermaNewPrice(
       suc,
       artNuevo,
-      pvtaNuevo,
+      this.toFloat(original.row.CLIEN),
     );
+    let pvtaNuevo = nuevoPrecio.unitPrice;
     if (pvtaNuevo == null || !Number.isFinite(pvtaNuevo) || pvtaNuevo < 0) {
       throw new BadRequestException('pvtaNuevo inválido para cambio/merma.');
     }
@@ -6513,7 +6776,7 @@ export class OrdenesTrabajoService {
       art: artNuevo,
       ctd: ctdCM,
       unitPrice: pvtaNuevo,
-      source: 'DAT_ART',
+      source: nuevoPrecio.source,
       tipoTran: this.resolveCambioMermaTipoTran(
         original.row.ORIGEN_AUT ?? original.row.AUT_FOLIO ?? original.row.AUT,
       ),
@@ -6591,8 +6854,24 @@ export class OrdenesTrabajoService {
         LTRIM(RTRIM(ISNULL(a.ART, ''))) AS ART,
         LTRIM(RTRIM(ISNULL(a.UPC, ''))) AS UPC,
         LTRIM(RTRIM(ISNULL(a.DES, ''))) AS DES,
-        TRY_CONVERT(FLOAT, a.PVTA) AS PVTA
+        TRY_CONVERT(FLOAT, a.PVTA) AS PVTA,
+        TRY_CONVERT(FLOAT, a.DEPA) AS DEPA,
+        TRY_CONVERT(FLOAT, a.SUBD) AS SUBD,
+        TRY_CONVERT(FLOAT, a.CLAS) AS CLAS,
+        TRY_CONVERT(FLOAT, a.SCLA) AS SCLA,
+        TRY_CONVERT(FLOAT, a.SCLA2) AS SCLA2,
+        LTRIM(RTRIM(ISNULL(j.GUIA, ''))) AS GUIA
       FROM dbo.DAT_ART a
+      OUTER APPLY (
+        SELECT TOP 1 jj.GUIA
+        FROM dbo.DAT_DET_JRQ_SVR jj
+        WHERE UPPER(LTRIM(RTRIM(ISNULL(jj.ART, '')))) = UPPER(LTRIM(RTRIM(ISNULL(a.ART, ''))))
+          AND (
+            UPPER(LTRIM(RTRIM(ISNULL(jj.SUC, '')))) = UPPER(@0)
+            OR LTRIM(RTRIM(ISNULL(jj.SUC, ''))) = ''
+          )
+        ORDER BY CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(jj.SUC, '')))) = UPPER(@0) THEN 0 ELSE 1 END
+      ) j
       WHERE UPPER(LTRIM(RTRIM(ISNULL(a.SUC, '')))) = UPPER(@0)
         AND UPPER(LTRIM(RTRIM(ISNULL(a.ART, '')))) = UPPER(@1)
       ORDER BY TRY_CONVERT(INT, ISNULL(a.BLOQ, 0)) ASC
@@ -6606,6 +6885,12 @@ export class OrdenesTrabajoService {
       upc: this.normalizeText(row.UPC) ?? '',
       des: this.normalizeText(row.DES) ?? '',
       pvta: this.toFloat(row.PVTA) ?? 0,
+      depa: this.toFloat(row.DEPA),
+      subd: this.toFloat(row.SUBD),
+      clas: this.toFloat(row.CLAS),
+      scla: this.toFloat(row.SCLA),
+      scla2: this.toFloat(row.SCLA2),
+      guia: this.normalizeText(row.GUIA) ?? '',
     };
   }
 
@@ -6625,10 +6910,10 @@ export class OrdenesTrabajoService {
     const suc = this.normalizeText(original.row.SUC) ?? '';
     const artOriginal = this.normalizeText(original.row.ART) ?? '';
     const artNuevo = this.normalizeText(artNuevoRaw) ?? artOriginal;
-    const pvtaNuevo = await this.resolveCambioMermaNewUnitPrice(
+    const nuevoPrecio = await this.resolveCambioMermaNewPrice(
       suc,
       artNuevo,
-      null,
+      this.toFloat(original.row.CLIEN),
     );
     const context = await this.buildCambioMermaContextResponse(
       iord,
@@ -6636,7 +6921,7 @@ export class OrdenesTrabajoService {
       original.row,
       {
         ART_NUEVO: artNuevo,
-        PVTA_NUEVO: pvtaNuevo,
+        PVTA_NUEVO: nuevoPrecio.unitPrice,
         CTD_C_M: ctdCM,
       },
     );
@@ -6646,7 +6931,7 @@ export class OrdenesTrabajoService {
       suc,
       artNuevo,
       ctdCM,
-      pvtaNuevo,
+      pvtaNuevo: nuevoPrecio.unitPrice,
       diferenciaEconomica: this.toFloat(context.diferenciaEconomica) ?? 0,
     };
   }
@@ -6845,27 +7130,192 @@ export class OrdenesTrabajoService {
     };
   }
 
-  private async resolveCambioMermaNewUnitPrice(
+  private async resolveCambioMermaNewPrice(
     sucRaw: string,
     artRaw: string,
-    fallback: number | null,
-  ) {
+    cliente: number | null,
+  ): Promise<CambioMermaNewPrice> {
     const suc = this.normalizeText(sucRaw) ?? '';
     const art = this.normalizeText(artRaw) ?? '';
-    const fallbackValue = this.toFloat(fallback);
-    if (
-      fallbackValue != null &&
-      Number.isFinite(fallbackValue) &&
-      fallbackValue >= 0
-    ) {
-      return this.roundMoney(fallbackValue);
-    }
     const artInfo = await this.resolveArticuloDatArt(suc, art);
-    const value = this.toFloat(artInfo?.pvta);
-    if (value != null && Number.isFinite(value) && value >= 0) {
-      return this.roundMoney(value);
+    const precioCatalogo = this.toFloat(artInfo?.pvta);
+    if (
+      !artInfo ||
+      precioCatalogo == null ||
+      !Number.isFinite(precioCatalogo) ||
+      precioCatalogo < 0
+    ) {
+      return { unitPrice: 0, source: 'DAT_ART', discountApplied: false };
     }
-    return 0;
+
+    const hasPromoSchema = await Promise.all([
+      this.hasTable('PROMO_CAB'),
+      this.hasTable('PROMO_REGLA_CRITERIO'),
+      this.hasTable('PROMO_REGLA_BENEFICIO'),
+    ]).then((values) => values.every(Boolean));
+    if (!hasPromoSchema || cliente == null || cliente <= 0) {
+      return {
+        unitPrice: this.roundMoney(precioCatalogo),
+        source: 'DAT_ART',
+        discountApplied: false,
+      };
+    }
+
+    const candidateRows = await this.dataSource.query(
+      `
+      SELECT
+        c.ID_PROM,
+        rb.ID_BENEFICIO,
+        UPPER(LTRIM(RTRIM(ISNULL(rb.T_BENEFICIO, '')))) AS T_BENEFICIO,
+        TRY_CONVERT(FLOAT, rb.PRC_DESC) AS PRC_DESC,
+        TRY_CONVERT(MONEY, rb.IMP_DESC) AS IMP_DESC,
+        TRY_CONVERT(MONEY, rb.PRECIO_GRATIS) AS PRECIO_GRATIS,
+        ISNULL(TRY_CONVERT(INT, rb.PRIORIDAD), 100) AS PRIORIDAD,
+        ISNULL(TRY_CONVERT(INT, c.PRIORIDAD), 100) AS PRIORIDAD_PROMO,
+        ISNULL(TRY_CONVERT(INT, rb.ACUMULABLE), 0) AS ACUMULABLE
+      FROM dbo.PROMO_CAB c
+      INNER JOIN dbo.PROMO_REGLA_BENEFICIO rb
+        ON rb.ID_PROM = c.ID_PROM
+       AND rb.EST = 1
+      WHERE (c.EST IN (1, -1) OR c.EST IS NULL)
+        AND (c.FCN_INI IS NULL OR CONVERT(DATE, c.FCN_INI) <= CONVERT(DATE, GETDATE()))
+        AND (c.FCN_TER IS NULL OR CONVERT(DATE, c.FCN_TER) >= CONVERT(DATE, GETDATE()))
+        AND (
+          LTRIM(RTRIM(ISNULL(c.SUC, ''))) = ''
+          OR LTRIM(RTRIM(ISNULL(c.SUC, ''))) = '*'
+          OR CHARINDEX(
+            ',' + UPPER(@0) + ',',
+            ',' + REPLACE(REPLACE(UPPER(LTRIM(RTRIM(ISNULL(c.SUC, '')))), ' ', ''), ';', ',') + ','
+          ) > 0
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM dbo.PROMO_REGLA_CRITERIO rc
+          WHERE rc.ID_PROM = c.ID_PROM
+            AND rc.EST = 1
+            AND (
+              LTRIM(RTRIM(ISNULL(rc.SUC, ''))) = ''
+              OR LTRIM(RTRIM(ISNULL(rc.SUC, ''))) = '*'
+              OR CHARINDEX(
+                ',' + UPPER(@0) + ',',
+                ',' + REPLACE(REPLACE(UPPER(LTRIM(RTRIM(ISNULL(rc.SUC, '')))), ' ', ''), ';', ',') + ','
+              ) > 0
+            )
+            AND (rc.CLIENTE IS NULL OR rc.CLIENTE = @1)
+            AND (rc.DEPA IS NULL OR rc.DEPA = @2)
+            AND (rc.SUBD IS NULL OR rc.SUBD = @3)
+            AND (rc.CLAS IS NULL OR rc.CLAS = @4)
+            AND (rc.SCLA IS NULL OR rc.SCLA = @5)
+            AND (rc.SCLA2 IS NULL OR rc.SCLA2 = @6)
+            AND (LTRIM(RTRIM(ISNULL(rc.GUIA, ''))) = '' OR LTRIM(RTRIM(ISNULL(rc.GUIA, ''))) = @7)
+            AND (LTRIM(RTRIM(ISNULL(rc.ART, ''))) = '' OR UPPER(LTRIM(RTRIM(ISNULL(rc.ART, '')))) = UPPER(@8))
+            AND (LTRIM(RTRIM(ISNULL(rc.UPC, ''))) = '' OR UPPER(LTRIM(RTRIM(ISNULL(rc.UPC, '')))) = UPPER(@9))
+        )
+      ORDER BY
+        ISNULL(TRY_CONVERT(INT, rb.PRIORIDAD), 100),
+        ISNULL(TRY_CONVERT(INT, c.PRIORIDAD), 100),
+        c.ID_PROM,
+        rb.ID_BENEFICIO
+      `,
+      [
+        suc,
+        cliente,
+        artInfo.depa,
+        artInfo.subd,
+        artInfo.clas,
+        artInfo.scla,
+        artInfo.scla2,
+        artInfo.guia,
+        artInfo.art,
+        artInfo.upc,
+      ],
+    );
+    const candidates = (
+      Array.isArray(candidateRows) ? candidateRows : []
+    ) as Array<Record<string, unknown>>;
+    if (!candidates.length) {
+      return {
+        unitPrice: this.roundMoney(precioCatalogo),
+        source: 'DAT_ART',
+        discountApplied: false,
+      };
+    }
+
+    const ordered = [...candidates].sort((a, b) => {
+      const benefitPriority =
+        (this.toInt(a.PRIORIDAD) ?? 100) - (this.toInt(b.PRIORIDAD) ?? 100);
+      if (benefitPriority !== 0) return benefitPriority;
+      const promoPriority =
+        (this.toInt(a.PRIORIDAD_PROMO) ?? 100) -
+        (this.toInt(b.PRIORIDAD_PROMO) ?? 100);
+      if (promoPriority !== 0) return promoPriority;
+      return (this.toInt(a.ID_BENEFICIO) ?? 0) - (this.toInt(b.ID_BENEFICIO) ?? 0);
+    });
+    const benefitForOne = (candidate: Record<string, unknown>, price: number) => {
+      const kind = this.normalizeUpper(candidate.T_BENEFICIO);
+      if (kind === 'PORCENTAJE') {
+        return this.roundMoney(
+          (price * (this.toFloat(candidate.PRC_DESC) ?? 0)) / 100,
+        );
+      }
+      if (kind === 'IMP_FIJO') {
+        return Math.min(price, this.roundMoney(this.toFloat(candidate.IMP_DESC) ?? 0));
+      }
+      if (kind === 'ART_GRATIS') {
+        return Math.max(price - (this.toFloat(candidate.PRECIO_GRATIS) ?? 0.01), 0);
+      }
+      return 0;
+    };
+
+    let selected = ordered;
+    if (ordered.some((candidate) => (this.toInt(candidate.ACUMULABLE) ?? 0) !== 1)) {
+      let best = ordered[0];
+      let bestBenefit = -1;
+      for (const candidate of ordered) {
+        const benefit = benefitForOne(candidate, precioCatalogo);
+        const priority = this.toInt(candidate.PRIORIDAD) ?? 100;
+        const bestPriority = this.toInt(best.PRIORIDAD) ?? 100;
+        if (
+          benefit > bestBenefit ||
+          (benefit === bestBenefit && priority < bestPriority)
+        ) {
+          best = candidate;
+          bestBenefit = benefit;
+        }
+      }
+      selected = [best];
+    }
+
+    let precioActual = this.roundMoney(precioCatalogo);
+    let descuentoAplicado = false;
+    for (const candidate of selected) {
+      const kind = this.normalizeUpper(candidate.T_BENEFICIO);
+      if (kind === 'PORCENTAJE') {
+        const porcentaje = this.toFloat(candidate.PRC_DESC) ?? 0;
+        if (porcentaje <= 0 || precioActual <= 0) continue;
+        precioActual = this.roundMoney(
+          Math.max(precioActual - (precioActual * porcentaje) / 100, 0),
+        );
+        descuentoAplicado = true;
+      } else if (kind === 'IMP_FIJO') {
+        const importe = this.toFloat(candidate.IMP_DESC) ?? 0;
+        if (importe <= 0 || precioActual <= 0) continue;
+        precioActual = this.roundMoney(Math.max(precioActual - Math.min(importe, precioActual), 0));
+        descuentoAplicado = true;
+      } else if (kind === 'ART_GRATIS') {
+        const precioGratis = this.toFloat(candidate.PRECIO_GRATIS) ?? 0.01;
+        if (precioGratis >= precioActual) continue;
+        precioActual = this.roundMoney(Math.max(precioGratis, 0));
+        descuentoAplicado = true;
+      }
+      if ((this.toInt(candidate.ACUMULABLE) ?? 0) !== 1) break;
+    }
+
+    return {
+      unitPrice: precioActual,
+      source: descuentoAplicado ? 'PROMO_CLIENTE' : 'DAT_ART',
+      discountApplied: descuentoAplicado,
+    };
   }
 
   private async syncCambioMermaStagingDiferencia(
@@ -7103,6 +7553,11 @@ export class OrdenesTrabajoService {
       for (const value of allowed) {
         if (Math.abs(fromPrimary - value) <= 0.0001) return value;
       }
+      throw new BadRequestException(
+        allowed.length === 1
+          ? 'CTD_C_M solo permite 0.5 cuando la ORD origen fue creada con 0.5.'
+          : 'CTD_C_M solo permite 1 o 0.5 cuando la ORD origen fue creada con 1.',
+      );
     }
     const fromSecondary = this.toFloat(secondary);
     if (fromSecondary != null) {
@@ -7118,7 +7573,7 @@ export class OrdenesTrabajoService {
       return [1, 0.5];
     }
     if (Math.abs(ctdOriginal - 0.5) <= 0.0001) {
-      return tipo === 1 ? [0.5, 1] : [0.5];
+      return [0.5];
     }
     throw new BadRequestException(
       'La ORD origen debe tener cantidad 1 o 0.5 para procesar cambio/merma.',
@@ -7146,11 +7601,6 @@ export class OrdenesTrabajoService {
   ) {
     const allowed = this.resolveAllowedCtdCM(ctdOriginal, tipo);
     if (!allowed.some((value) => Math.abs(ctdCM - value) <= 0.0001)) {
-      if (tipo === 1) {
-        throw new BadRequestException(
-          'Para cambio de material, CTD_C_M solo permite 1 o 0.5.',
-        );
-      }
       throw new BadRequestException(
         allowed.length === 1
           ? 'CTD_C_M solo permite 0.5 cuando la ORD origen fue creada con 0.5.'
@@ -7526,29 +7976,95 @@ export class OrdenesTrabajoService {
     scope: SucScope,
     sucOverride?: string | null,
   ) {
-    if (!(await this.hasTable('DAT_LAB'))) {
+    const schema = await this.resolveLaboratoriosSchema();
+    if (!schema.hasDatLab) {
       return [];
     }
-    if (await this.hasTable('DAT_LAB_ACCESO')) {
+    if (schema.hasDatLabAcceso) {
       return this.resolveLaboratoriosFromAcceso(scope, sucOverride);
     }
     return this.resolveLaboratoriosLegacy(sucOverride ?? scope.requestedSuc);
   }
 
+  private async resolveLaboratoriosSchema(): Promise<{
+    hasDatLab: boolean;
+    hasDatLabAcceso: boolean;
+  }> {
+    const now = Date.now();
+    const cached = this.laboratoriosSchemaCache;
+    if (cached && cached.expiresAt > now) {
+      return {
+        hasDatLab: cached.hasDatLab,
+        hasDatLabAcceso: cached.hasDatLabAcceso,
+      };
+    }
+    if (this.laboratoriosSchemaInFlight) {
+      return this.laboratoriosSchemaInFlight;
+    }
+
+    const schemaPromise = this.dataSource
+      .query(
+        `
+        SELECT
+          MAX(CASE WHEN TABLE_NAME = 'DAT_LAB' THEN 1 ELSE 0 END) AS HAS_DAT_LAB,
+          MAX(CASE WHEN TABLE_NAME = 'DAT_LAB_ACCESO' THEN 1 ELSE 0 END) AS HAS_DAT_LAB_ACCESO
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME IN ('DAT_LAB', 'DAT_LAB_ACCESO')
+        `,
+      )
+      .then((rows: unknown[]) => {
+        const row = this.firstRow(rows);
+        const value = {
+          hasDatLab: this.toInt(row?.HAS_DAT_LAB) === 1,
+          hasDatLabAcceso: this.toInt(row?.HAS_DAT_LAB_ACCESO) === 1,
+        };
+        this.laboratoriosSchemaCache = {
+          ...value,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+        };
+        return value;
+      })
+      .finally(() => {
+        this.laboratoriosSchemaInFlight = null;
+      });
+
+    this.laboratoriosSchemaInFlight = schemaPromise;
+    return schemaPromise;
+  }
+
   private async hasTable(tableName: string) {
     if (!tableName.trim()) return false;
-    return (
-      (
-        await this.dataSource.query(
-          `
-        SELECT 1
+    const key = tableName.trim().toUpperCase();
+    const now = Date.now();
+    const cached = this.tableExistsCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.exists;
+
+    const inFlight = this.tableExistsInFlight.get(key);
+    if (inFlight) return inFlight;
+
+    const query = this.dataSource
+      .query(
+        `
+        SELECT TOP (1) 1 AS EXISTS_TABLE
         FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @0
+        WHERE TABLE_SCHEMA = 'dbo' AND UPPER(TABLE_NAME) = @0
         `,
-          [tableName.trim()],
-        )
-      ).length > 0
-    );
+        [key],
+      )
+      .then((rows: unknown[]) => {
+        const exists = Array.isArray(rows) && rows.length > 0;
+        this.tableExistsCache.set(key, {
+          exists,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+        });
+        return exists;
+      })
+      .finally(() => {
+        this.tableExistsInFlight.delete(key);
+      });
+    this.tableExistsInFlight.set(key, query);
+    return query;
   }
 
   private async hasColumn(tableName: string, columnName: string) {
@@ -7935,13 +8451,6 @@ export class OrdenesTrabajoService {
       'SCAN_ENTREGAR',
     ];
 
-    if (this.isAdmin(user)) {
-      if (panelMode === 'estado') return ['VER_DETALLE'];
-      if (panelMode === 'anulados') return ['VER_DETALLE'];
-      if (panelMode === 'entregadas') return ['VER_DETALLE', 'GARANTIA'];
-      return operationalActions;
-    }
-
     const roleCode = this.normalizeUpper(roleCodeRaw);
     const byRole: Record<string, string[]> = {
       JEF_TALLER: operationalActions,
@@ -7953,6 +8462,7 @@ export class OrdenesTrabajoService {
         'VER_DETALLE',
         'AUTORIZAR',
         'ENVIAR',
+        'REGRESAR_INCIDENCIA',
         'REGRESAR_TIENDA',
         'ASIGNAR_LABORATORIO',
         'SCAN_RECIBIR',
@@ -7986,21 +8496,28 @@ export class OrdenesTrabajoService {
       ],
     };
 
-    const allowed = byRole[roleCode] ?? [];
     if (panelMode === 'estado') {
-      return roleCode === 'JEF_TALLER' || roleCode === 'ANALISTA_ORD'
+      return this.isAdmin(user) ||
+          roleCode === 'JEF_TALLER' ||
+          roleCode === 'ANALISTA_ORD'
         ? ['VER_DETALLE']
         : [];
     }
     if (panelMode === 'anulados') {
-      if (roleCode === 'JEF_TALLER') return ['VER_DETALLE'];
+      if (this.isAdmin(user) || roleCode === 'JEF_TALLER') {
+        return ['VER_DETALLE'];
+      }
       return [];
     }
     if (panelMode === 'entregadas') {
-      if (roleCode === 'JEF_TALLER') return ['VER_DETALLE', 'GARANTIA'];
+      if (this.isAdmin(user) || roleCode === 'JEF_TALLER') {
+        return ['VER_DETALLE', 'GARANTIA'];
+      }
       return [];
     }
-    return allowed;
+    const roleActions = byRole[roleCode];
+    if (roleActions) return roleActions;
+    return this.isAdmin(user) ? operationalActions : [];
   }
 
   private canEditOrdDetail(user: JwtPayload, roleCodeRaw: string) {
@@ -8396,6 +8913,16 @@ export class OrdenesTrabajoService {
   private resolveFlowVisibilityRoleCandidates(roleCodeRaw: string) {
     const roleCode = this.normalizeUpper(roleCodeRaw);
     if (!roleCode) return [] as string[];
+    if (
+      [
+        'AUX_JEF_TALLER',
+        'AUX_JEFE_TALLER',
+        'AUXILIAR_JEF_TALLER',
+        'AUXILIAR_JEFE_TALLER',
+      ].includes(roleCode)
+    ) {
+      return [roleCode, 'JEF_TALLER'];
+    }
     return [roleCode];
   }
 
