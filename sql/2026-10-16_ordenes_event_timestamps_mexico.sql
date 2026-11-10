@@ -86,6 +86,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_pv_ctr_ords_create_from_quote_line
   @ESTADO NVARCHAR(50),
   @TIPO NVARCHAR(255),
   @FCNM DATETIME = NULL,
+  @HRENT NVARCHAR(5) = NULL,
   @COMAD NVARCHAR(MAX) = NULL,
   @SUC NVARCHAR(10),
   @OPV NVARCHAR(255),
@@ -104,6 +105,10 @@ BEGIN
   DECLARE @estadoNorm NVARCHAR(50) = UPPER(LTRIM(RTRIM(ISNULL(@ESTADO, ''))));
   DECLARE @tipoNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@TIPO, '')));
   DECLARE @fcnmNorm DATETIME = @FCNM;
+  DECLARE @hrEntNorm DATETIME = CASE
+    WHEN NULLIF(LTRIM(RTRIM(ISNULL(@HRENT, ''))), '') IS NULL THEN NULL
+    ELSE TRY_CONVERT(DATETIME, CONVERT(VARCHAR(10), @FCNM, 23) + ' ' + @HRENT + ':00', 120)
+  END;
   DECLARE @comadNorm NVARCHAR(MAX) = NULLIF(LTRIM(RTRIM(ISNULL(@COMAD, ''))), '');
   DECLARE @sucNorm NVARCHAR(10) = UPPER(LTRIM(RTRIM(ISNULL(@SUC, ''))));
   DECLARE @opvNorm NVARCHAR(255) = LTRIM(RTRIM(ISNULL(@OPV, '')));
@@ -240,6 +245,7 @@ BEGIN
       OPV,
       FCNS,
       FCNM,
+      HR_ENT,
       CLIEN,
       CTD,
       ART,
@@ -258,6 +264,7 @@ BEGIN
       @opvNorm,
       @now,
       @fcnmNorm,
+      @hrEntNorm,
       @clienNorm,
       @ctdNorm,
       @artNorm,

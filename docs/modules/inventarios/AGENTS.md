@@ -73,6 +73,8 @@
 - `GET /transferencias/notificaciones` debe incluir `LIBERADA` para roles de sucursal solo con `SUC_SAL` y `TRANSITO` solo con `SUC_ENT`.
 - `GET /transferencias` debe ocultar `TRANSITO` a la sucursal origen; en ese estatus solo se lista para `SUC_ENT`.
 - `GET /transferencias` debe mostrar `BORRADOR` solo a `SUC_ENT`.
+- `POST /transferencias/:doc/detalle/contabilizar-todo` se limita al Encargado de Sucursal (`IDROL=13008`) con acceso a la sucursal solicitante y documentos `REVISANDO`; actualiza a `CONTABILIZADO` todos los detalles activos en una transacción, sin registrar movimientos.
+- Cambiar `ESTATUS_R` a `INCIDENCIA` en un detalle no cambia de inmediato el encabezado `REVISANDO`; `sp_trans_contabilizar` determina `INCIDENCIA` al procesar la contabilización.
 - Para el jefe de inventarios, `GET /transferencias` limita cualquier consulta operativa a `PENDIENTE` y `BORRADOR` de todas las sucursales, permitiendo recuperar capturas interrumpidas; si envia `suc`, debe filtrar por sucursal de entrada o salida.
 - La evidencia de surtido se guarda en `TRAN_EVID` desde `POST /transferencias/:doc/detalle/:idpd/evidencia`; validar estado `PREPARACION` y sucursal origen/surtidora.
 - Antes de ejecutar `sp_trans_transito`, backend debe bloquear documentos con renglones sin evidencia en `TRAN_EVID`; aceptar solo data URL de imagen mayor a 500 bytes y maximo 500 KB.

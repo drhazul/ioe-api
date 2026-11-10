@@ -655,6 +655,30 @@ export class AccessService {
   // -------- FRONT MENU --------
   async getFrontMenu(userId: number, roleId: number) {
     const roleName = await this.resolveRoleNameById(roleId);
+    const isControlCalidadRole =
+      roleName.includes('CONTROL') && roleName.includes('CALIDAD');
+    const includeControlCalidadEstadoModule = async (
+      modules: Array<{ codigo: string; nombre: string; depto: string | null }>,
+    ) => {
+      if (
+        !isControlCalidadRole ||
+        modules.some((module) => module.codigo.toUpperCase() === 'DAT_JAO_ORD_ESTADO')
+      ) {
+        return modules;
+      }
+      const module = await this.modFrontRepo.findOne({
+        where: { CODIGO: 'DAT_JAO_ORD_ESTADO', ACTIVO: true },
+      });
+      if (!module) return modules;
+      return [
+        ...modules,
+        {
+          codigo: module.CODIGO,
+          nombre: module.NOMBRE,
+          depto: module.DEPTO ?? null,
+        },
+      ];
+    };
 
     const resolved = await this.resolveEffectiveFrontGroups(userId, roleId);
     if (resolved.accesoTotal) {
@@ -668,16 +692,18 @@ export class AccessService {
         roleName,
         roleId,
       );
-      return scopedRows.sort((a, b) => {
-        const deptoA = (a.depto ?? '').trim();
-        const deptoB = (b.depto ?? '').trim();
-        const deptoCmp = deptoA.localeCompare(deptoB);
-        return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
-      });
+      return (await includeControlCalidadEstadoModule(scopedRows)).sort(
+        (a, b) => {
+          const deptoA = (a.depto ?? '').trim();
+          const deptoB = (b.depto ?? '').trim();
+          const deptoCmp = deptoA.localeCompare(deptoB);
+          return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
+        },
+      );
     }
 
     if (!resolved.allowedGroupIds || resolved.allowedGroupIds.length === 0) {
-      return [];
+      return includeControlCalidadEstadoModule([]);
     }
 
     const rel = await this.gfmRepo
@@ -702,16 +728,19 @@ export class AccessService {
       depto: m.DEPTO ?? null,
     }));
 
-    return this.applyMermaModuleVisibilityByRoleName(
+    const visibleRows = this.applyMermaModuleVisibilityByRoleName(
       rows,
       roleName,
       roleId,
-    ).sort((a, b) => {
-      const deptoA = (a.depto ?? '').trim();
-      const deptoB = (b.depto ?? '').trim();
-      const deptoCmp = deptoA.localeCompare(deptoB);
-      return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
-    });
+    );
+    return (await includeControlCalidadEstadoModule(visibleRows)).sort(
+      (a, b) => {
+        const deptoA = (a.depto ?? '').trim();
+        const deptoB = (b.depto ?? '').trim();
+        const deptoCmp = deptoA.localeCompare(deptoB);
+        return deptoCmp !== 0 ? deptoCmp : a.nombre.localeCompare(b.nombre);
+      },
+    );
   }
 
   private normalizeText(value: unknown): string {

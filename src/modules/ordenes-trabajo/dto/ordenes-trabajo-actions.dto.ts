@@ -154,6 +154,13 @@ export class CambioMermaContextDto {
   tipo!: number;
 }
 
+export class CancelarCambioMermaDto extends CambioMermaContextDto {
+  @ApiProperty({ example: 'Se cancela por error de captura' })
+  @IsString()
+  @Length(3, 255)
+  motivoCancelacion!: string;
+}
+
 export class PrepararCambioMermaDto {
   @ApiProperty({ example: 1, enum: [1, 2] })
   @Type(() => Number)

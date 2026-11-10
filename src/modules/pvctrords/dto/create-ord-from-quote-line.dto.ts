@@ -4,6 +4,7 @@ import {
   IsDateString,
   IsNumber,
   IsOptional,
+  Matches,
   IsString,
   Length,
   Min,
@@ -83,6 +84,13 @@ export class CreateOrdFromQuoteLineDto {
   @IsOptional()
   @IsDateString()
   fechaEntrega?: string;
+
+  @ApiPropertyOptional({ example: '14:30', description: 'Hora de entrega en formato HH:MM' })
+  @Transform(({ value }) => toOptionalTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+  hrEnt?: string;
 
   @ApiPropertyOptional()
   @Transform(({ value }) => toOptionalTrimmedString(value))

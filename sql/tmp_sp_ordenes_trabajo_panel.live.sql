@@ -101,6 +101,8 @@ BEGIN
     BEGIN
       INSERT INTO @allowedStatus (ESTSEGU)
       VALUES (2), (3), (3.1), (5), (6), (7), (8), (9), (9.1), (9.2), (9.3), (10), (12);
+      -- Solicitudes de cambio material creadas desde SIN FLUJO (selCtrlOrd=14).
+      SET @ALLOW_NULL_ESTSEGU = 1;
     END
     ELSE IF @ROLE_CODE IN ('ENC_MAQUILA', 'ENCARGADO_MAQUILA', 'ENC_BISEL', 'ENCARGADO_BISELADO')
       INSERT INTO @allowedStatus (ESTSEGU)
@@ -264,6 +266,14 @@ BEGIN
       AND (
         @ROLE_CODE NOT IN ('ANALISTA_INV', 'INVJEF')
         OR TRY_CONVERT(INT, o.selCtrlOrd) = 14
+      )
+      AND (
+        @ROLE_CODE NOT IN ('ANALISTA_INV', 'INVJEF')
+        OR TRY_CONVERT(FLOAT, o.ESTSEGU) IS NOT NULL
+        OR (
+          TRY_CONVERT(INT, o.selCtrlOrd) = 14
+          AND TRY_CONVERT(INT, tipomx.TIPOM) = 1
+        )
       )
   )
   SELECT *
