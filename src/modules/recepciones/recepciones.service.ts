@@ -51,7 +51,7 @@ export class RecepcionesService {
       ctx.isBranchManager
         ? `UPPER(LTRIM(RTRIM(ISNULL(h.ESTATUS, '')))) = 'PROCESADO'`
         : `UPPER(LTRIM(RTRIM(ISNULL(h.ESTATUS, '')))) IN ('PROCESADO', 'VALIDADO', 'RECHAZADO')`,
-      `UPPER(LTRIM(RTRIM(ISNULL(h.SUC, '')))) IN ('DF01', 'DF04', 'DF05', 'DF06')`,
+      `EXISTS (SELECT 1 FROM dbo.DAT_SUC ds WHERE UPPER(LTRIM(RTRIM(ds.SUC))) = UPPER(LTRIM(RTRIM(h.SUC))) AND LTRIM(RTRIM(ds.SUC)) <> '000')`,
       `EXISTS (SELECT 1 FROM dbo.REC_DET_PED dx WHERE dx.NPED=h.NPED AND ISNULL(dx.BLOQ,0)<>-1 AND ISNULL(dx.CTDREC,0)<ISNULL(dx.CTDPED,0))`,
     ];
     const params: unknown[] = [];
@@ -662,7 +662,7 @@ export class RecepcionesService {
     const ctx = await this.resolveUserContext(user);
     if (ctx.isAdmin || ctx.canAuthorize) {
       const rows = await this.dataSource.query(
-        `SELECT SUC,[DESC] NOMBRE FROM dbo.DAT_SUC ORDER BY SUC`,
+        `SELECT SUC,[DESC] NOMBRE FROM dbo.DAT_SUC WHERE LTRIM(RTRIM(SUC)) NOT IN ('', '000') ORDER BY SUC`,
       );
       return rows ?? [];
     }

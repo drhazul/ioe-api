@@ -58,6 +58,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new ForbiddenException('Usuario inactivo');
     }
 
+    const path = (req.originalUrl || req.url || '').split('?')[0];
+    const isPasswordChange =
+      req.method === 'POST' && path === '/auth/change-password';
+    if (user.FORZAR_CAMBIO_PASS && !isPasswordChange) {
+      throw new ForbiddenException(
+        'Debe cambiar su contraseña antes de continuar',
+      );
+    }
+
     return payload;
   }
 }

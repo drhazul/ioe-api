@@ -177,7 +177,7 @@ export class DevolucionesProveedorService {
   async catalogSucursales(user: JwtPayload) {
     await this.authorizedContext(user);
     return this.dataSource.query(
-      `SELECT LTRIM(RTRIM(SUC)) suc,LTRIM(RTRIM(ISNULL([DESC],''))) nombre FROM dbo.DAT_SUC ORDER BY SUC`,
+      `SELECT LTRIM(RTRIM(SUC)) suc,LTRIM(RTRIM(ISNULL([DESC],''))) nombre FROM dbo.DAT_SUC WHERE LTRIM(RTRIM(SUC)) NOT IN ('', '000') ORDER BY SUC`,
     );
   }
 

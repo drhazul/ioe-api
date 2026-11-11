@@ -73,4 +73,35 @@ describe('TransferenciasService', () => {
       expect.arrayContaining(['DF04', 'PENDIENTE', 'BORRADOR']),
     );
   });
+  it('rechaza origen con inventario compartido antes de crear documento', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ CODIGO: 'INVJEF', NOMBRE: 'JEFE' }]);
+    const service = new TransferenciasService({
+      query,
+    } as unknown as DataSource);
+    await expect(
+      service.create(
+        { sucEnt: 'DF24', sucSal: 'DF02', mtv: '1' } as never,
+        user,
+      ),
+    ).rejects.toThrow('comparte inventario');
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechaza origen y destino con el mismo inventario', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ CODIGO: 'INVJEF', NOMBRE: 'JEFE' }]);
+    const service = new TransferenciasService({
+      query,
+    } as unknown as DataSource);
+    await expect(
+      service.create(
+        { sucEnt: 'DF02', sucSal: 'DF01', mtv: '1' } as never,
+        user,
+      ),
+    ).rejects.toThrow('compartir inventario');
+    expect(query).toHaveBeenCalledTimes(1);
+  });
 });

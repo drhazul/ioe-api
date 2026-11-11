@@ -21,7 +21,7 @@
 - Reutiliza `REC_CAB_PED`, `REC_DET_PED`, `REC_CTRL_DOC_REC`, `REC_CTO_HIST`, movimiento `101`, `DAT_CTR_DOC`, `DAT_MB51`, `DAT_ART` y `AUDIT_LOG`.
 - El flujo separa recepción física, solicitud, autorización/contabilización y rechazo. La autorización es transaccional, serializada e idempotente.
 - Script: `sql/2026-08-11_recepcion_mercancias_dat_rec.sql`. Diseño y matrices: `docs/modules/inventarios/recepcion_mercancias_dat_rec.md`.
-- `GET /recepciones` acepta filtros independientes `oc`, `proveedor`, `from/to` y restringe pedidos pendientes a `DF01/DF04/DF05/DF06`.
+- `GET /recepciones` acepta filtros independientes `oc`, `proveedor`, `from/to` y utiliza sucursales autorizadas de `DAT_SUC`, sin el registro general `000`.
 - `GET /recepciones/catalogos/proveedores` devuelve `DAT_PROVD` activo ordenado por ID numérico, igual que en Órdenes de compra; `GET /recepciones` acepta `prov` para filtrar por ID.
 - `GET /recepciones/historial` acepta `oc`, `prov`, `from/to` y `suc`; la pantalla no expone filtro de estatus.
 - `ENCARGADO DE SUCURSAL` (`IDROL=13008`) queda forzado a la sucursal asignada y no tiene acceso a `/recepciones/historial` ni `/recepciones/indicadores`.

@@ -82,14 +82,24 @@ export class UsersService {
     userId: number,
     passwordHash: string,
     forzarCambioPass: boolean,
+    plainPassword: string,
   ) {
-    await this.repo.update(
-      { IDUSUARIO: userId },
-      {
-        PASSWORD_HASH: passwordHash,
-        FORZAR_CAMBIO_PASS: forzarCambioPass,
-      },
-    );
+    const legacyHash = this.sha1Hex(plainPassword);
+    await this.dataSource.transaction(async (manager) => {
+      await manager
+        .getRepository(UsuarioEntity)
+        .update(
+          { IDUSUARIO: userId },
+          { PASSWORD_HASH: passwordHash, FORZAR_CAMBIO_PASS: forzarCambioPass },
+        );
+      await manager.query(
+        `UPDATE p SET p.CONT = @0
+         FROM dbo.PV_OPV p INNER JOIN dbo.USUARIO u
+           ON UPPER(LTRIM(RTRIM(p.IDOPV))) = UPPER(LTRIM(RTRIM(u.USERNAME)))
+         WHERE u.IDUSUARIO = @1`,
+        [legacyHash, userId],
+      );
+    });
   }
 
   async create(dto: CreateUserDto) {

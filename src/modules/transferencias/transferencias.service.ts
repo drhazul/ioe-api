@@ -362,6 +362,7 @@ export class TransferenciasService {
     const sucEnt = await this.resolveTargetSuc(dto.sucEnt, ctx);
     const sucSal = this.requireText(dto.sucSal, 'sucSal').toUpperCase();
     await this.assertSucAllowed(sucEnt, ctx);
+    await this.assertBranchPair(sucEnt, sucSal);
 
     try {
       const rows = await this.dataSource.query(
@@ -400,6 +401,12 @@ export class TransferenciasService {
     if (sucEnt) await this.assertSucAllowed(sucEnt, ctx);
     if (sucSal && !ctx.isAdmin && !this.isInventoryRole(ctx.roleCode)) {
       await this.assertSucAllowed(sucSal, ctx, false);
+    }
+    if (sucEnt || sucSal) {
+      await this.assertBranchPair(
+        sucEnt ?? header.sucEnt,
+        sucSal ?? header.sucSal,
+      );
     }
 
     await this.dataSource.query(
@@ -928,13 +935,55 @@ export class TransferenciasService {
     const ctx = await this.resolveUserContext(user);
     if (ctx.isAdmin || this.isInventoryRole(ctx.roleCode)) {
       const rows = await this.dataSource.query(
-        `SELECT SUC FROM dbo.DAT_SUC ORDER BY SUC ASC`,
+        `SELECT SUC FROM dbo.DAT_SUC WHERE LTRIM(RTRIM(SUC)) NOT IN ('', '000') ORDER BY SUC ASC`,
       );
       return (rows ?? []).map((row: Record<string, unknown>) =>
         this.normalizeText(row.SUC),
       );
     }
     return this.resolveAuthorizedSucs(ctx);
+  }
+
+  async catalogSucursalesOrigen(user: JwtPayload, destino?: string) {
+    await this.resolveUserContext(user);
+    const rows = await this.dataSource.query(
+      `SELECT SUC FROM dbo.DAT_SUC WHERE LTRIM(RTRIM(SUC)) NOT IN ('', '000') ORDER BY SUC`,
+    );
+    return (rows ?? [])
+      .map((row: Record<string, unknown>) =>
+        this.normalizeText(row.SUC).toUpperCase(),
+      )
+      .filter(
+        (suc: string) =>
+          suc &&
+          this.resolveDatArtSuc(suc) === suc &&
+          (!destino ||
+            this.resolveDatArtSuc(suc) !== this.resolveDatArtSuc(destino)),
+      );
+  }
+
+  private async assertBranchPair(sucEnt: string, sucSal: string) {
+    const ent = this.requireText(sucEnt, 'sucEnt').toUpperCase();
+    const sal = this.requireText(sucSal, 'sucSal').toUpperCase();
+    if (this.resolveDatArtSuc(sal) !== sal) {
+      throw new BadRequestException(
+        'La sucursal origen comparte inventario y no puede surtir como origen independiente.',
+      );
+    }
+    if (this.resolveDatArtSuc(ent) === this.resolveDatArtSuc(sal)) {
+      throw new BadRequestException(
+        'Origen y destino no pueden compartir inventario.',
+      );
+    }
+    const rows = await this.dataSource.query(
+      `SELECT COUNT(DISTINCT UPPER(LTRIM(RTRIM(SUC)))) AS total FROM dbo.DAT_SUC WHERE UPPER(LTRIM(RTRIM(SUC))) IN (@0,@1) AND LTRIM(RTRIM(SUC)) NOT IN ('', '000')`,
+      [ent, sal],
+    );
+    if (Number(rows?.[0]?.total ?? 0) !== 2) {
+      throw new BadRequestException(
+        'Origen y destino deben ser sucursales existentes.',
+      );
+    }
   }
 
   async catalogMotivos() {

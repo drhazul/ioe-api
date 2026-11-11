@@ -1,5 +1,9 @@
 # CFDI Quadrum
 
+## Prueba de nuevo CSD por RFC (2026-11-10)
+
+`FACT_CSD.ID=10005` corresponde al emisor `JIGE810809HI4`; no es un folio de venta. El registro está activo, pero el RFC no figura en el gate productivo y `FAC_SVR_SHAP` no contiene facturas de ese emisor al corte. Comunicación autenticada y timbrado siguen pendientes. Correo automático está activo y debe revisarse antes de autorizar una factura. [Plan](../../../docs/modules/cfdi/QUADRUM_CSD_ID10005_PRUEBA_PLAN_20261110.md) y [seguimiento](../../../docs/modules/cfdi/QUADRUM_CSD_ID10005_PRUEBA_SEGUIMIENTO_20261110.md).
+
 ## Recorte de nombre receptor diagnosticado (2026-10-29)
 
 Defecto `ESPINOSA → ESPINO` confirmado en mapper productivo y XML históricos de dos folios DF05 con `CFDI40144`. Corrección local integrada: `normalizarNombreSat(valor, rfcReceptor)` conserva nombres de personas físicas y palabras completas; sólo retira forma societaria separada para RFC con estructura de persona moral. Sin RFC reconocible conserva texto. Mapper 57/57, suite CFDI 23 suites/300 pruebas, build y verificaciones de estilo PASS; preview XML local de ambos folios conserva apellido. [Plan](../../../docs/modules/cfdi/QUADRUM_NOMBRE_RECEPTOR_PLAN_20261029.md) y [seguimiento](../../../docs/modules/cfdi/QUADRUM_NOMBRE_RECEPTOR_SEGUIMIENTO_20261029.md). Titular realizará despliegue; simulación firmada y UAT fiscal pendientes. Sin SQL de reparación, cambios de credenciales ni timbrado en esta integración.

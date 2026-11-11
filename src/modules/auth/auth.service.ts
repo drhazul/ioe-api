@@ -69,10 +69,7 @@ export class AuthService {
     });
   }
 
-  private async issueRefreshToken(
-    userId: number,
-    meta?: AuthRequestMeta,
-  ) {
+  private async issueRefreshToken(userId: number, meta?: AuthRequestMeta) {
     const refreshToken = randomUUID() + '.' + randomUUID();
     const refreshHash = await bcrypt.hash(refreshToken, 10);
 
@@ -124,11 +121,7 @@ export class AuthService {
     });
   }
 
-  async login(
-    username: string,
-    password: string,
-    meta?: AuthRequestMeta,
-  ) {
+  async login(username: string, password: string, meta?: AuthRequestMeta) {
     const user = await this.usersService.findByUsername(username);
     if (!user) throw new UnauthorizedException('Credenciales inválidas');
 
@@ -252,7 +245,12 @@ export class AuthService {
     }
 
     const newHash = await bcrypt.hash(newPassword, 10);
-    await this.usersService.updatePassword(user.IDUSUARIO, newHash, false);
+    await this.usersService.updatePassword(
+      user.IDUSUARIO,
+      newHash,
+      false,
+      newPassword,
+    );
 
     await this.logoutAll(user.IDUSUARIO);
 

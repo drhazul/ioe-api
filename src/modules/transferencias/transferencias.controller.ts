@@ -57,6 +57,14 @@ export class TransferenciasController {
     return this.service.catalogSucursales(user);
   }
 
+  @Get('catalogos/sucursales-origen')
+  sucursalesOrigen(
+    @CurrentUser() user: JwtPayload,
+    @Query('destino') destino?: string,
+  ) {
+    return this.service.catalogSucursalesOrigen(user, destino);
+  }
+
   @Get('catalogos/motivos')
   motivos() {
     return this.service.catalogMotivos();

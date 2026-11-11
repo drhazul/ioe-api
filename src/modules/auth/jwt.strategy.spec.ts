@@ -64,4 +64,33 @@ describe('JwtStrategy', () => {
       }),
     );
   });
+  it('exige cambio de contraseña antes de acceder a otras rutas', async () => {
+    (usersService.findAuthById as jest.Mock).mockResolvedValue({
+      IDUSUARIO: 12,
+      ESTATUS: 'ACTIVO',
+      FORZAR_CAMBIO_PASS: true,
+    });
+    const strategy = new JwtStrategy(config, usersService, auditService);
+    const payload = { sub: 12 } as never;
+    await expect(
+      strategy.validate(
+        {
+          method: 'GET',
+          headers: {},
+          originalUrl: '/users',
+        } as unknown as Request,
+        payload,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      strategy.validate(
+        {
+          method: 'POST',
+          headers: {},
+          originalUrl: '/auth/change-password',
+        } as unknown as Request,
+        payload,
+      ),
+    ).resolves.toBe(payload);
+  });
 });

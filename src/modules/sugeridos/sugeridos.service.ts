@@ -27,7 +27,6 @@ type UserContext = {
 @Injectable()
 export class SugeridosService {
   private static readonly MODULE_CODES = ['DAT_JAA_SUG', 'DAT_ORD_COMP'];
-  private static readonly CALCULO_SUCURSALES = ['DF01', 'DF04', 'DF05', 'DF06'];
   private static readonly INVENTORY_CHIEF_CODES = new Set([
     'INVJEF',
     'JEFE_INVENTARIOS',
@@ -123,9 +122,15 @@ export class SugeridosService {
   }
 
   async calcular(query: SugeridosCalculoQueryDto, user: JwtPayload) {
-    await this.resolveUserContext(user);
+    const ctx = await this.resolveUserContext(user);
     const suc = this.normalizeText(query.suc).toUpperCase();
-    this.assertCalculoSucAllowed(suc);
+    await this.assertSucAllowed(suc, ctx);
+    const exists = await this.dataSource.query(
+      `SELECT 1 AS ok FROM dbo.DAT_SUC WHERE UPPER(LTRIM(RTRIM(SUC))) = @0 AND LTRIM(RTRIM(SUC)) <> '000'`,
+      [suc],
+    );
+    if (!exists.length)
+      throw new BadRequestException(`Sucursal ${suc} no existe.`);
     const page = Math.max(1, this.toInt(query.page) ?? 1);
     const limit = Math.min(500, Math.max(1, this.toInt(query.limit) ?? 100));
     const rows = await this.dataSource.query(
@@ -531,7 +536,7 @@ export class SugeridosService {
     const ctx = await this.resolveUserContext(user);
     if (ctx.isAdmin) {
       const rows = await this.dataSource.query(
-        `SELECT SUC FROM dbo.DAT_SUC ORDER BY SUC`,
+        `SELECT SUC FROM dbo.DAT_SUC WHERE LTRIM(RTRIM(SUC)) NOT IN ('', '000') ORDER BY SUC`,
       );
       return (rows ?? []).map((row: Record<string, unknown>) =>
         this.normalizeText(row.SUC),
@@ -869,14 +874,29 @@ export class SugeridosService {
       `,
       [ctx.username.toUpperCase(), ...SugeridosService.MODULE_CODES],
     );
+    const isInventory =
+      ctx.roleId === 2 ||
+      [
+        'INVJEF',
+        'JEFE_INVENTARIOS',
+        'ANALISTA_INV',
+        'ANALISTA_INVENTARIOS',
+      ].includes(ctx.roleCode);
+    const catalog = isInventory
+      ? await this.dataSource.query(
+          `SELECT SUC FROM dbo.DAT_SUC WHERE LTRIM(RTRIM(ISNULL(SUC, ''))) NOT IN ('', '000')`,
+        )
+      : [];
     const allowed = Array.from(
       new Set(
         [
+          ...(catalog ?? []).map((row: Record<string, unknown>) =>
+            this.normalizeText(row.SUC).toUpperCase(),
+          ),
           ...(rows ?? []).map((row: Record<string, unknown>) =>
             this.normalizeText(row.SUC).toUpperCase(),
           ),
           ctx.suc,
-          ...SugeridosService.CALCULO_SUCURSALES,
         ].filter(Boolean),
       ),
     );
@@ -890,12 +910,6 @@ export class SugeridosService {
     const normalized = this.normalizeText(suc).toUpperCase();
     const allowed = await this.resolveAuthorizedSucs(ctx);
     if (allowed.includes(normalized)) return;
-    throw new ForbiddenException(`No autorizado para la sucursal ${suc}.`);
-  }
-
-  private assertCalculoSucAllowed(suc: string) {
-    const normalized = this.normalizeText(suc).toUpperCase();
-    if (SugeridosService.CALCULO_SUCURSALES.includes(normalized)) return;
     throw new ForbiddenException(`No autorizado para la sucursal ${suc}.`);
   }
 

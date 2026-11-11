@@ -24,7 +24,7 @@
 - La recepción física no afecta inventario. Solo `sp_rec_recepcion_autorizar` registra `DAT_CTR_DOC`, movimiento `DAT_MB51` 101 en almacén 002 y actualiza `DAT_ART.STOCK`.
 - Los DTO de sucursal omiten costos y tipo/folio documental; la restricción se aplica en backend.
 - Mantener idempotencia, `sp_getapplock`, transacción y auditoría `AUDIT_LOG` en acciones críticas.
-- El listado pendiente acepta O.C. y proveedor como filtros separados y queda limitado a `DF01/DF04/DF05/DF06`.
+- El listado pendiente acepta O.C. y proveedor como filtros separados y usa `DAT_SUC` (sin `000`) y permisos por usuario.
 - El selector de proveedor usa `/recepciones/catalogos/proveedores`, ordenado por ID numérico igual que en Órdenes de compra, y filtra por `prov`.
 - Histórico filtra en servidor por O.C., proveedor, fecha y sucursal; no debe exponer filtro de estatus en la UI.
 - `ENCARGADO DE SUCURSAL` (`IDROL=13008`) solo puede consultar su `USUARIO.SUC`; debe rechazarse su acceso directo a Histórico e Indicadores.

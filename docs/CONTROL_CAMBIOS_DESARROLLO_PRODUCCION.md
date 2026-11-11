@@ -263,3 +263,14 @@ Si la venta VF ya se reconoció una sola vez en Odoo, el asiento del cierre de v
 ## Aislamiento en release CDMX (2026-11-04)
 
 IOELOCAL carece de sp_ps_creditos_preparar/fn_creditos_config_efectiva y ENTIDAD_FISCAL. Fuente se versiona completa; guardia DevelopmentBusinessGuard restringe créditos/configuración fiscal a IOEDESARROLLO no productivo. PS omite precheck experimental en producción y conserva SP vigente. Flutter release oculta estas acciones/rutas y consulta de contexto CR; debug conserva desarrollo. No se instala DDL de créditos, entidades ni Odoo durante pase de horarios.
+
+
+## IOE-DF24-20261110 — sucursal, acceso y emisor histórico
+
+- **Estado:** aplicado sólo en `IOEDESARROLLO`; API y Flutter `WORKTREE`, sin commit ni despliegue. Autorización productiva y ventana: pendientes.
+- **DDL/objetos:** ALTER `dbo.sp_fact_sync_folio_vf`, preserva emisor existente cuando folio y cliente quedan en sucursales distintas. Script guardado por base, servidor y hash anterior: `sql/2026-11-10_proteger_emisor_folio_sucursal.sql`; fue ensayado con rollback. Tablas, columnas, claves, constraints, índices, vistas, funciones, triggers, sinónimos y jobs nuevos: NINGUNO.
+- **DML de mantenimiento en desarrollo:** `DAT_SUC`, `DAT_ART`, `USUARIO`, `PV_OPV`, `USR_MOD_SUC`, `DAT_LAB_ACCESO`, `DAT_SUC_COLAB_ACCESO`, `FACT_CLIENT_SHP`. Diez clientes conservan identidad; su sucursal y RFC emisor se ajustaron. Sin folios ni operaciones comerciales persistentes nuevos. Permisos SQL de servidor: NINGUNO.
+- **API/Flutter:** sucursales dinámicas de DAT_SUC sin registro general 000, acceso por rol/sucursal; validación de orígenes sin transferir entre inventarios compartidos; cambio obligatorio de contraseña y sincronización de hash de caja. PDF de O.C. usa datos de la sucursal. Revisión de accesos y comportamiento de módulos en expediente.
+- **Evidencia y mantenimiento:** `../outputs/df24_desarrollo_20261110/RESULTADO.md`; preflight, aplicación, reversa y postflight separados en esa carpeta. Reversas de datos y SP ensayadas dentro de transacciones revertidas. Scripts de aplicación/reversa son intervenciones manuales, no pasos automáticos de build.
+- **Validación:** 69 suites/449 pruebas API finales; compilación API, Flutter analyze y 7 pruebas Flutter aprobadas. Pruebas HTTP con órdenes/folio sintéticos y autenticación SQL real revertidas; SP probado con emisor histórico y nuevo. Sin PAC, timbrado real, UAT visual ni instalación.
+- **Antes de producción:** confirmar identidad fiscal, CSD/cuenta PAC y lugar de expedición manualmente; revisar clientes reales, folios y respaldo actualizado; preparar scripts específicos y lista blanca en orden con aprobación de destino y ventana. Se requiere pase coordinado backend/frontend y SQL según instrucciones del workspace.
