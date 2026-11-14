@@ -65,6 +65,24 @@ export class MermasAutorizadasQueryDto {
   @Length(0, 30)
   asign?: string;
 
+  @ApiPropertyOptional({
+    example: '1',
+    description: '1 cambio de material, 2 merma',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(0, 1)
+  otrosTipo?: string;
+
+  @ApiPropertyOptional({
+    example: '2,5,8',
+    description: 'IDs de motivos seleccionados',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(0, 1000)
+  motivos?: string;
+
   @ApiPropertyOptional({ example: '2026-01-01' })
   @IsOptional()
   @IsDateString()

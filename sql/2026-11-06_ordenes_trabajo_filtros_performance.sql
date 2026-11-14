@@ -123,6 +123,8 @@ END;
    buscar por índice. Si el esquema usa texto, se conserva el SQL original.
 */
 DECLARE @sucCollation SYSNAME;
+DECLARE @fcnsType INT;
+DECLARE @fcnmType INT;
 SELECT @fcnsType = c.system_type_id
 FROM sys.columns c
 WHERE c.object_id = OBJECT_ID(N'dbo.PV_CTR_ORDS') AND c.name = N'FCNS';

@@ -6,8 +6,46 @@ describe('OrdenesTrabajoService cambio material/merma', () => {
       OrdenesTrabajoService.prototype,
     ) as OrdenesTrabajoService;
     (service as any).dataSource = { query };
+    (service as any).tableExistsCache = new Map();
+    (service as any).tableExistsInFlight = new Map();
     return service;
   }
+
+  describe('precio en mermas autorizadas', () => {
+    it('prorratea el precio unitario por la cantidad mermada', () => {
+      const service = createService();
+
+      expect(
+        (service as any).prorateAuthorizedMermaPrices([
+          {
+            MOVIMIENTO: 'MERMA AUTORIZADA',
+            CTD: 0.5,
+            CTD_C_M: 0.5,
+            PRECIO_COBRADO: 520,
+          },
+          {
+            MOVIMIENTO: 'CAMBIO DE MATERIAL AUTORIZADO',
+            CTD: 0.5,
+            CTD_C_M: 0.5,
+            PRECIO_COBRADO: 520,
+          },
+        ]),
+      ).toEqual([
+        {
+          MOVIMIENTO: 'MERMA AUTORIZADA',
+          CTD: 0.5,
+          CTD_C_M: 0.5,
+          PRECIO_COBRADO: 260,
+        },
+        {
+          MOVIMIENTO: 'CAMBIO DE MATERIAL AUTORIZADO',
+          CTD: 0.5,
+          CTD_C_M: 0.5,
+          PRECIO_COBRADO: 520,
+        },
+      ]);
+    });
+  });
 
   describe('consulta estado', () => {
     it('incluye SIN FLUJO en los modos operativo y estado autorizados', () => {

@@ -78,6 +78,8 @@ type MermasAutorizadasFilterOptions = {
   tipos: Array<{ value: string; label: string }>;
   laboratorios: unknown[];
   asignados: Array<{ value: string; label: string }>;
+  motivosCambioMaterial: unknown[];
+  motivosMerma: unknown[];
 };
 
 type OrdenesTrabajoPanelCatalogs = {
@@ -626,7 +628,10 @@ export class OrdenesTrabajoService {
       const enrichedItems =
         selectedFlow != null
           ? showFlowHistoryDetails
-            ? await this.attachFlowHistorySafely(labeledItems, historyFlowLimit)
+            ? await this.attachFlowHistoryAndDurationsSafely(
+                labeledItems,
+                historyFlowLimit,
+              )
             : await this.attachFlowHistory(labeledItems)
           : labeledItems;
       items =
@@ -654,18 +659,10 @@ export class OrdenesTrabajoService {
             QUIEN_REALIZO: 'Sin registro',
           }));
         });
-      const durationsPromise = this.attachFlowDurations(items, selectedFlow);
-      const [itemsWithActors, itemsWithDurations] = await Promise.all([
-        actorsPromise,
-        durationsPromise,
-      ]);
+      const itemsWithActors = await actorsPromise;
       items = items.map((item, index) => ({
         ...item,
         QUIEN_REALIZO: itemsWithActors[index]?.QUIEN_REALIZO ?? 'Sin registro',
-        TIEMPO_FLUJO:
-          itemsWithDurations[index]?.TIEMPO_FLUJO ?? 'Sin historial',
-        TIEMPO_POR_FLUJO:
-          itemsWithDurations[index]?.TIEMPO_POR_FLUJO ?? 'Sin historial',
       }));
     }
     if (query.reportMode === true) {
@@ -835,7 +832,7 @@ export class OrdenesTrabajoService {
           ${tipoMSql} IN (1, 2)
           AND TRY_CONVERT(FLOAT, o.ESTSEGU) = 4
           AND NULLIF(LTRIM(RTRIM(ISNULL(${usrAutSql}, ''))), '') IS NOT NULL
-          AND ${fcnAutSql} IS NOT NULL
+          AND ${authorizationDateSql} IS NOT NULL
           AND ${approvedByInventoryChiefSql}
         )
         OR (
@@ -859,7 +856,43 @@ export class OrdenesTrabajoService {
     }
     const authorizationWhere = [...where];
     const authorizationParams = [...params];
+    const otrosTipoRaw = this.normalizeText(query.otrosTipo);
+    const otrosTipo = otrosTipoRaw ? this.toInt(otrosTipoRaw) : null;
+    if (otrosTipoRaw && otrosTipo !== 1 && otrosTipo !== 2) {
+      throw new BadRequestException(
+        'otrosTipo debe ser 1 (cambio de material) o 2 (merma).',
+      );
+    }
+    if (otrosTipo != null) {
+      where.push(`TRY_CONVERT(INT, o.TIPOM) = @${params.length}`);
+      params.push(otrosTipo);
+    }
+    const motivosRaw = this.normalizeText(query.motivos);
+    if (motivosRaw) {
+      const parsedMotivos = motivosRaw
+        .split(',')
+        .map((value) => this.toInt(value));
+      if (parsedMotivos.some((value) => value == null || value <= 0)) {
+        throw new BadRequestException(
+          'motivos debe contener IDs numéricos positivos separados por comas.',
+        );
+      }
+      const motivos = [...new Set(parsedMotivos as number[])];
+      if (motivos.length > 100) {
+        throw new BadRequestException(
+          'Se permiten hasta 100 motivos por consulta.',
+        );
+      }
+      where.push(
+        `TRY_CONVERT(INT, o.MOTR) IN (${motivos
+          .map((_, index) => `@${params.length + index}`)
+          .join(', ')})`,
+      );
+      params.push(...motivos);
+    }
     if (query.fecIni) {
+      // FCN_AUT_CYM y FCNMOD son fechas de negocio guardadas en hora local
+      // de México; comparar directamente mantiene correcto el día y el índice.
       const dateParam = `TRY_CONVERT(DATE, @${params.length})`;
       where.push(
         `(
@@ -1038,6 +1071,7 @@ export class OrdenesTrabajoService {
         END AS FLUJO,
         LTRIM(RTRIM(ISNULL(${usrAutSql}, ''))) AS USR_AUT_CYM,
         o.AUTHORIZATION_DATE AS FCN_AUT_CYM,
+        CONVERT(VARCHAR(23), o.AUTHORIZATION_DATE, 121) AS FCN_AUT_CYM_LOCAL,
         LTRIM(RTRIM(ISNULL(n.ART, ''))) AS ART_NUEVA,
         LTRIM(RTRIM(ISNULL(n.DESCART, ''))) AS DESCART_NUEVA,
         TRY_CONVERT(FLOAT, n.CTD) AS CTD_NUEVA
@@ -1089,10 +1123,34 @@ export class OrdenesTrabajoService {
     }
 
     const rawItems = (rows ?? []) as Record<string, unknown>[];
-    const items = attachPrices
+    const pricedItems = attachPrices
       ? await this.attachChargedArticlePrices(rawItems)
       : rawItems;
+    const items = this.prorateAuthorizedMermaPrices(pricedItems);
     return { items, total, page, pageSize };
+  }
+
+  private prorateAuthorizedMermaPrices(
+    items: Record<string, unknown>[],
+  ): Record<string, unknown>[] {
+    return items.map((item) => {
+      if (this.normalizeUpper(item.MOVIMIENTO) !== 'MERMA AUTORIZADA') {
+        return item;
+      }
+
+      const unitPrice = this.toFloat(item.PRECIO_COBRADO);
+      const mermaQuantity = this.toFloat(item.CTD_C_M);
+      if (unitPrice == null || mermaQuantity == null || mermaQuantity < 0) {
+        return item;
+      }
+
+      // PVTA representa el precio unitario; mostrar solo el importe de la
+      // cantidad mermada (p. ej. media pieza = la mitad del precio unitario).
+      return {
+        ...item,
+        PRECIO_COBRADO: this.roundMoney(unitPrice * mermaQuantity),
+      };
+    });
   }
 
   private async resolveCachedMermasAutorizadasFilterOptions(
@@ -1137,9 +1195,10 @@ export class OrdenesTrabajoService {
     where: string[],
     params: unknown[],
   ): Promise<MermasAutorizadasFilterOptions> {
-    const [rows, laboratorios] = await Promise.all([
-      this.dataSource.query(
-        `SET NOCOUNT ON;
+    const [rows, laboratorios, motivosCambioMaterial, motivosMerma] =
+      await Promise.all([
+        this.dataSource.query(
+          `SET NOCOUNT ON;
          IF OBJECT_ID('tempdb..#MermasAutorizadasFilterOptions') IS NOT NULL
            DROP TABLE #MermasAutorizadasFilterOptions;
          SELECT DISTINCT
@@ -1179,11 +1238,13 @@ export class OrdenesTrabajoService {
                 UPPER(asignados.ASIGN)
          ) opciones
          ORDER BY OPTION_TYPE, VALUE;
-         DROP TABLE #MermasAutorizadasFilterOptions;`,
-        params,
-      ),
-      this.resolveLaboratorios(scope),
-    ]);
+           DROP TABLE #MermasAutorizadasFilterOptions;`,
+          params,
+        ),
+        this.resolveLaboratorios(scope),
+        this.resolveMovimientoMotivos(1),
+        this.resolveMovimientoMotivos(2),
+      ]);
     const optionRows = Array.isArray(rows)
       ? (rows as Record<string, unknown>[])
       : [];
@@ -1205,6 +1266,8 @@ export class OrdenesTrabajoService {
       tipos: uniqueOptions('TIPO'),
       laboratorios,
       asignados: uniqueOptions('ASIGN'),
+      motivosCambioMaterial,
+      motivosMerma,
     };
   }
 
@@ -1233,7 +1296,9 @@ export class OrdenesTrabajoService {
       rows.push(...(result.items ?? []));
     }
 
-    const pricedRows = await this.attachChargedArticlePrices(rows);
+    const pricedRows = this.prorateAuthorizedMermaPrices(
+      await this.attachChargedArticlePrices(rows),
+    );
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Mermas autorizadas');
@@ -1257,7 +1322,7 @@ export class OrdenesTrabajoService {
       { header: 'Artículo nuevo', key: 'ART_NUEVA', width: 20 },
       { header: 'Descripción nueva', key: 'DESCART_NUEVA', width: 36 },
       { header: 'F. autorización', key: 'FCN_AUT_CYM', width: 22 },
-      { header: 'Precio cobrado', key: 'PRECIO_COBRADO', width: 18 },
+      { header: 'Importe de merma', key: 'PRECIO_COBRADO', width: 18 },
       { header: 'Costo del artículo', key: 'COSTO_ARTICULO', width: 20 },
       { header: 'Costo del servicio', key: 'COSTO_SERVICIO', width: 20 },
       { header: 'Autorizó', key: 'USR_AUT_CYM', width: 22 },
@@ -1290,6 +1355,18 @@ export class OrdenesTrabajoService {
     page: number,
     pageSize: number,
   ): Promise<Record<string, unknown>[]> {
+    const hasFlowHistoryTable = await this.hasTable(
+      'PV_CTR_ORDS_FLUJO_HIST',
+    );
+    const flow10TimestampApply = hasFlowHistoryTable
+      ? `OUTER APPLY (
+        SELECT TOP (1) h.FCNR
+        FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
+        WHERE h.IORD = o.IORD
+          AND TRY_CONVERT(FLOAT, h.ESTSEGU) = 10
+        ORDER BY h.FCNR, h.ID
+      ) flujoEntregaCliente`
+      : `OUTER APPLY (SELECT CAST(NULL AS DATETIME2) AS FCNR) flujoEntregaCliente`;
     const params: unknown[] = [
       this.normalizeText(query.iord),
       this.normalizeText(query.idfol),
@@ -1330,7 +1407,9 @@ export class OrdenesTrabajoService {
           LTRIM(RTRIM(ISNULL(CAST(o.OPV AS NVARCHAR(100)), '')))
         ) AS OPV,
         o.FCNS,
+        GETDATE() AS SERVER_NOW,
         fechaEntrega.FechaHoraEntrega AS FCNM,
+        flujoEntregaCliente.FCNR AS FCN_PENDIENTE_ENTREGA,
         o.CLIEN,
         o.NCLIENTE,
         o.MAT,
@@ -1388,6 +1467,7 @@ export class OrdenesTrabajoService {
           )
         END AS FechaHoraEntrega
       ) fechaEntrega
+      ${flow10TimestampApply}
       WHERE
         (@0 IS NULL OR LTRIM(RTRIM(ISNULL(o.IORD, ''))) LIKE '%' + @0 + '%')
         AND (@1 IS NULL OR LTRIM(RTRIM(ISNULL(o.IDFOL, ''))) LIKE '%' + @1 + '%')
@@ -1576,8 +1656,14 @@ export class OrdenesTrabajoService {
       context.roleCode === 'JEF_TALLER' &&
       flowCode === 9.3;
     const needsFlowIntervalBoundary =
-      this.normalizeText(query.fecIni) != null ||
-      this.normalizeText(query.fecFin) != null;
+      (this.normalizeText(query.fecIni) != null ||
+        this.normalizeText(query.fecFin) != null) &&
+      !(
+        flowCode == null ||
+        (context.roleCode === 'ANALISTA_ORD' &&
+          (flowCode === 4 || flowCode === 7)) ||
+        reportFiltersByOrderDates
+      );
     const flowHistoryCte = isJefeGarantiaReport
       ? `FlowHistoryIntervals AS (
         SELECT
@@ -1590,7 +1676,7 @@ export class OrdenesTrabajoService {
         ${needsFlowIntervalBoundary ? `OUTER APPLY (
           SELECT TOP (1) h2.FCNR
           FROM dbo.PV_CTR_ORDS_FLUJO_HIST h2
-          WHERE UPPER(LTRIM(RTRIM(h2.IORD))) = UPPER(LTRIM(RTRIM(h.IORD)))
+          WHERE h2.IORD = h.IORD
             AND (
               h2.FCNR > h.FCNR
               OR (h2.FCNR = h.FCNR AND h2.ID > h.ID)
@@ -1599,8 +1685,28 @@ export class OrdenesTrabajoService {
         ) nextFlow` : ''}
         WHERE h.ESTSEGU = 9.3
       )`
-      : query.reportMode !== true
+      : query.reportMode === true
         ? `FlowHistoryIntervals AS (
+        SELECT
+          h.IORD,
+          h.ID,
+          TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
+          h.FCNR,
+          ${needsFlowIntervalBoundary ? 'nextFlow.FCNR' : 'CAST(NULL AS DATETIME)'} AS NEXT_FCNR
+        FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
+        ${needsFlowIntervalBoundary ? `OUTER APPLY (
+          SELECT TOP (1) h2.FCNR
+          FROM dbo.PV_CTR_ORDS_FLUJO_HIST h2
+          WHERE h2.IORD = h.IORD
+            AND (
+              h2.FCNR > h.FCNR
+              OR (h2.FCNR = h.FCNR AND h2.ID > h.ID)
+            )
+          ORDER BY h2.FCNR, h2.ID
+        ) nextFlow` : ''}
+        WHERE ${flowHistoryPredicate}
+      )`
+      : `FlowHistoryIntervals AS (
         SELECT
           h.IORD,
           h.ID,
@@ -1619,18 +1725,6 @@ export class OrdenesTrabajoService {
           ORDER BY h2.FCNR, h2.ID
         ) nextFlow
         WHERE ${flowCode == null ? 'h.ESTSEGU IS NULL' : `h.ESTSEGU = ${flowCode}`}
-      )`
-      : `FlowHistoryIntervals AS (
-        SELECT
-          h.IORD,
-          h.ID,
-          TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
-          h.FCNR,
-          LEAD(h.FCNR) OVER (
-            PARTITION BY UPPER(LTRIM(RTRIM(h.IORD)))
-            ORDER BY h.FCNR, h.ID
-          ) AS NEXT_FCNR
-        FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
       )`;
     const params: unknown[] = [
       this.normalizeText(query.fecIni),
@@ -2142,10 +2236,10 @@ export class OrdenesTrabajoService {
       params,
     );
     const total = this.toInt(rows?.[0]?.TOTAL_COUNT) ?? 0;
-    const items =
-      query.reportMode === true
-        ? await this.attachChargedArticlePrices(rows)
-        : rows;
+    let items = rows;
+    if (query.reportMode === true) {
+      items = await this.attachChargedArticlePrices(rows);
+    }
     return {
       ok: true,
       page: context.page,
@@ -5506,29 +5600,151 @@ export class OrdenesTrabajoService {
     });
   }
 
-  private async attachFlowHistorySafely(
+  private async attachFlowHistoryAndDurationsSafely(
     items: Record<string, unknown>[],
     flowLimit?: string,
   ): Promise<Record<string, unknown>[]> {
     try {
-      return await this.attachFlowHistory(items, flowLimit);
-    } catch (error) {
-      this.logger.error(
-        'No se pudo cargar el historial de flujos de Consulta Estado.',
-        error instanceof Error ? error.stack : String(error),
+      if (!items.length) return items;
+      const iords = this.normalizeDistinctIords(items.map((item) => item.IORD));
+      if (!iords.length || !(await this.hasTable('PV_CTR_ORDS_FLUJO_HIST'))) {
+        return this.withHistoryFallback(items);
+      }
+
+      const placeholders = iords.map((_, index) => `@${index}`).join(',');
+      const hasFlowLimit = flowLimit !== undefined;
+      const flowLimitIsNull = this.normalizeUpper(flowLimit) === 'NULL';
+      const flowLimitClause = !hasFlowLimit
+        ? ''
+        : flowLimitIsNull
+          ? 'AND event.ESTSEGU IS NULL'
+          : `AND TRY_CONVERT(FLOAT, event.ESTSEGU) <= @${iords.length}`;
+      const queryParams = hasFlowLimit
+        ? [...iords, this.toFloat(flowLimit)]
+        : iords;
+      const rows = await this.dataSource.query(
+        `
+        WITH OrderedEvents AS (
+          SELECT
+            h.IORD,
+            h.ID,
+            h.ESTSEGU,
+            h.FCNR,
+            LEAD(h.FCNR) OVER (
+              PARTITION BY h.IORD ORDER BY h.FCNR, h.ID
+            ) AS NEXT_FCNR
+          FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
+          WHERE h.IORD IN (${placeholders})
+        )
+        SELECT
+          UPPER(LTRIM(RTRIM(ISNULL(event.IORD, '')))) AS IORD,
+          TRY_CONVERT(FLOAT, event.ESTSEGU) AS ESTSEGU,
+          LTRIM(RTRIM(ISNULL(status.TIPO, ''))) AS ESTSEGU_DESC,
+          event.FCNR,
+          DATEDIFF_BIG(
+            SECOND,
+            event.FCNR,
+            CASE
+              WHEN event.NEXT_FCNR IS NOT NULL THEN event.NEXT_FCNR
+              WHEN event.ESTSEGU = TRY_CONVERT(FLOAT, actual.ESTSEGU)
+                OR (event.ESTSEGU IS NULL AND TRY_CONVERT(FLOAT, actual.ESTSEGU) IS NULL)
+                THEN GETDATE()
+              ELSE NULL
+            END
+          ) AS SEGUNDOS_EN_FLUJO
+        FROM OrderedEvents event
+        LEFT JOIN dbo.DAT_EST_ORD status
+          ON TRY_CONVERT(FLOAT, status.ESTA) = TRY_CONVERT(FLOAT, event.ESTSEGU)
+        LEFT JOIN dbo.PV_CTR_ORDS actual
+          ON actual.IORD = event.IORD
+        WHERE 1 = 1 ${flowLimitClause}
+        ORDER BY event.IORD, event.FCNR, event.ID
+        `,
+        queryParams,
       );
-      return items.map((item) => {
-        const flow = this.toFloat(item.ESTSEGU);
+
+      const historyLabels = new Map<string, string[]>();
+      const historyItems = new Map<
+        string,
+        Array<{ ESTSEGU: number | null; ESTSEGU_DESC: string }>
+      >();
+      const allDurations = new Map<string, string[]>();
+      const durationsByFlow = new Map<string, Map<string, string[]>>();
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const record = row as Record<string, unknown>;
+        const iord = this.normalizeUpper(record.IORD ?? '');
+        if (!iord) continue;
+        const flow = this.toFloat(record.ESTSEGU);
+        const description = this.normalizeText(record.ESTSEGU_DESC) ?? '';
         const code = flow == null ? 'SIN FLUJO' : this.formatStatusCode(flow);
-        const description = this.normalizeText(item.ESTSEGU_DESC) ?? '';
         const label = `${code} ${description}`.trim();
+        const labels = historyLabels.get(iord) ?? [];
+        if (!labels.includes(label)) labels.push(label);
+        historyLabels.set(iord, labels);
+
+        const entries = historyItems.get(iord) ?? [];
+        if (!entries.some((entry) => entry.ESTSEGU === flow)) {
+          entries.push({ ESTSEGU: flow, ESTSEGU_DESC: description });
+        }
+        historyItems.set(iord, entries);
+
+        const seconds = Number(record.SEGUNDOS_EN_FLUJO);
+        if (!Number.isFinite(seconds) || seconds < 0) continue;
+        const duration = this.formatFlowDuration(seconds);
+        const durations = allDurations.get(iord) ?? [];
+        durations.push(`${label}: ${duration}`);
+        allDurations.set(iord, durations);
+        const flowKey = flow == null ? 'NULL' : this.formatStatusCode(flow);
+        const byFlow = durationsByFlow.get(iord) ?? new Map<string, string[]>();
+        const flowDurations = byFlow.get(flowKey) ?? [];
+        flowDurations.push(duration);
+        byFlow.set(flowKey, flowDurations);
+        durationsByFlow.set(iord, byFlow);
+      }
+
+      return items.map((item) => {
+        const iord = this.normalizeUpper(item.IORD ?? '');
+        const flow = this.toFloat(item.ESTSEGU);
+        const flowKey = flow == null ? 'NULL' : this.formatStatusCode(flow);
+        const currentLabel = `${flow == null ? 'SIN FLUJO' : this.formatStatusCode(flow)} ${this.normalizeText(item.ESTSEGU_DESC) ?? ''}`.trim();
         return {
           ...item,
-          FLUJO_HISTORIAL: label,
-          FLUJO_HISTORIAL_ITEMS: [{ ESTSEGU: flow, ESTSEGU_DESC: description }],
+          FLUJO_HISTORIAL: historyLabels.get(iord)?.join(' -> ') ?? currentLabel,
+          FLUJO_HISTORIAL_ITEMS: historyItems.get(iord) ?? [
+            { ESTSEGU: flow, ESTSEGU_DESC: this.normalizeText(item.ESTSEGU_DESC) ?? '' },
+          ],
+          TIEMPO_FLUJO:
+            durationsByFlow.get(iord)?.get(flowKey)?.join(' / ') ?? 'Sin historial',
+          TIEMPO_POR_FLUJO: allDurations.get(iord)?.join(' | ') ?? 'Sin historial',
+          TIEMPOS_POR_FLUJO: Object.fromEntries(
+            [...(durationsByFlow.get(iord) ?? new Map()).entries()].map(
+              ([key, values]) => [key, values.join(' / ')],
+            ),
+          ),
         };
       });
+    } catch (error) {
+      this.logger.error(
+        'No se pudo cargar el historial y duración de flujos de Consulta Estado.',
+        error instanceof Error ? error.stack : String(error),
+      );
+      return this.withHistoryFallback(items);
     }
+  }
+
+  private withHistoryFallback(items: Record<string, unknown>[]) {
+    return items.map((item) => {
+      const flow = this.toFloat(item.ESTSEGU);
+      const description = this.normalizeText(item.ESTSEGU_DESC) ?? '';
+      const label = `${flow == null ? 'SIN FLUJO' : this.formatStatusCode(flow)} ${description}`.trim();
+      return {
+        ...item,
+        FLUJO_HISTORIAL: this.normalizeText(item.FLUJO_HISTORIAL) ?? label,
+        FLUJO_HISTORIAL_ITEMS: [{ ESTSEGU: flow, ESTSEGU_DESC: description }],
+        TIEMPO_FLUJO: 'Sin historial',
+        TIEMPO_POR_FLUJO: 'Sin historial',
+      };
+    });
   }
 
   private async attachAnulacionMotivos(
@@ -5596,16 +5812,13 @@ export class OrdenesTrabajoService {
     const iords = this.normalizeDistinctIords(items.map((item) => item.IORD));
     if (!iords.length) return items;
     const placeholders = iords.map((_, index) => `@${index}`).join(',');
-    const bulkAuditPredicates = iords.map(
-      (_, index) => `a.METADATA_JSON LIKE '%' + @${index} + '%'`,
-    );
     const filterBySelectedFlow = selectedFlow !== undefined;
     const selectedFlowIsNull = this.normalizeUpper(selectedFlow) === 'NULL';
     const flowFilterClause = !filterBySelectedFlow
       ? ''
       : selectedFlowIsNull
-        ? 'AND h.ESTSEGU IS NULL'
-        : `AND h.ESTSEGU <= @${iords.length}`;
+        ? 'AND ESTSEGU IS NULL'
+        : `AND ESTSEGU <= @${iords.length}`;
     const auditFlowFilterClause = !filterBySelectedFlow
       ? ''
       : selectedFlowIsNull
@@ -5619,40 +5832,131 @@ export class OrdenesTrabajoService {
       : iords;
     const rows = await this.dataSource.query(
       `
-      WITH FlowEvents AS (
+      WITH OrderedFlowEvents AS (
         SELECT
           h.ID,
           UPPER(LTRIM(RTRIM(ISNULL(h.IORD, '')))) AS IORD,
           TRY_CONVERT(FLOAT, h.ESTSEGU) AS ESTSEGU,
           h.FCNR,
-          nextFlow.FCNR AS NEXT_FCNR
+          LEAD(h.FCNR) OVER (
+            PARTITION BY h.IORD ORDER BY h.FCNR, h.ID
+          ) AS NEXT_FCNR
         FROM dbo.PV_CTR_ORDS_FLUJO_HIST h
-        OUTER APPLY (
-          SELECT TOP (1) h2.FCNR
-          FROM dbo.PV_CTR_ORDS_FLUJO_HIST h2
-          WHERE h2.IORD = h.IORD
-            AND (
-              h2.FCNR > h.FCNR
-              OR (h2.FCNR = h.FCNR AND h2.ID > h.ID)
-            )
-          ORDER BY h2.FCNR, h2.ID
-        ) nextFlow
         WHERE h.IORD IN (${placeholders})
-          ${flowFilterClause}
+      ), FlowEvents AS (
+        SELECT ID, IORD, ESTSEGU, FCNR, NEXT_FCNR
+        FROM OrderedFlowEvents
+        WHERE 1 = 1 ${flowFilterClause}
       ), AuditCandidates AS (
-        SELECT a.IDLOG, a.FCNR, a.IDUSUARIO, a.METADATA_JSON
+        SELECT
+          a.IDLOG,
+          CONVERT(
+            DATETIME2(3),
+            ((a.FCNR AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')
+          ) AS FCNR,
+          a.IDUSUARIO,
+          a.METADATA_JSON,
+          a.ACTION
         FROM dbo.AUDIT_LOG a
         WHERE a.MODULO = 'ordenes-trabajo'
           AND a.ENTIDAD = 'PV_CTR_ORDS'
           AND a.ENTIDAD_ID IN (${placeholders})
+          AND a.ACTION IN (
+            'ORD_GUARDAR_DETALLE', 'ORD_AUTORIZAR', 'ORD_ANULAR_LOTE',
+            'ORD_ENVIAR', 'ORD_RECIBIR', 'ORD_ENTREGAR', 'ORD_GARANTIA',
+            'ORD_RECHAZAR_REGRESAR_TIENDA_LOTE', 'ORD_CAMBIO_MERMA_CANCELAR',
+            'ORD_SCAN_RECIBIR', 'ORD_SCAN_ENTREGAR', 'ORD_ENVIAR_LOTE',
+            'ORD_ASIGNAR_LOTE', 'ORD_TRABAJO_TERMINADO_LOTE',
+            'ORD_REGRESAR_INCIDENCIA_LOTE', 'ORD_REGRESAR_TIENDA_LOTE',
+            'ORD_RECIBIR_LOTE', 'ORD_ENTREGAR_LOTE'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM FlowEvents f
+            WHERE f.IORD = UPPER(LTRIM(RTRIM(a.ENTIDAD_ID)))
+              AND a.FCNR >= CONVERT(
+                DATETIME2(3),
+                ((f.FCNR AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC')
+              )
+              AND (
+                f.NEXT_FCNR IS NULL
+                OR a.FCNR <= CONVERT(
+                  DATETIME2(3),
+                  ((f.NEXT_FCNR AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC')
+                )
+              )
+          )
         UNION ALL
-        SELECT a.IDLOG, a.FCNR, a.IDUSUARIO, a.METADATA_JSON
+        SELECT
+          a.IDLOG,
+          CONVERT(
+            DATETIME2(3),
+            ((a.FCNR AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')
+          ) AS FCNR,
+          a.IDUSUARIO,
+          a.METADATA_JSON,
+          a.ACTION
         FROM dbo.AUDIT_LOG a
         WHERE a.MODULO = 'ordenes-trabajo'
           AND a.ENTIDAD = 'PV_CTR_ORDS'
-          AND (a.ENTIDAD_ID IS NULL OR a.ENTIDAD_ID = '')
-          AND (${bulkAuditPredicates.join(' OR ')})
-      ), AuditEvents AS (
+          AND a.ENTIDAD_ID IS NULL
+          AND a.ACTION IN (
+            'ORD_ANULAR_LOTE', 'ORD_ENVIAR_LOTE', 'ORD_ASIGNAR_LOTE',
+            'ORD_TRABAJO_TERMINADO_LOTE', 'ORD_REGRESAR_INCIDENCIA_LOTE',
+            'ORD_REGRESAR_TIENDA_LOTE', 'ORD_RECHAZAR_REGRESAR_TIENDA_LOTE',
+            'ORD_RECIBIR_LOTE', 'ORD_ENTREGAR_LOTE'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM FlowEvents f
+            WHERE a.FCNR >= CONVERT(
+                DATETIME2(3),
+                ((f.FCNR AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC')
+              )
+              AND (
+                f.NEXT_FCNR IS NULL
+                OR a.FCNR <= CONVERT(
+                  DATETIME2(3),
+                  ((f.NEXT_FCNR AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC')
+                )
+              )
+          )
+        UNION ALL
+        SELECT
+          a.IDLOG,
+          CONVERT(
+            DATETIME2(3),
+            ((a.FCNR AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')
+          ) AS FCNR,
+          a.IDUSUARIO,
+          a.METADATA_JSON,
+          a.ACTION
+        FROM dbo.AUDIT_LOG a
+        WHERE a.MODULO = 'ordenes-trabajo'
+          AND a.ENTIDAD = 'PV_CTR_ORDS'
+          AND a.ENTIDAD_ID = ''
+          AND a.ACTION IN (
+            'ORD_ANULAR_LOTE', 'ORD_ENVIAR_LOTE', 'ORD_ASIGNAR_LOTE',
+            'ORD_TRABAJO_TERMINADO_LOTE', 'ORD_REGRESAR_INCIDENCIA_LOTE',
+            'ORD_REGRESAR_TIENDA_LOTE', 'ORD_RECHAZAR_REGRESAR_TIENDA_LOTE',
+            'ORD_RECIBIR_LOTE', 'ORD_ENTREGAR_LOTE'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM FlowEvents f
+            WHERE a.FCNR >= CONVERT(
+                DATETIME2(3),
+                ((f.FCNR AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC')
+              )
+              AND (
+                f.NEXT_FCNR IS NULL
+                OR a.FCNR <= CONVERT(
+                  DATETIME2(3),
+                  ((f.NEXT_FCNR AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC')
+                )
+              )
+          )
+      ), AuditEventsWithFlow AS (
         SELECT
           a.IDLOG,
           a.FCNR,
@@ -5665,7 +5969,8 @@ export class OrdenesTrabajoService {
             ))), ''),
             NULLIF(LTRIM(RTRIM(ISNULL(u.USERNAME, ''))), ''),
             CONVERT(NVARCHAR(100), a.IDUSUARIO)
-          ) AS QUIEN_REALIZO
+          ) AS QUIEN_REALIZO,
+          CAST(0 AS BIT) AS IS_TRANSITION_FALLBACK
         FROM AuditCandidates a
         LEFT JOIN dbo.USUARIO u
           ON TRY_CONVERT(INT, u.IDUSUARIO) = TRY_CONVERT(INT, a.IDUSUARIO)
@@ -5677,6 +5982,55 @@ export class OrdenesTrabajoService {
         WHERE j.IORD IN (${placeholders})
           AND NULLIF(LTRIM(RTRIM(ISNULL(j.IORD, ''))), '') IS NOT NULL
           ${auditFlowFilterClause}
+      ), AuditTransitionEvents AS (
+        SELECT
+          a.IDLOG,
+          CONVERT(
+            DATETIME2(3),
+            ((a.FCNR AT TIME ZONE 'UTC') AT TIME ZONE 'Central Standard Time (Mexico)')
+          ) AS FCNR,
+          UPPER(LTRIM(RTRIM(JSON_VALUE(a.METADATA_JSON, '$.iord')))) AS IORD,
+          CAST(NULL AS FLOAT) AS ESTSEGU,
+          COALESCE(
+            NULLIF(LTRIM(RTRIM(CONCAT(
+              ISNULL(u.NOMBRE, ''),
+              CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(u.APELLIDOS, ''))), '') IS NULL THEN '' ELSE ' ' + LTRIM(RTRIM(u.APELLIDOS)) END
+            ))), ''),
+            NULLIF(LTRIM(RTRIM(ISNULL(u.USERNAME, ''))), ''),
+            CONVERT(NVARCHAR(100), a.IDUSUARIO)
+          ) AS QUIEN_REALIZO,
+          CAST(1 AS BIT) AS IS_TRANSITION_FALLBACK
+        FROM dbo.AUDIT_LOG a
+        LEFT JOIN dbo.USUARIO u
+          ON TRY_CONVERT(INT, u.IDUSUARIO) = TRY_CONVERT(INT, a.IDUSUARIO)
+        WHERE a.MODULO = 'ordenes-trabajo'
+          AND a.ENTIDAD = 'PV_CTR_ORDS'
+          AND a.ACTION = 'ORD_GUARDAR_DETALLE'
+          AND a.ENTIDAD_ID IN (${placeholders})
+          AND ISJSON(a.METADATA_JSON) = 1
+          AND JSON_VALUE(a.METADATA_JSON, '$.iord') IN (${placeholders})
+          AND EXISTS (
+            SELECT 1
+            FROM FlowEvents f
+            WHERE f.IORD = UPPER(LTRIM(RTRIM(JSON_VALUE(a.METADATA_JSON, '$.iord'))))
+              AND a.FCNR >= CONVERT(
+                DATETIME2(3),
+                ((f.FCNR AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC')
+              )
+              AND (
+                f.NEXT_FCNR IS NULL
+                OR a.FCNR <= CONVERT(
+                  DATETIME2(3),
+                  ((f.NEXT_FCNR AT TIME ZONE 'Central Standard Time (Mexico)') AT TIME ZONE 'UTC')
+                )
+              )
+          )
+      ), AuditEvents AS (
+        SELECT IDLOG, FCNR, IORD, ESTSEGU, QUIEN_REALIZO, IS_TRANSITION_FALLBACK
+        FROM AuditEventsWithFlow
+        UNION ALL
+        SELECT IDLOG, FCNR, IORD, ESTSEGU, QUIEN_REALIZO, IS_TRANSITION_FALLBACK
+        FROM AuditTransitionEvents
       )
       SELECT
         h.IORD,
@@ -5691,6 +6045,7 @@ export class OrdenesTrabajoService {
           AND (
             a.ESTSEGU = h.ESTSEGU
             OR (a.ESTSEGU IS NULL AND h.ESTSEGU IS NULL)
+            OR a.IS_TRANSITION_FALLBACK = 1
           )
           AND a.FCNR >= h.FCNR
           AND (h.NEXT_FCNR IS NULL OR a.FCNR <= h.NEXT_FCNR)
@@ -5917,6 +6272,16 @@ export class OrdenesTrabajoService {
         copy.ESTSEGU_ACTUAL_DESC = item.ESTSEGU_DESC;
         copy.ESTSEGU = historyItem.ESTSEGU ?? null;
         copy.ESTSEGU_DESC = historyItem.ESTSEGU_DESC ?? '';
+        const flow = this.toFloat(historyItem.ESTSEGU);
+        const flowKey = flow == null ? 'NULL' : this.formatStatusCode(flow);
+        const durationsByFlow =
+          item.TIEMPOS_POR_FLUJO &&
+          typeof item.TIEMPOS_POR_FLUJO === 'object'
+            ? (item.TIEMPOS_POR_FLUJO as Record<string, unknown>)
+            : {};
+        copy.TIEMPO_FLUJO =
+          this.normalizeText(durationsByFlow[flowKey]) ?? 'Sin historial';
+        delete copy.TIEMPOS_POR_FLUJO;
         delete copy.FLUJO_HISTORIAL_ITEMS;
         return copy;
       });
