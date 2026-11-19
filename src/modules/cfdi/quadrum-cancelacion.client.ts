@@ -322,6 +322,12 @@ export class QuadrumCancelacionClient {
       const str = valor(texto, 'faultstring') ?? '';
       throw new PacError(`SOAP Fault del PAC: ${code} - ${str}`.trim(), false);
     }
+    if (status < 200 || status >= 300) {
+      throw new PacError(
+        `Servicio de cancelacion PAC respondio HTTP ${status} en '${soapAction}'.`,
+        true,
+      );
+    }
     if (!existe(texto, nombreResultado)) {
       throw new PacError(
         `No se encontro el nodo '${nombreResultado}' en la respuesta del PAC.`,

@@ -673,13 +673,8 @@ export class TimbradoService {
   async validarEmision(rfc: string, operacion: OperacionQuadrum = 'FACTURA') {
     const emisor = await this.csdService.obtenerPorRfc(rfc);
     assertOperacionQuadrum(this.config, rfc, operacion);
-    if (this.quadrum.esProduccion()) {
-      const diagnostico = await this.diagnosticarRfc(rfc);
-      if (!diagnostico.ok)
-        throw new ServiceUnavailableException(
-          `RFC ${rfc} sin acceso PAC validado: ${diagnostico.mensaje}`,
-        );
-    }
+    // La consulta de cancelación es independiente del servicio de timbrado.
+    // Un fallo de ese servicio no determina si el PAC puede emitir la factura.
     return emisor;
   }
 

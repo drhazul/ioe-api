@@ -143,6 +143,14 @@ it('diagnóstico por RFC distingue cuenta rechazada de UUID inexistente', async 
   expect((await service.diagnosticarRfc('XIQB891116QE4')).ok).toBe(true);
 });
 
+it('validar emisión no depende de disponibilidad del servicio de cancelación', async () => {
+  const { service, venta, csdService } = armar();
+  globalThis.fetch = jest.fn().mockResolvedValue(new Response('unavailable', { status: 503 }));
+  await expect(service.validarEmision(venta.rfcEmisor)).resolves.toBeDefined();
+  expect(csdService.obtenerPorRfc).toHaveBeenCalledWith(venta.rfcEmisor);
+  expect(globalThis.fetch).not.toHaveBeenCalled();
+});
+
 it('Fault interno después de enviar timbrado conserva resultado incierto', async () => {
   const { service, venta } = armar();
   globalThis.fetch = jest

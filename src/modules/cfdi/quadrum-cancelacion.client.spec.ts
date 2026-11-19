@@ -63,6 +63,14 @@ const respuesta = `
 
 afterEach(() => jest.restoreAllMocks());
 
+it('informa HTTP 503 sin atribuirlo a credenciales o nodo SOAP', async () => {
+  jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response('<html><body>Service Unavailable</body></html>', { status: 503 }),
+  );
+  await expect(cliente('ws').consultar('00000000-0000-0000-0000-000000000000', entrada.cuenta))
+    .rejects.toThrow(/HTTP 503/);
+});
+
 describe('QuadrumCancelacionClient — contrato de consulta SAT por ambiente', () => {
   it.each(contratos)(
     'usa el contrato oficial de $host y cuenta del RFC',
