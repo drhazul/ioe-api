@@ -32,6 +32,7 @@ import { EmitirNotaCreditoDto } from './dto/nota-credito.dto';
 import { EmitirComplementoPagoDto } from './dto/complemento-pago.dto';
 import { GuardarCsdDto } from './dto/guardar-csd.dto';
 import { ActualizarCuentaQuadrumDto } from './dto/actualizar-cuenta-quadrum.dto';
+import { ActualizarPermisosQuadrumDto } from './dto/actualizar-permisos-quadrum.dto';
 import {
   TimbrarNotaCreditoPruebaDto,
   TimbrarPruebaDto,
@@ -254,6 +255,20 @@ export class CfdiController {
     @Body() dto: ActualizarCuentaQuadrumDto,
   ) {
     return this.csd.actualizarCuentaQuadrum(rfc, dto);
+  }
+
+  @Patch('csd/:rfc/quadrum/permisos')
+  @UseGuards(AdminOnlyGuard)
+  actualizarPermisosQuadrum(
+    @Param('rfc') rfc: string,
+    @Body() dto: ActualizarPermisosQuadrumDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.csd.actualizarPermisos(
+      rfc,
+      dto,
+      String(user?.sub ?? user?.username ?? ''),
+    );
   }
 
   /** CSD, ambiente y conexion con Quadrum. No gasta timbre. */

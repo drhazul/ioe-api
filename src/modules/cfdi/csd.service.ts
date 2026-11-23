@@ -6,7 +6,12 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { quadrumProduccion, validarRfcEmisor } from './quadrum-config';
+import {
+  quadrumProduccion,
+  validarRfcEmisor,
+  OperacionQuadrum,
+  assertOperacionQuadrum,
+} from './quadrum-config';
 import { cargarCsd, Csd, CsdInvalidoError } from './cfdi-sellador';
 import { cifrar, CifradoInvalidoError, descifrar } from './cripto';
 import { CsdRepositorio, FilaCsd, ResumenFilaCsd } from './csd.repositorio';
@@ -87,6 +92,39 @@ export class CsdService {
     private readonly repo: CsdRepositorio,
     private readonly config: ConfigService,
   ) {}
+
+  async validarPermiso(
+    rfc: string,
+    operacion: OperacionQuadrum,
+  ): Promise<void> {
+    const permisos = quadrumProduccion(this.config)
+      ? await this.repo.permisosPorRfc(validarRfcEmisor(rfc))
+      : null;
+    assertOperacionQuadrum(this.config, rfc, operacion, permisos);
+  }
+
+  async actualizarPermisos(
+    rfc: string,
+    input: {
+      noCertificado: string;
+      factura: boolean;
+      notaCredito: boolean;
+      complementoPago: boolean;
+    },
+    usuario: string,
+  ) {
+    const clave = validarRfcEmisor(rfc);
+    await this.repo.actualizarPermisos(
+      clave,
+      input.noCertificado,
+      input.factura,
+      input.notaCredito,
+      input.complementoPago,
+      usuario,
+    );
+    this.cache.delete(clave);
+    return { rfc: clave, actualizada: true };
+  }
 
   /** Da de alta (o renueva) el certificado de una razon social. */
   async guardar(input: AltaCsdInput): Promise<ResumenCsd> {

@@ -65,7 +65,13 @@ describe('Quadrum producción: destino e identidad', () => {
       QUADRUM_RFC_HABILITADOS: RFC,
       QUADRUM_FLUJOS_HABILITADOS: 'FACTURA',
     });
-    expect(() => assertOperacionQuadrum(c, RFC, 'FACTURA')).not.toThrow();
+    expect(() =>
+      assertOperacionQuadrum(c, RFC, 'FACTURA', {
+        factura: true,
+        notaCredito: false,
+        complementoPago: false,
+      }),
+    ).not.toThrow();
     expect(() =>
       assertOperacionQuadrum(c, 'JIFJ4704238T5', 'FACTURA'),
     ).toThrow();

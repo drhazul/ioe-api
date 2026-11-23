@@ -36,6 +36,9 @@ export interface ResumenFilaCsd {
   usuarioAlta: string | null;
   /** Cuenta del PAC. Se muestra para saber con cual timbra cada RFC. */
   quadrumUsuario: string | null;
+  quadrumFacturaHabilitada: boolean;
+  quadrumNotaCreditoHabilitada: boolean;
+  quadrumComplementoPagoHabilitado: boolean;
 }
 
 export interface GuardarFilaCsd {
@@ -64,6 +67,38 @@ export interface GuardarFilaCsd {
 @Injectable()
 export class CsdRepositorio {
   constructor(private readonly dataSource: DataSource) {}
+
+  async permisosPorRfc(rfc: string) {
+    const rows = await this.dataSource.query(
+      `SELECT QUADRUM_FACTURA_HABILITADA factura,
+              QUADRUM_NOTA_CREDITO_HABILITADA notaCredito,
+              QUADRUM_COMPLEMENTO_PAGO_HABILITADO complementoPago
+         FROM dbo.FACT_CSD WHERE RFC=@0 AND ACTIVO=1`,
+      [rfc.trim().toUpperCase()],
+    );
+    return rows[0] ?? null;
+  }
+
+  async actualizarPermisos(
+    rfc: string,
+    cert: string,
+    factura: boolean,
+    nota: boolean,
+    pago: boolean,
+    usuario: string,
+  ) {
+    const rows = await this.dataSource.query(
+      `UPDATE dbo.FACT_CSD SET QUADRUM_FACTURA_HABILITADA=@2,
+        QUADRUM_NOTA_CREDITO_HABILITADA=@3, QUADRUM_COMPLEMENTO_PAGO_HABILITADO=@4,
+        QUADRUM_PERMISOS_USUARIO=@5, QUADRUM_PERMISOS_FECHA=SYSDATETIME()
+        OUTPUT inserted.RFC WHERE RFC=@0 AND NO_CERTIFICADO=@1 AND ACTIVO=1`,
+      [rfc, cert, factura, nota, pago, usuario],
+    );
+    if (rows.length !== 1)
+      throw new ConflictException(
+        'El certificado activo cambió; actualiza la lista.',
+      );
+  }
 
   async cuentaActivaPorRfc(rfc: string): Promise<{
     NO_CERTIFICADO: string;
@@ -149,10 +184,14 @@ export class CsdRepositorio {
       FCN_ALTA: Date;
       USUARIO_ALTA: string | null;
       QUADRUM_USUARIO: string | null;
+      QUADRUM_FACTURA_HABILITADA: boolean;
+      QUADRUM_NOTA_CREDITO_HABILITADA: boolean;
+      QUADRUM_COMPLEMENTO_PAGO_HABILITADO: boolean;
     }[] = await this.dataSource.query(
       `SELECT RFC, NOMBRE, NO_CERTIFICADO, REGIMEN_FISCAL, CODIGO_POSTAL,
               VIGENCIA_DESDE, VIGENCIA_HASTA, ACTIVO, FCN_ALTA, USUARIO_ALTA,
-              QUADRUM_USUARIO
+              QUADRUM_USUARIO, QUADRUM_FACTURA_HABILITADA,
+              QUADRUM_NOTA_CREDITO_HABILITADA, QUADRUM_COMPLEMENTO_PAGO_HABILITADO
          FROM dbo.FACT_CSD
         ORDER BY RFC, ACTIVO DESC, VIGENCIA_HASTA DESC`,
     );
@@ -167,6 +206,11 @@ export class CsdRepositorio {
       activo: Boolean(r.ACTIVO),
       fechaAlta: r.FCN_ALTA,
       quadrumUsuario: r.QUADRUM_USUARIO,
+      quadrumFacturaHabilitada: Boolean(r.QUADRUM_FACTURA_HABILITADA),
+      quadrumNotaCreditoHabilitada: Boolean(r.QUADRUM_NOTA_CREDITO_HABILITADA),
+      quadrumComplementoPagoHabilitado: Boolean(
+        r.QUADRUM_COMPLEMENTO_PAGO_HABILITADO,
+      ),
       usuarioAlta: r.USUARIO_ALTA,
     }));
   }
@@ -180,6 +224,12 @@ export class CsdRepositorio {
     const rfc = fila.rfc.trim().toUpperCase();
 
     await this.dataSource.transaction(async (manager) => {
+      const [permisos] = await manager.query(
+        `SELECT QUADRUM_FACTURA_HABILITADA factura, QUADRUM_NOTA_CREDITO_HABILITADA nota,
+                QUADRUM_COMPLEMENTO_PAGO_HABILITADO pago
+           FROM dbo.FACT_CSD WITH (UPDLOCK, HOLDLOCK) WHERE RFC=@0 AND ACTIVO=1`,
+        [rfc],
+      );
       await manager.query(
         `UPDATE dbo.FACT_CSD SET ACTIVO = 0 WHERE RFC = @0 AND ACTIVO = 1`,
         [rfc],
@@ -225,6 +275,20 @@ export class CsdRepositorio {
            VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, 1, @10, @11, @12);`,
         parametros,
       );
+      if (permisos) {
+        await manager.query(
+          `UPDATE dbo.FACT_CSD SET QUADRUM_FACTURA_HABILITADA=@2,
+            QUADRUM_NOTA_CREDITO_HABILITADA=@3, QUADRUM_COMPLEMENTO_PAGO_HABILITADO=@4
+            WHERE RFC=@0 AND NO_CERTIFICADO=@1 AND ACTIVO=1`,
+          [
+            rfc,
+            fila.noCertificado,
+            permisos.factura,
+            permisos.nota,
+            permisos.pago,
+          ],
+        );
+      }
     });
   }
 }

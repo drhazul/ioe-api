@@ -1,5 +1,14 @@
 # CFDI Quadrum
 
+## Permisos por RFC en FACT_CSD (2026-11-23)
+
+Integración local para administrar factura, nota de crédito y complemento de
+pago por RFC desde pantalla CSD. Las columnas SQL ya se prepararon en
+IOEDESARROLLO e IOELOCAL preservando la matriz productiva; JIGE permanece
+deshabilitado hasta edición administrativa tras despliegue. La versión activa
+actual sigue usando las variables anteriores hasta el pase conjunto.
+[Contrato, migración y reversa](../../../docs/modules/cfdi/QUADRUM_PERMISOS_CSD_20261123.md).
+
 ## Prueba de nuevo CSD por RFC (2026-11-10)
 
 `FACT_CSD.ID=10005` corresponde al emisor `JIGE810809HI4`; no es un folio de venta. El registro está activo, pero el RFC no figura en el gate productivo y `FAC_SVR_SHAP` no contiene facturas de ese emisor al corte. Comunicación autenticada y timbrado siguen pendientes. Correo automático está activo y debe revisarse antes de autorizar una factura. [Plan](../../../docs/modules/cfdi/QUADRUM_CSD_ID10005_PRUEBA_PLAN_20261110.md) y [seguimiento](../../../docs/modules/cfdi/QUADRUM_CSD_ID10005_PRUEBA_SEGUIMIENTO_20261110.md).

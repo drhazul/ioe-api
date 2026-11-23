@@ -43,7 +43,7 @@ import {
   QuadrumClient,
 } from './quadrum.client';
 import { decodificarXmlEmbebido } from './soap-xml';
-import { assertOperacionQuadrum, OperacionQuadrum } from './quadrum-config';
+import { OperacionQuadrum } from './quadrum-config';
 import { VentaRepositorio } from './venta.repositorio';
 import { QuadrumCancelacionClient } from './quadrum-cancelacion.client';
 
@@ -531,7 +531,7 @@ export class TimbradoService {
         throw new ForbiddenException(
           'Rutas de prueba o CSD/cuenta global no permitidos en producción.',
         );
-      assertOperacionQuadrum(this.config, credenciales.csd.rfc, operacion);
+      await this.csdService.validarPermiso(credenciales.csd.rfc, operacion);
     }
 
     const listo = this.sellarComprobante(comprobante, credenciales);
@@ -672,7 +672,7 @@ export class TimbradoService {
 
   async validarEmision(rfc: string, operacion: OperacionQuadrum = 'FACTURA') {
     const emisor = await this.csdService.obtenerPorRfc(rfc);
-    assertOperacionQuadrum(this.config, rfc, operacion);
+    await this.csdService.validarPermiso(rfc, operacion);
     // La consulta de cancelación es independiente del servicio de timbrado.
     // Un fallo de ese servicio no determina si el PAC puede emitir la factura.
     return emisor;

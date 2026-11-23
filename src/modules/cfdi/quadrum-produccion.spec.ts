@@ -8,6 +8,7 @@ import { cargarCsd } from './cfdi-sellador';
 import { generarCsdDePrueba } from './testing/csd-de-prueba';
 import { QuadrumClient } from './quadrum.client';
 import { TimbradoService } from './timbrado.service';
+import { assertOperacionQuadrum, OperacionQuadrum } from './quadrum-config';
 
 const original = globalThis.fetch;
 const dirs: string[] = [];
@@ -37,18 +38,22 @@ function armar(habilitada = true) {
     certificadoDer: () => generado.cer,
   } as unknown as CsdStore;
   const csdService = {
-    obtenerPorRfc: jest
-      .fn()
-      .mockResolvedValue({
-        csd,
-        cer: generado.cer,
-        regimenFiscal: '612',
-        codigoPostal: '39000',
-        credencialesPac: {
-          usuario: 'cuenta-propia-ficticia',
-          contrasena: 'secreto-propio-ficticio',
-        },
+    validarPermiso: async (rfc: string, operacion: OperacionQuadrum) =>
+      assertOperacionQuadrum(cfg, rfc, operacion, {
+        factura: true,
+        notaCredito: false,
+        complementoPago: false,
       }),
+    obtenerPorRfc: jest.fn().mockResolvedValue({
+      csd,
+      cer: generado.cer,
+      regimenFiscal: '612',
+      codigoPostal: '39000',
+      credencialesPac: {
+        usuario: 'cuenta-propia-ficticia',
+        contrasena: 'secreto-propio-ficticio',
+      },
+    }),
   } as unknown as CsdService;
   const service = new TimbradoService(
     new QuadrumClient(cfg),
@@ -125,27 +130,25 @@ it('ninguna ruta sintética timbra con endpoints productivos', async () => {
 
 it('diagnóstico por RFC distingue cuenta rechazada de UUID inexistente', async () => {
   const { service } = armar();
-  globalThis.fetch = jest
-    .fn()
-    .mockResolvedValue({
-      status: 200,
-      text: async () =>
-        '<consultaResult><error>Usuario o Contrasena Invalida</error></consultaResult>',
-    });
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    status: 200,
+    text: async () =>
+      '<consultaResult><error>Usuario o Contrasena Invalida</error></consultaResult>',
+  });
   expect((await service.diagnosticarRfc('XIQB891116QE4')).ok).toBe(false);
-  globalThis.fetch = jest
-    .fn()
-    .mockResolvedValue({
-      status: 200,
-      text: async () =>
-        '<consultaResult><error>UUID does not exist</error></consultaResult>',
-    });
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    status: 200,
+    text: async () =>
+      '<consultaResult><error>UUID does not exist</error></consultaResult>',
+  });
   expect((await service.diagnosticarRfc('XIQB891116QE4')).ok).toBe(true);
 });
 
 it('validar emisión no depende de disponibilidad del servicio de cancelación', async () => {
   const { service, venta, csdService } = armar();
-  globalThis.fetch = jest.fn().mockResolvedValue(new Response('unavailable', { status: 503 }));
+  globalThis.fetch = jest
+    .fn()
+    .mockResolvedValue(new Response('unavailable', { status: 503 }));
   await expect(service.validarEmision(venta.rfcEmisor)).resolves.toBeDefined();
   expect(csdService.obtenerPorRfc).toHaveBeenCalledWith(venta.rfcEmisor);
   expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -153,13 +156,11 @@ it('validar emisión no depende de disponibilidad del servicio de cancelación',
 
 it('Fault interno después de enviar timbrado conserva resultado incierto', async () => {
   const { service, venta } = armar();
-  globalThis.fetch = jest
-    .fn()
-    .mockResolvedValue({
-      status: 500,
-      text: async () =>
-        "<Fault><faultcode>senv:Server</faultcode><faultstring>local variable 'result' referenced before assignment</faultstring></Fault>",
-    });
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    status: 500,
+    text: async () =>
+      "<Fault><faultcode>senv:Server</faultcode><faultstring>local variable 'result' referenced before assignment</faultstring></Fault>",
+  });
   try {
     await service.timbrarVenta(venta);
     throw new Error('debía fallar');

@@ -62,6 +62,11 @@ export function assertOperacionQuadrum(
   config: ConfigService,
   rfc: string,
   operacion: OperacionQuadrum,
+  permisos?: {
+    factura: boolean;
+    notaCredito: boolean;
+    complementoPago: boolean;
+  } | null,
 ): void {
   if (operacion === 'CANCELACION') {
     assertCancelacionQuadrum(config, rfc);
@@ -71,20 +76,13 @@ export function assertOperacionQuadrum(
   const habilitada =
     String(config.get('QUADRUM_PRODUCCION_HABILITADA') ?? '').toLowerCase() ===
     'true';
-  const rfcs = String(config.get('QUADRUM_RFC_HABILITADOS') ?? '')
-    .toUpperCase()
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean);
-  const flujos = String(config.get('QUADRUM_FLUJOS_HABILITADOS') ?? '')
-    .toUpperCase()
-    .split(',')
-    .map((x) => x.trim());
-  if (
-    !habilitada ||
-    !rfcs.includes(rfc.trim().toUpperCase()) ||
-    !flujos.includes(operacion)
-  ) {
+  const permitido =
+    operacion === 'FACTURA'
+      ? permisos?.factura
+      : operacion === 'NOTA_CREDITO'
+        ? permisos?.notaCredito
+        : permisos?.complementoPago;
+  if (!habilitada || !permitido) {
     throw new ForbiddenException(
       `Operación Quadrum ${operacion} no habilitada en producción para ese RFC.`,
     );
